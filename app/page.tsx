@@ -16,6 +16,7 @@ type PageKey =
 
 type FunnelMode = "product" | "monetization";
 type UnitMode = "users" | "events";
+type TrendMetric = "viewer" | "opportunity";
 type ModuleKey = "global" | "project" | "funnel" | "admob" | "firebase" | "reconcile" | "tracking" | "config" | "tasks";
 const moduleMenus: Array<{ key: ModuleKey; index: string; label: string; group: "经营分析" | "质量治理" }> = [
   { key: "global", index: "01", label: "全局项目总览", group: "经营分析" },
@@ -291,6 +292,7 @@ export default function Home() {
   const [issueStatus, setIssueStatus] = useState("修复中");
   const [notice, setNotice] = useState("");
   const [baseline, setBaseline] = useState("近7日均值");
+  const [trendMetric, setTrendMetric] = useState<TrendMetric>("viewer");
   const [dialog, setDialog] = useState<DialogKey | null>(null);
 
   useEffect(() => {
@@ -316,6 +318,10 @@ export default function Home() {
     .map((event, index) => ({ event, index }))
     .filter(({ event }) => !onlyErrors || event.result !== "有效");
   const issuePhase = issueStatus === "重测中" ? 3 : 2;
+  const trendValues = trendMetric === "viewer"
+    ? [34.9, 35.4, 34.6, 35.1, 31.8, 26.7, 23.1]
+    : [41.2, 41.6, 40.8, 40.9, 37.6, 32.9, 28.4];
+  const trendLabel = trendMetric === "viewer" ? "广告浏览者比例" : "Opportunity机会覆盖率";
 
   function notify(message: string) {
     setNotice(message);
@@ -462,8 +468,9 @@ export default function Home() {
 
               <section className="two-column">
                 <div className="surface">
-                  <div className="surface-title"><div><h2>关键指标趋势</h2><p>广告浏览者比例与机会覆盖率同步下降</p></div><Segmented label="趋势指标" active="viewer" onChange={() => undefined} items={[{ key: "viewer", label: "浏览者比例" }, { key: "opportunity", label: "机会覆盖" }]} /></div>
-                  <div className="bar-chart" aria-label="近七日广告浏览者比例趋势">{[34.9, 35.4, 34.6, 35.1, 31.8, 26.7, 23.1].map((value, index) => <div key={index}><span style={{ height: `${value * 2}px` }} className={index > 3 ? "alert" : ""}><em>{value}%</em></span><small>{["8/5", "8/6", "8/7", "8/8", "8/9", "8/10", "今天"][index]}</small></div>)}</div>
+                  <div className="surface-title"><div><h2>关键指标趋势</h2><p>{trendMetric === "viewer" ? "广告浏览用户持续减少，当前低于35%目标" : "请求前机会覆盖持续下降，当前低于40%基线"}</p></div><Segmented label="趋势指标" active={trendMetric} onChange={(key) => setTrendMetric(key as TrendMetric)} items={[{ key: "viewer", label: "浏览者比例" }, { key: "opportunity", label: "机会覆盖" }]} /></div>
+                  <div className="trend-current"><span>{trendLabel}</span><strong>{trendValues.at(-1)}%</strong><small>{trendMetric === "viewer" ? "目标 ≥ 35%" : "目标 ≥ 40%"}</small></div>
+                  <div className="bar-chart" aria-label={`近七日${trendLabel}趋势`}>{trendValues.map((value, index) => <div key={`${trendMetric}-${index}`}><span style={{ height: `${value * 2}px` }} className={index > 3 ? "alert" : ""}><em>{value}%</em></span><small>{["8/5", "8/6", "8/7", "8/8", "8/9", "8/10", "今天"][index]}</small></div>)}</div>
                 </div>
                 <aside className="surface diagnostic-card">
                   <div className="surface-title"><div><h2>智能诊断</h2><p>基于漏斗与数据质量规则</p></div><Badge tone="bad">严重</Badge></div>
