@@ -14,6 +14,31 @@ type PageKey =
 
 type FunnelMode = "product" | "monetization";
 type UnitMode = "users" | "events";
+type ModuleKey = "global" | "project" | "funnel" | "admob" | "firebase" | "reconcile" | "tracking" | "config" | "tasks";
+
+const moduleMenus: Array<{ key: ModuleKey; index: string; label: string; group: "经营分析" | "质量治理" }> = [
+  { key: "global", index: "01", label: "全局项目总览", group: "经营分析" },
+  { key: "project", index: "02", label: "单项目诊断", group: "经营分析" },
+  { key: "funnel", index: "03", label: "漏斗分析", group: "经营分析" },
+  { key: "admob", index: "04", label: "AdMob 分析", group: "经营分析" },
+  { key: "firebase", index: "05", label: "Firebase 分析", group: "经营分析" },
+  { key: "reconcile", index: "06", label: "数据对账", group: "经营分析" },
+  { key: "tracking", index: "07", label: "打点验收中心", group: "质量治理" },
+  { key: "config", index: "08", label: "规范与项目配置", group: "质量治理" },
+  { key: "tasks", index: "09", label: "数据任务与告警", group: "质量治理" },
+];
+
+const moduleCopy: Record<ModuleKey, { title: string; description: string; action: string }> = {
+  global: { title: "全局项目总览", description: "统一查看所有项目的用户、投放、收入、利润和数据健康度", action: "导出项目日报" },
+  project: { title: "单项目诊断", description: "围绕单个项目串联用户增长、产品漏斗、广告变现和数据质量", action: "创建诊断任务" },
+  funnel: { title: "漏斗分析中心", description: "从多项目异常发现到事件证据、修复重测和效果验证的完整诊断闭环", action: "新建诊断任务" },
+  admob: { title: "AdMob 分析", description: "分析请求、匹配、展示、广告浏览用户、eCPM和收入变化", action: "导出 AdMob 报表" },
+  firebase: { title: "Firebase 分析", description: "监控活跃用户、事件覆盖、参数质量、版本分布和实时数据延迟", action: "查看事件字典" },
+  reconcile: { title: "数据对账", description: "对比 Firebase、AdMob、中台与 ADB 的用户、展示和收入口径", action: "发起重新对账" },
+  tracking: { title: "打点验收中心", description: "按项目品类和测试快照验证应收事件、必填参数与完整关联链", action: "新建验收 Run" },
+  config: { title: "规范与项目配置", description: "管理项目类型、能力包、事件参数、漏斗版本和项目关联范围", action: "新建配置版本" },
+  tasks: { title: "数据任务与告警", description: "监控采集、同步、聚合与对账任务，并闭环处理数据异常", action: "新建告警规则" },
+};
 
 const pages: Array<{ key: PageKey; label: string; hint: string }> = [
   { key: "overview", label: "多项目漏斗总览", hint: "发现异常项目" },
@@ -114,7 +139,83 @@ function Segmented({ items, active, onChange, label }: { items: Array<{ key: str
   );
 }
 
+function ModulePage({ module, project, openModule, notify }: { module: Exclude<ModuleKey, "funnel">; project: string; openModule: (next: ModuleKey) => void; notify: (message: string) => void }) {
+  if (module === "global") return (
+    <div className="page-stack">
+      <section className="metric-grid six"><Metric label="项目数" value="28" note="在线 24 · 灰度 4" /><Metric label="总 DAU" value="1,284,630" note="较昨日 +4.1%" tone="good" /><Metric label="总收入" value="$48,921" note="较昨日 +2.7%" tone="good" /><Metric label="投放消耗" value="$31,406" note="ROAS 155.8%" /><Metric label="预估利润" value="$17,515" note="利润率 35.8%" tone="good" /><Metric label="异常项目" value="4" note="严重 2 · 预警 2" tone="bad" /></section>
+      <section className="portfolio-health"><div><Badge tone="bad">2</Badge><strong>变现严重异常</strong><p>广告浏览者比例或收入连续下降</p></div><div><Badge tone="warn">2</Badge><strong>数据质量预警</strong><p>Firebase 与中台 DAU 差异超阈值</p></div><div><Badge tone="blue">3</Badge><strong>待完成验收</strong><p>新版本尚未达到 P0 100%</p></div><div><Badge tone="good">21</Badge><strong>项目运行正常</strong><p>核心指标处于历史基线范围</p></div></section>
+      <section className="two-column wide-left">
+        <div className="surface"><div className="surface-title"><div><h2>项目经营总览</h2><p>项目代号、包名和产品维度分开管理</p></div><button className="text-button" onClick={() => openModule("project")}>进入单项目诊断</button></div><div className="table-wrap"><table><thead><tr><th>项目</th><th>品类</th><th>DAU</th><th>收入</th><th>消耗</th><th>ROAS</th><th>广告浏览者比例</th><th>数据健康</th><th>状态</th></tr></thead><tbody>{projects.map((item, index) => <tr key={item.code} className="clickable-row" onClick={() => openModule("project")}><td><strong>{item.code}</strong><small>{item.name}</small></td><td>{item.category}</td><td>{item.dau}</td><td>{item.revenue}</td><td>{["$3,118", "$2,791", "$1,436", "$1,210", "$892"][index]}</td><td>{["154.6%", "147.0%", "146.5%", "155.9%", "110.5%"][index]}</td><td>{item.viewer}</td><td>{index === 0 ? "96.8%" : index === 4 ? "91.2%" : "≥99.0%"}</td><td><Badge tone={item.status === "严重" ? "bad" : item.status === "预警" ? "warn" : "good"}>{item.status}</Badge></td></tr>)}</tbody></table></div></div>
+        <aside className="surface"><div className="surface-title"><div><h2>今日重点</h2><p>按利润影响和紧急度排序</p></div></div><div className="focus-list"><button onClick={() => openModule("funnel")}><Badge tone="bad">P0</Badge><div><strong>IRAN-VPN-01 覆盖下跌</strong><p>预计影响 $2,807/日</p></div></button><button onClick={() => openModule("reconcile")}><Badge tone="warn">P1</Badge><div><strong>CLEAN-MAX-03 DAU差异</strong><p>Firebase 比中台高 8.7%</p></div></button><button onClick={() => openModule("tracking")}><Badge tone="blue">验收</Badge><div><strong>AIVORA-LAUNCHER 1.4.0</strong><p>P0事件完成 28/31</p></div></button></div></aside>
+      </section>
+      <section className="two-column"><div className="surface"><div className="surface-title"><div><h2>项目收入与利润贡献</h2><p>近7日 · 按项目排序</p></div></div><div className="contribution-bars">{[["IRAN-VPN-01",82,"$33,747","$12,268"],["FAST-VPN-02",70,"$28,721","$9,816"],["CLEAN-MAX-03",48,"$14,728","$4,193"],["AIVORA-LAUNCHER",39,"$13,209","$3,887"]].map(([name,width,revenue,profit]) => <div key={String(name)}><span>{name}</span><div><i style={{width:`${width}%`}} /></div><strong>{revenue}</strong><small>利润 {profit}</small></div>)}</div></div><aside className="surface"><div className="surface-title"><div><h2>市场分布</h2><p>DAU / 收入占比</p></div></div><div className="market-list">{[["伊朗","38.4%","42.1%"],["埃及","16.7%","14.8%"],["土耳其","12.6%","15.2%"],["巴基斯坦","9.4%","7.8%"],["其他","22.9%","20.1%"]].map(row => <div key={row[0]}><strong>{row[0]}</strong><span>{row[1]} DAU</span><span>{row[2]} 收入</span></div>)}</div></aside></section>
+    </div>
+  );
+
+  if (module === "project") return (
+    <div className="page-stack">
+      <section className="project-hero surface"><div><div className="eyebrow">{project} · com.jkcl.iran.vpn</div><h2>Iran Fast VPN</h2><p>套利 VPN · Android · 负责人 Oliver · 当前版本 1.8.0 (108)</p></div><div className="project-health"><span>综合健康度</span><strong>72</strong><Badge tone="warn">需要关注</Badge></div></section>
+      <section className="metric-grid six"><Metric label="DAU" value="128,430" note="+2.8%" tone="good" /><Metric label="新增用户" value="31,842" note="占DAU 24.8%" /><Metric label="广告浏览者比例" value="23.1%" note="目标 ≥35%" tone="bad" /><Metric label="收入" value="$4,821" note="-8.4%" tone="bad" /><Metric label="ARPDAU" value="$0.0375" note="-10.1%" tone="bad" /><Metric label="D1留存" value="34.8%" note="+1.2pp" tone="good" /></section>
+      <section className="health-dimensions">{[["用户增长",82,"good"],["产品转化",76,"good"],["广告覆盖",48,"bad"],["广告效率",91,"good"],["收入表现",63,"warn"],["数据质量",94,"good"]].map(([name,score,tone]) => <button key={String(name)} onClick={() => tone === "bad" ? openModule("funnel") : notify(`${name}诊断详情已展开`)}><span>{name}</span><strong className={String(tone)}>{score}</strong><div><i className={String(tone)} style={{width:`${score}%`}} /></div><small>{tone === "bad" ? "存在严重异常" : tone === "warn" ? "低于项目基线" : "处于正常范围"}</small></button>)}</section>
+      <section className="two-column wide-left"><div className="surface"><div className="surface-title"><div><h2>全链路诊断</h2><p>从安装、活跃、产品使用到广告变现</p></div><Badge tone="bad">1 个核心阻塞</Badge></div><div className="diagnostic-chain">{[["安装","31,842","100%","normal"],["活跃","128,430","—","normal"],["连接成功","64,276","50.0%","normal"],["广告机会","36,474","28.4%","bad"],["广告浏览 AV","29,671","23.1%","bad"],["付费回调","29,404","99.1%","normal"]].map(([label,value,rate,status],index) => <div key={String(label)} className={status === "bad" ? "bad" : ""}><span>{index+1}</span><strong>{label}</strong><em>{value}</em><small>{rate}</small></div>)}</div><div className="diagnosis-callout"><Badge tone="bad">核心问题</Badge><strong>请求前广告机会覆盖不足</strong><p>请求后的加载与展示效率正常；无需先调整 AdMob 填充策略。</p><button onClick={() => openModule("funnel")}>进入漏斗分析</button></div></div><aside className="surface"><div className="surface-title"><div><h2>快速检查</h2><p>按问题优先级执行</p></div></div><div className="quick-checks"><button onClick={() => openModule("funnel")}><span>1</span><div><strong>漏斗异常</strong><p>Eligible → Opportunity -12.8pp</p></div><Badge tone="bad">严重</Badge></button><button onClick={() => openModule("firebase")}><span>2</span><div><strong>Firebase质量</strong><p>P0字段完整率 99.1%</p></div><Badge tone="warn">预警</Badge></button><button onClick={() => openModule("admob")}><span>3</span><div><strong>AdMob效率</strong><p>匹配100% · 展示70.2%</p></div><Badge tone="good">正常</Badge></button><button onClick={() => openModule("reconcile")}><span>4</span><div><strong>数据对账</strong><p>展示差异 1.7%</p></div><Badge tone="good">正常</Badge></button></div></aside></section>
+    </div>
+  );
+
+  if (module === "admob") return (
+    <div className="page-stack">
+      <section className="metric-grid six"><Metric label="预估收入" value="$4,821" note="较昨日 -8.4%" tone="bad" /><Metric label="广告请求" value="201,944" note="+4.9%" /><Metric label="匹配率" value="100%" note="AdMob已结算" tone="good" /><Metric label="展示率" value="70.2%" note="目标 ≥68%" tone="good" /><Metric label="eCPM" value="$35.03" note="-3.1%" /><Metric label="广告浏览者 AV" value="29,671" note="AV/DAU 23.1%" tone="bad" /></section>
+      <section className="admob-split"><div className="surface"><div className="surface-title"><div><h2>用户覆盖</h2><p>回答有多少用户真正看到了广告</p></div><Badge tone="bad">异常</Badge></div><div className="big-ratio"><strong>23.1%</strong><span>广告浏览者比例</span><div><i style={{width:"23.1%"}} /></div></div><div className="ratio-details"><div><span>DAU</span><strong>128,430</strong></div><div><span>Request UV</span><strong>34,921</strong></div><div><span>AV</span><strong>29,671</strong></div><div><span>Impression/AV</span><strong>3.42</strong></div></div><button className="full-link" onClick={() => openModule("funnel")}>定位用户覆盖漏斗 →</button></div><div className="surface"><div className="surface-title"><div><h2>请求后效率</h2><p>回答广告 SDK 链路是否健康</p></div><Badge tone="good">正常</Badge></div><div className="efficiency-chain">{[["Request","201,944","100%"],["Matched","201,944","100%"],["Show","141,760","70.2%"],["Impression","137,628","97.1%"]].map(row => <div key={row[0]}><strong>{row[0]}</strong><span>{row[1]}</span><Badge tone={row[0] === "Show" ? "blue" : "good"}>{row[2]}</Badge></div>)}</div><div className="conclusion-block good"><strong>结论</strong><p>AdMob匹配和请求后展示正常，低AV主要不是填充问题。</p></div></div></section>
+      <section className="surface"><div className="surface-title"><div><h2>广告格式与广告位</h2><p>收入、覆盖和效率必须同时评估</p></div><div className="dimension-tabs"><button className="active">广告格式</button><button>广告位</button><button>国家</button></div></div><div className="table-wrap"><table><thead><tr><th>广告格式</th><th>请求</th><th>匹配率</th><th>展示率</th><th>Impression</th><th>AV</th><th>Impression/AV</th><th>eCPM</th><th>收入</th><th>状态</th></tr></thead><tbody>{[["插屏","128,420","100%","72.4%","90,216","21,904","4.12","$38.42","$3,466","正常"],["激励视频","31,842","99.8%","81.6%","25,912","12,404","2.09","$42.18","$1,093","正常"],["Banner","41,682","100%","51.4%","21,500","18,621","1.15","$12.19","$262","预警"]].map(row => <tr key={row[0]}>{row.map((cell,index) => <td key={index}>{index === 9 ? <Badge tone={cell === "正常" ? "good" : "warn"}>{cell}</Badge> : cell}</td>)}</tr>)}</tbody></table></div></section>
+      <section className="two-column"><div className="surface"><div className="surface-title"><div><h2>Mediation Adapter</h2><p>按收入贡献和错误率排序</p></div></div><div className="adapter-list">{[["Google Ads","62.4%","$3,009","0.3%"],["Meta Audience Network","18.7%","$902","1.1%"],["AppLovin","12.8%","$617","0.8%"],["Unity Ads","6.1%","$293","2.4%"]].map(row => <div key={row[0]}><strong>{row[0]}</strong><div><i style={{width:row[1]}} /></div><span>{row[2]}</span><small>错误 {row[3]}</small></div>)}</div></div><aside className="surface"><div className="surface-title"><div><h2>收入异常说明</h2><p>自动关联相关指标</p></div></div><div className="conclusion-block warn"><strong>收入下降不是 eCPM 单因子</strong><p>eCPM下降3.1%，但AV下降12.4%；用户覆盖是更大的收入损失来源。</p></div><button className="primary-button full" onClick={() => openModule("project")}>返回单项目诊断</button></aside></section>
+    </div>
+  );
+
+  if (module === "firebase") return (
+    <div className="page-stack">
+      <section className="metric-grid six"><Metric label="Firebase DAU" value="128,430" note="实时 · 延迟8分钟" /><Metric label="中台 DAU" value="124,208" note="差异 3.3%" tone="bad" /><Metric label="今日事件量" value="8.42M" note="+5.7%" /><Metric label="P0参数完整率" value="99.1%" note="目标100%" tone="bad" /><Metric label="未知事件率" value="0.18%" note="目标&lt;0.5%" tone="good" /><Metric label="隔离事件" value="2,184" note="缺ID 1,602" tone="bad" /></section>
+      <section className="firebase-status"><div><span className="status-dot" /><strong>Firebase Export</strong><p>最近入库 15:31 · 正常</p></div><i /><div><span className="status-dot" /><strong>标准化任务</strong><p>批次 fb_1530 · 正常</p></div><i /><div><span className="status-dot" /><strong>ADB 聚合</strong><p>水位 15:22 · 延迟9分钟</p></div><i /><div><span className="status-dot warn" /><strong>中台接口</strong><p>成功率 96.7% · 预警</p></div></section>
+      <section className="two-column wide-left"><div className="surface"><div className="surface-title"><div><h2>事件健康度</h2><p>按P0覆盖、参数和关联链综合判断</p></div><button className="text-button" onClick={() => openModule("tracking")}>进入打点验收</button></div><div className="table-wrap"><table><thead><tr><th>事件</th><th>今日用户</th><th>事件量</th><th>P0参数</th><th>event_id</th><th>关联链</th><th>版本覆盖</th><th>状态</th></tr></thead><tbody>{[["jk_ad_request","34,921","201,944","100%","100%","99.8%","98.6%","正常"],["jk_ad_impression","29,671","137,628","99.1%","100%","97.8%","异常"],["connect_success","64,276","71,804","100%","99.9%","99.7%","99.2%","正常"],["app_background","82,104","126,908","98.7%","100%","—","96.4%","预警"],["jk_ad_paid_event","29,404","136,392","100%","100%","99.1%","98.6%","正常"]].map(row => <tr key={row[0]}>{row.map((cell,index) => <td key={index}>{index === 7 ? <Badge tone={cell === "正常" ? "good" : cell === "预警" ? "warn" : "bad"}>{cell}</Badge> : cell}</td>)}</tr>)}</tbody></table></div></div><aside className="surface"><div className="surface-title"><div><h2>主要质量问题</h2><p>按影响事件量排序</p></div></div><div className="quality-issues"><button onClick={() => openModule("tracking")}><Badge tone="bad">P0</Badge><strong>impression缺opportunity_id</strong><span>1,824 条 · 1.3%</span></button><button onClick={() => openModule("reconcile")}><Badge tone="warn">同步</Badge><strong>中台接口上报失败</strong><span>4,222 用户 · 3.3%</span></button><button><Badge tone="warn">P1</Badge><strong>background_reason 缺失</strong><span>1,649 条 · 1.3%</span></button><button><Badge tone="neutral">隔离</Badge><strong>event_id 为空</strong><span>1,602 条</span></button></div></aside></section>
+      <section className="surface"><div className="surface-title"><div><h2>版本与用户覆盖</h2><p>确认新版本是否完整接入全部事件</p></div><Badge tone="blue">Android</Badge></div><div className="version-coverage">{[["1.8.0 (108)","68.4%",68,"99.1%","31/31"],["1.7.4 (104)","21.7%",22,"99.8%","31/31"],["1.7.2 (102)","7.1%",7,"98.9%","29/31"],["其他","2.8%",3,"95.2%","26/31"]].map(row => <div key={String(row[0])}><strong>{row[0]}</strong><span>{row[1]} DAU</span><div><i style={{width:`${row[2]}%`}} /></div><small>参数 {row[3]}</small><Badge tone={row[4] === "31/31" ? "good" : "warn"}>{row[4]} P0</Badge></div>)}</div></section>
+    </div>
+  );
+
+  if (module === "reconcile") return (
+    <div className="page-stack">
+      <section className="metric-grid five"><Metric label="对账项目" value="24" note="今日完成 22" /><Metric label="正常项目" value="19" note="差异&lt;3%" tone="good" /><Metric label="预警项目" value="3" note="差异3%–5%" /><Metric label="异常项目" value="2" note="差异&gt;5%" tone="bad" /><Metric label="待结算日期" value="3 天" note="AdMob T+3" /></section>
+      <section className="reconcile-flow">{[["Firebase","用户/事件","128,430 DAU"],["AdMob","请求/展示/收入","T+3 已结算"],["OSS Raw","原始事件备份","8.42M"],["ADB","标准化事实表","水位15:22"],["中台报表","统一口径","差异告警"]].map((row,index) => <div key={row[0]}><span>{index+1}</span><strong>{row[0]}</strong><p>{row[1]}</p><small>{row[2]}</small></div>)}</section>
+      <section className="surface"><div className="surface-title"><div><h2>核心指标对账</h2><p>今天仅对账 Firebase 与中台；AdMob 使用已结算日期</p></div><Badge tone="warn">2项异常</Badge></div><div className="table-wrap"><table><thead><tr><th>指标</th><th>日期</th><th>Firebase</th><th>AdMob</th><th>中台/ADB</th><th>差异率</th><th>容差</th><th>判定</th><th>建议</th></tr></thead><tbody>{[["DAU","今天","128,430","—","124,208","3.3%","≤2%","预警","检查中台接口"],["广告浏览人数AV","8/8","31,284","30,901","31,022","1.2%","≤3%","正常","—"],["Impression","8/8","142,821","140,432","141,076","1.7%","≤3%","正常","—"],["Paid Revenue","8/8","$5,018","$4,821","$5,001","4.1%","≤3%","异常","检查币种/时区"],["Request","8/8","203,812","201,944","202,405","0.9%","≤3%","正常","—"]].map(row => <tr key={`${row[0]}${row[1]}`}>{row.map((cell,index) => <td key={index}>{index === 7 ? <Badge tone={cell === "正常" ? "good" : cell === "预警" ? "warn" : "bad"}>{cell}</Badge> : cell}</td>)}</tr>)}</tbody></table></div></section>
+      <section className="two-column"><div className="surface"><div className="surface-title"><div><h2>近7日差异趋势</h2><p>差异超过阈值自动创建问题</p></div></div><div className="diff-bars">{[["8/5",1.2,"good"],["8/6",1.6,"good"],["8/7",1.1,"good"],["8/8",1.7,"good"],["8/9",2.6,"warn"],["8/10",3.1,"bad"],["今天",3.3,"bad"]].map(row => <div key={row[0]}><span>{row[1]}%</span><i className={row[2]} style={{height:`${Number(row[1])*24}px`}} /><small>{row[0]}</small></div>)}</div></div><aside className="surface"><div className="surface-title"><div><h2>异常归因</h2><p>DAU 差异 4,222 用户</p></div></div><div className="reason-list compact"><button><div className="reason-title"><strong>中台接口失败</strong><span>3,108 · 73.6%</span></div><div className="reason-bar"><span style={{width:"73.6%"}} /></div></button><button><div className="reason-title"><strong>重复去重规则</strong><span>724 · 17.1%</span></div><div className="reason-bar"><span style={{width:"17.1%"}} /></div></button><button><div className="reason-title"><strong>时区/跨日</strong><span>390 · 9.3%</span></div><div className="reason-bar"><span style={{width:"9.3%"}} /></div></button></div><button className="primary-button full" onClick={() => openModule("tasks")}>创建同步任务告警</button></aside></section>
+    </div>
+  );
+
+  if (module === "tracking") return (
+    <div className="page-stack">
+      <section className="acceptance-flow">{[["选择项目与品类","IRAN-VPN-01 · 套利VPN"],["冻结测试快照","snapshot_8fd2"],["执行测试场景","8/12 已执行"],["采集与校验","41/46 已收到"],["反馈与发布门禁","BLOCKED"]].map((row,index) => <div key={row[0]} className={index < 2 ? "done" : index === 2 ? "current" : ""}><span>{index<2?"✓":index+1}</span><strong>{row[0]}</strong><small>{row[1]}</small></div>)}</section>
+      <section className="run-banner"><div><strong>RUN-20260811-IRAN-001</strong><p>Android 1.8.0 (108) · Pixel 8 · 套利VPN v1.7 · 广告 v1.7</p></div><span><i />实时采集中</span><button onClick={() => notify("验收 Run 已暂停")}>暂停</button><button onClick={() => notify("已生成当前验收报告")}>生成报告</button></section>
+      <section className="metric-grid six"><Metric label="应测场景" value="12" note="已执行 8" /><Metric label="应收事件" value="46" note="已收到 41" /><Metric label="P0事件" value="29/31" note="未完成不可发布" tone="bad" /><Metric label="P0参数" value="99.1%" note="目标100%" tone="bad" /><Metric label="关联链" value="97.8%" note="目标100%" tone="bad" /><Metric label="发布门禁" value="BLOCKED" note="失败3项" tone="bad" /></section>
+      <section className="tracking-layout"><div className="surface"><div className="surface-title"><div><h2>测试场景</h2><p>不同项目按品类加载应测范围</p></div><Badge tone="blue">套利VPN</Badge></div><div className="scene-list">{[["01 首次启动与授权","6/6","通过","good"],["02 VPN连接成功","9/9","通过","good"],["03 非缓存插屏广告","7/9","执行中","warn"],["04 缓存广告命中","0/8","未执行","neutral"],["05 VPN断开与重连","0/7","未执行","neutral"]].map(row => <button key={row[0]}><div><strong>{row[0]}</strong><small>{row[1]}事件</small></div><Badge tone={row[3] as "good"|"warn"|"neutral"}>{row[2]}</Badge><div className="scene-progress"><i style={{width:row[2]==="通过"?"100%":row[2]==="执行中"?"78%":"0%"}} /></div></button>)}</div></div><div className="surface"><div className="surface-title"><div><h2>事件验收矩阵</h2><p>未执行和执行后未收到严格分开</p></div><button className="text-button">仅看失败</button></div><div className="table-wrap"><table><thead><tr><th>事件</th><th>执行</th><th>接收</th><th>参数</th><th>关联链</th><th>结论</th></tr></thead><tbody>{[["connect_success","已执行","9/9","100%","完整","PASSED"],["jk_ad_impression","已执行","1/1","100%","缺opportunity_id","CHAIN_INVALID"],["jk_ad_dismiss","已执行","0/1","—","缺终态","NOT_RECEIVED"],["cache_hit","未执行","不判定","—","—","SCENE_NOT_EXECUTED"]].map(row => <tr key={row[0]}>{row.map((cell,index) => <td key={index}>{index===5?<Badge tone={cell==="PASSED"?"good":cell==="SCENE_NOT_EXECUTED"?"neutral":"bad"}>{cell}</Badge>:cell}</td>)}</tr>)}</tbody></table></div></div><aside className="surface"><div className="surface-title"><div><h2>发布门禁</h2><p>P0必须全部100%</p></div><Badge tone="bad">BLOCKED</Badge></div><div className="gate-list"><div><span>P0事件</span><strong>93.5%</strong><Badge tone="bad">失败</Badge></div><div><span>P0参数</span><strong>99.1%</strong><Badge tone="bad">失败</Badge></div><div><span>关联链</span><strong>97.8%</strong><Badge tone="bad">失败</Badge></div></div><div className="conclusion-block bad"><strong>主要原因</strong><p>缓存 Context 未随广告对象保存，导致 impression 丢失 opportunity_id。</p></div><button className="primary-button full" onClick={() => notify("失败项重测包已创建")}>发起失败项重测</button></aside></section>
+    </div>
+  );
+
+  if (module === "config") return (
+    <div className="page-stack">
+      <section className="config-head surface"><div><div className="eyebrow">执行权威 · V1.7</div><h2>项目类型、能力包与事件规范</h2><p>公共基础包＋主品类＋能力包＋项目覆盖，最终合并为项目应测范围</p></div><div><Badge tone="good">已发布</Badge><button className="secondary-button" onClick={() => notify("V1.8 草稿已创建")}>复制为新版本</button></div></section>
+      <section className="config-layout"><div className="surface"><div className="surface-title"><div><h2>项目主品类</h2><p>每个项目只能选择一个</p></div><button className="text-button">＋新增</button></div><div className="category-list"><button className="selected"><strong>套利 VPN</strong><span>v1.7 · 14项目</span><small>连接、权限、服务器、协议、连接广告</small></button><button><strong>清理</strong><span>v1.5 · 8项目</span><small>扫描、清理、结果、大小、清理广告</small></button><button><strong>Launcher</strong><span>v1.3 · 6项目</span><small>引导、默认桌面、主题、桌面交互</small></button></div></div><div className="surface"><div className="surface-title"><div><h2>套利 VPN · 规则解析</h2><p>发布前预览事件、参数和冲突</p></div><Badge tone="blue">46事件</Badge></div><div className="resolution-list"><div><span>公共基础包</span><strong>生命周期、会话、网络</strong><em>18</em></div><div><span>主品类</span><strong>套利VPN v1.7</strong><em>12</em></div><div><span>能力包</span><strong>广告＋VPN＋订阅</strong><em>19</em></div><div><span>项目覆盖</span><strong>新增2 · 禁用1</strong><em>+1</em></div><div><span>合并去重</span><strong>同名事件条件取并集</strong><em>-4</em></div></div><div className="conclusion-block warn"><strong>配置冲突 1 项</strong><p>项目覆盖尝试将 subscription_status 从 P1 降为 P2，发布前需要审批。</p></div></div><aside className="surface"><div className="surface-title"><div><h2>发布检查</h2><p>规则完整性</p></div></div><div className="publish-checks"><div><span>✓</span><p>产品漏斗每个P0阶段均绑定事件</p></div><div><span>✓</span><p>缓存/非缓存广告逻辑完整</p></div><div><span>✓</span><p>Firebase参数≤22</p></div><div><span>!</span><p>订阅Provider有1个P1未配置</p></div></div><button className="primary-button full" onClick={() => notify("发布审批已发起")}>提交发布审批</button></aside></section>
+      <section className="surface"><div className="surface-title"><div><h2>事件与字段包</h2><p>客户端接入和中台验收的唯一来源</p></div><div className="dimension-tabs"><button className="active">事件</button><button>公共字段</button><button>枚举</button><button>Provider</button></div></div><div className="table-wrap"><table><thead><tr><th>事件</th><th>业务阶段</th><th>优先级</th><th>适用条件</th><th>参数数</th><th>移动端可得性</th><th>降级口径</th><th>状态</th></tr></thead><tbody>{[["jk_ad_request","广告请求","P0","真实Load前","13","稳定可得","缺失阻断","已发布"],["jk_ad_impression","广告展示","P0","SDK回调","11","依赖广告SDK","缺失阻断","已发布"],["connect_success","VPN连接","P0","成功回调","10","依赖业务模块","缺失阻断","已发布"],["background_reason","生命周期","P2","后台时","4","推断可得","unknown/省略","已发布"]].map(row => <tr key={row[0]}>{row.map((cell,index)=><td key={index}>{index===2?<Badge tone={cell==="P0"?"bad":"neutral"}>{cell}</Badge>:index===7?<Badge tone="good">{cell}</Badge>:cell}</td>)}</tr>)}</tbody></table></div></section>
+    </div>
+  );
+
+  return (
+    <div className="page-stack">
+      <section className="metric-grid six"><Metric label="今日任务" value="186" note="成功 179" /><Metric label="运行中" value="4" note="最长 8分钟" /><Metric label="失败任务" value="3" note="需立即处理" tone="bad" /><Metric label="数据延迟" value="9分钟" note="SLA ≤15分钟" tone="good" /><Metric label="活动告警" value="7" note="P0 2 · P1 5" tone="bad" /><Metric label="今日恢复" value="12" note="自动恢复 9" tone="good" /></section>
+      <section className="surface"><div className="surface-title"><div><h2>数据流水线任务</h2><p>Firebase → OSS → ADB → 聚合 → 对账</p></div><div className="dimension-tabs"><button className="active">全部</button><button>失败</button><button>运行中</button></div></div><div className="table-wrap"><table><thead><tr><th>任务</th><th>项目</th><th>批次/水位</th><th>开始时间</th><th>耗时</th><th>处理量</th><th>SLA</th><th>状态</th><th>操作</th></tr></thead><tbody>{[["Firebase增量拉取","全部项目","15:30","15:31","2m18s","8.42M","≤10m","成功"],["OSS Raw归档","全部项目","fb_1530","15:34","1m06s","4.8GB","≤15m","成功"],["ADB事件标准化","IRAN-VPN-01","batch_8241","15:35","运行8m","2.14M","≤15m","运行中"],["中台DAU聚合","CLEAN-MAX-03","2026-08-11","15:20","失败","76,210","≤20m","失败"],["AdMob T+3同步","全部项目","2026-08-08","14:10","12m44s","24项目","≤60m","成功"]].map(row => <tr key={`${row[0]}${row[1]}`}>{row.map((cell,index)=><td key={index}>{index===7?<Badge tone={cell==="成功"?"good":cell==="运行中"?"blue":"bad"}>{cell}</Badge>:index===8?<button className="table-link" onClick={()=>notify(cell==="失败"?"失败任务已重新执行":"任务日志已打开")}>{cell==="失败"?"重试":"日志"}</button>:cell}</td>)}</tr>)}</tbody></table></div></section>
+      <section className="two-column wide-left"><div className="surface"><div className="surface-title"><div><h2>活动告警</h2><p>指标告警与数据任务告警统一管理</p></div><button className="text-button">告警规则</button></div><div className="alert-list">{[["P0","IRAN-VPN-01 广告浏览者比例低于25%","持续3小时 · 影响$2,807/日","产品/广告/客户端"],["P0","CLEAN-MAX-03 中台DAU差异8.7%","持续42分钟 · 接口失败率9.1%","数据平台"],["P1","ADB标准化任务延迟接近SLA","已运行8分钟 · 阈值15分钟","数据平台"],["P1","jk_ad_impression 关联链完整率97.8%","缺opportunity_id 1,824条","客户端增长组"]].map(row => <button key={row[1]} onClick={() => row[1].includes("浏览者") ? openModule("funnel") : row[1].includes("DAU") ? openModule("reconcile") : notify("告警详情已展开")}><Badge tone={row[0]==="P0"?"bad":"warn"}>{row[0]}</Badge><div><strong>{row[1]}</strong><p>{row[2]}</p><small>负责人：{row[3]}</small></div><span>→</span></button>)}</div></div><aside className="surface"><div className="surface-title"><div><h2>告警通知</h2><p>当前值班策略</p></div></div><div className="notification-rules"><div><span>P0</span><strong>立即通知</strong><p>飞书群＋负责人＋值班人</p></div><div><span>P1</span><strong>持续15分钟</strong><p>飞书群＋负责人</p></div><div><span>P2</span><strong>每日汇总</strong><p>数据质量日报</p></div></div><button className="primary-button full" onClick={() => notify("新建告警规则草稿已打开")}>＋ 新建告警规则</button></aside></section>
+    </div>
+  );
+}
+
 export default function Home() {
+  const [module, setModule] = useState<ModuleKey>("funnel");
   const [page, setPage] = useState<PageKey>("overview");
   const [project, setProject] = useState("IRAN-VPN-01");
   const [range, setRange] = useState("今天");
@@ -135,6 +236,7 @@ export default function Home() {
   }, [funnelMode, unitMode]);
 
   const currentPage = pages.find((item) => item.key === page)!;
+  const currentModule = moduleCopy[module];
   const visibleEvents = eventRows
     .map((event, index) => ({ event, index }))
     .filter(({ event }) => !onlyErrors || event.result !== "有效");
@@ -146,7 +248,14 @@ export default function Home() {
   }
 
   function go(next: PageKey) {
+    setModule("funnel");
     setPage(next);
+    if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function openModule(next: ModuleKey) {
+    setModule(next);
+    if (next === "funnel") setPage("overview");
     if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
@@ -161,27 +270,25 @@ export default function Home() {
       <aside className="sidebar">
         <div className="brand"><span className="brand-mark">JK</span><span><strong>变现与埋点</strong><small>质量分析中心</small></span></div>
         <div className="nav-group-label">经营分析</div>
-        {[
-          ["全局项目总览", "01"], ["单项目诊断", "02"], ["漏斗分析", "03"], ["AdMob 分析", "04"], ["Firebase 分析", "05"], ["数据对账", "06"],
-        ].map(([label, index]) => <button key={label} className={`main-nav-item ${label === "漏斗分析" ? "active" : ""}`}><span>{index}</span>{label}</button>)}
+        {moduleMenus.filter((item) => item.group === "经营分析").map((item) => <button key={item.key} className={`main-nav-item ${module === item.key ? "active" : ""}`} onClick={() => openModule(item.key)}><span>{item.index}</span>{item.label}</button>)}
         <div className="nav-group-label">质量治理</div>
-        {[["打点验收中心", "07"], ["规范与项目配置", "08"], ["数据任务与告警", "09"]].map(([label, index]) => <button key={label} className="main-nav-item"><span>{index}</span>{label}</button>)}
+        {moduleMenus.filter((item) => item.group === "质量治理").map((item) => <button key={item.key} className={`main-nav-item ${module === item.key ? "active" : ""}`} onClick={() => openModule(item.key)}><span>{item.index}</span>{item.label}</button>)}
         <div className="sidebar-foot"><span className="status-dot" />Firebase 实时数据正常<small>AdMob 已结算至 8月8日</small></div>
       </aside>
 
       <div className="workspace">
         <header className="topbar">
-          <div className="breadcrumbs">经营分析 / 漏斗分析 / <strong>{currentPage.label}</strong></div>
+          <div className="breadcrumbs">{moduleMenus.find((item) => item.key === module)?.group} / {currentModule.title}{module === "funnel" && <> / <strong>{currentPage.label}</strong></>}</div>
           <div className="topbar-actions"><div className="global-search">搜索项目、事件、问题单</div><button className="icon-button" aria-label="通知">3</button><div className="avatar">OL</div></div>
         </header>
 
         <main className="main-content">
           <section className="page-heading">
-            <div><h1>漏斗分析中心</h1><p>从多项目异常发现到事件证据、修复重测和效果验证的完整诊断闭环</p></div>
-            <div className="heading-actions"><button className="secondary-button" onClick={() => go("snapshot")}>查看口径 V1.7</button><button className="primary-button" onClick={() => { go("issues"); notify("已创建诊断任务草稿"); }}>＋ 新建诊断任务</button></div>
+            <div><h1>{currentModule.title}</h1><p>{currentModule.description}</p></div>
+            <div className="heading-actions"><button className="secondary-button" onClick={() => module === "funnel" ? go("snapshot") : notify("数据已刷新至最新水位")}>{module === "funnel" ? "查看口径 V1.7" : "刷新数据"}</button><button className="primary-button" onClick={() => module === "funnel" ? (go("issues"), notify("已创建诊断任务草稿")) : notify(`${currentModule.action}任务已创建`)}>＋ {currentModule.action}</button></div>
           </section>
 
-          <section className="workflow-strip" aria-label="漏斗诊断流程">
+          {module === "funnel" && <section className="workflow-strip" aria-label="漏斗诊断流程">
             {[
               ["发现", "多项目总览"], ["定位", "单项目漏斗"], ["拆解", "步骤与分群"], ["取证", "路径与事件"], ["闭环", "修复与验证"],
             ].map(([name, hint], index) => {
@@ -189,11 +296,11 @@ export default function Home() {
               const phase = pageIndex === 0 ? 0 : pageIndex === 1 ? 1 : pageIndex <= 3 ? 2 : pageIndex <= 5 ? 3 : 4;
               return <div key={name} className={`workflow-step ${phase === index ? "current" : ""} ${phase > index ? "done" : ""}`}><span>{phase > index ? "✓" : index + 1}</span><div><strong>{name}</strong><small>{hint}</small></div></div>;
             })}
-          </section>
+          </section>}
 
-          <nav className="page-nav" aria-label="漏斗分析页面">
+          {module === "funnel" && <nav className="page-nav" aria-label="漏斗分析页面">
             {pages.map((item) => <button key={item.key} className={page === item.key ? "active" : ""} onClick={() => go(item.key)}><span>{item.label}</span><small>{item.hint}</small></button>)}
-          </nav>
+          </nav>}
 
           <section className="filter-bar">
             <label>项目<select value={project} onChange={(event) => setProject(event.target.value)}>{projects.map((item) => <option key={item.code}>{item.code}</option>)}</select></label>
@@ -206,12 +313,14 @@ export default function Home() {
           </section>
 
           <section className="context-toolbar">
-            <div className="context-summary"><Badge tone="blue">{currentPage.hint}</Badge><span>{project}</span><i /> <span>{range}</span><i /> <span>Android · 1.8.0</span><i /> <span>口径 V1.7</span></div>
+            <div className="context-summary"><Badge tone="blue">{module === "funnel" ? currentPage.hint : currentModule.title}</Badge><span>{project}</span><i /> <span>{range}</span><i /> <span>Android · 1.8.0</span><i /> <span>口径 V1.7</span></div>
             <div className="context-actions"><button onClick={() => notify("当前分析视图已保存")}>保存视图</button><button onClick={() => notify("报表导出任务已创建")}>导出报表</button></div>
           </section>
           <section className="freshness-note"><div><strong>数据使用提示：</strong>今天的用户漏斗与事件漏斗来自 Firebase 实时数据；收入、匹配率和 AdMob 广告浏览者为 T+3 结算口径。</div><button onClick={() => go("snapshot")}>查看数据口径</button></section>
 
-          {page === "overview" && (
+          {module !== "funnel" && <ModulePage module={module as Exclude<ModuleKey, "funnel">} project={project} openModule={openModule} notify={notify} />}
+
+          {module === "funnel" && page === "overview" && (
             <div className="page-stack">
               <section className="metric-grid six">
                 <Metric label="全项目 DAU" value="397,380" note="较昨日 +3.2%" />
@@ -257,7 +366,7 @@ export default function Home() {
             </div>
           )}
 
-          {page === "workbench" && (
+          {module === "funnel" && page === "workbench" && (
             <div className="page-stack">
               <section className="analysis-head surface">
                 <div><div className="eyebrow">{project} · Android 1.8.0</div><h2>{funnelMode === "product" ? "VPN 产品主漏斗" : "广告变现主漏斗"}</h2><p>当前周期：{range} 00:00–当前 · 对比昨日同期</p></div>
@@ -292,7 +401,7 @@ export default function Home() {
             </div>
           )}
 
-          {page === "diagnosis" && (
+          {module === "funnel" && page === "diagnosis" && (
             <div className="page-stack">
               <section className="transition-banner">
                 <div><span>上一步</span><strong>Eligible 用户</strong><em>83,106</em></div><span className="transition-arrow">→<small>43.9%</small></span><div><span>下一步</span><strong>Opportunity 用户</strong><em>36,474</em></div><div className="transition-loss"><span>流失用户</span><strong>46,632</strong><small>较基线多流失 10,641</small></div>
@@ -325,7 +434,7 @@ export default function Home() {
             </div>
           )}
 
-          {page === "cohort" && (
+          {module === "funnel" && page === "cohort" && (
             <div className="page-stack">
               <section className="surface">
                 <div className="surface-title cohort-header"><div><h2>Eligible → Opportunity 分群对比</h2><p>找出贡献最大的问题人群，而不只是转化率最低的人群</p></div><div className="dimension-tabs">{["国家", "App版本", "广告位", "网络类型", "新老用户", "VPN状态"].map((item) => <button key={item} className={dimension === item ? "active" : ""} onClick={() => setDimension(item)}>{item}</button>)}</div></div>
@@ -347,7 +456,7 @@ export default function Home() {
             </div>
           )}
 
-          {page === "path" && (
+          {module === "funnel" && page === "path" && (
             <div className="page-stack">
               <section className="surface">
                 <div className="surface-title"><div><h2>伊朗 · 1.8.0 流失用户路径</h2><p>观察没有进入 Opportunity 前后的真实行为，不把“页面离开”和“App 后台”混为一谈</p></div><Badge tone="blue">46,632 用户</Badge></div>
@@ -373,7 +482,7 @@ export default function Home() {
             </div>
           )}
 
-          {page === "evidence" && (
+          {module === "funnel" && page === "evidence" && (
             <div className="page-stack">
               <section className="evidence-head surface"><div><div className="eyebrow">样本 user_pseudo_id · u_8f1a***92</div><h2>事件证据时间线</h2><p>IRAN-VPN-01 · Android 1.8.0 · Iran · session=s_728c</p></div><Segmented label="证据模式" active={evidenceMode} onChange={setEvidenceMode} items={[{ key: "user", label: "用户事件链" }, { key: "ad", label: "广告关联链" }]} /></section>
               <section className="two-column wide-left evidence-layout">
@@ -395,7 +504,7 @@ export default function Home() {
             </div>
           )}
 
-          {page === "issues" && (
+          {module === "funnel" && page === "issues" && (
             <div className="page-stack">
               <section className="surface">
                 <div className="surface-title"><div><h2>ISSUE-20260811-024 · Opportunity 覆盖率异常</h2><p>IRAN-VPN-01 · P0 · 负责人：客户端增长组 / Oliver · SLA 剩余 18 小时</p></div><Badge tone={issueStatus === "重测中" ? "blue" : "warn"}>{issueStatus}</Badge></div>
@@ -421,7 +530,7 @@ export default function Home() {
             </div>
           )}
 
-          {page === "snapshot" && (
+          {module === "funnel" && page === "snapshot" && (
             <div className="page-stack">
               <section className="snapshot-head surface"><div><div className="eyebrow">只读执行快照</div><h2>IRAN-VPN-01 · 漏斗口径 V1.7</h2><p>生效于 2026-08-01 · 套利 VPN v1.7 ＋ 广告 v1.7 ＋ VPN v1.7</p></div><div><Badge tone="good">已发布</Badge> <button className="secondary-button" onClick={() => notify("已定位到项目类型设置中的 V1.7 配置")}>前往项目类型设置</button></div></section>
               <section className="metric-grid five"><Metric label="产品漏斗" value="6 步" note="严格顺序" /><Metric label="变现用户漏斗" value="8 步" note="UV 去重" /><Metric label="变现事件漏斗" value="6 步" note="event_id 去重" /><Metric label="转化窗口" value="30 分钟" note="跨会话不合并" /><Metric label="规范版本" value="V1.7" note="schema_version 1.7" /></section>
