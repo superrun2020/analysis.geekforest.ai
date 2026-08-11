@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { ActionDialog, type DialogKey, type DialogResult } from "./action-dialog";
+import { FirebaseConfiguration } from "./firebase-configuration";
 
 type PageKey =
   | "overview"
@@ -15,20 +17,6 @@ type PageKey =
 type FunnelMode = "product" | "monetization";
 type UnitMode = "users" | "events";
 type ModuleKey = "global" | "project" | "funnel" | "admob" | "firebase" | "reconcile" | "tracking" | "config" | "tasks";
-type DialogKey =
-  | "project-report"
-  | "diagnosis"
-  | "admob-report"
-  | "version-diff-report"
-  | "event-dictionary"
-  | "reconcile-run"
-  | "tracking-run"
-  | "retest-run"
-  | "config-version"
-  | "project-category"
-  | "publish-approval"
-  | "alert-rule";
-
 const moduleMenus: Array<{ key: ModuleKey; index: string; label: string; group: "经营分析" | "质量治理" }> = [
   { key: "global", index: "01", label: "全局项目总览", group: "经营分析" },
   { key: "project", index: "02", label: "单项目诊断", group: "经营分析" },
@@ -49,7 +37,7 @@ const moduleCopy: Record<ModuleKey, { title: string; description: string; action
   firebase: { title: "Firebase 分析", description: "监控活跃用户、事件覆盖、参数质量、版本分布和实时数据延迟", action: "查看事件字典" },
   reconcile: { title: "数据对账", description: "对比 Firebase、AdMob、中台与 ADB 的用户、展示和收入口径", action: "发起重新对账" },
   tracking: { title: "打点验收中心", description: "按项目品类和测试快照验证应收事件、必填参数与完整关联链", action: "新建验收 Run" },
-  config: { title: "规范与项目配置", description: "管理项目类型、能力包、事件参数、漏斗版本和项目关联范围", action: "新建配置版本" },
+  config: { title: "规范与项目配置", description: "管理项目品类、事件规范、Firebase连接、App关联和接口字段", action: "新建配置版本" },
   tasks: { title: "数据任务与告警", description: "监控采集、同步、聚合与对账任务，并闭环处理数据异常", action: "新建告警规则" },
 };
 
@@ -227,6 +215,7 @@ function ModulePage({ module, project, openModule, openDialog, notify }: { modul
       <section className="config-head surface"><div><div className="eyebrow">执行权威 · V1.7</div><h2>项目类型、能力包与事件规范</h2><p>公共基础包＋主品类＋能力包＋项目覆盖，最终合并为项目应测范围</p></div><div><Badge tone="good">已发布</Badge><button className="secondary-button" onClick={() => openDialog("config-version")}>复制为新版本</button></div></section>
       <section className="config-layout"><div className="surface"><div className="surface-title"><div><h2>项目主品类</h2><p>每个项目只能选择一个</p></div><button className="text-button" onClick={() => openDialog("project-category")}>＋新增</button></div><div className="category-list"><button className="selected"><strong>套利 VPN</strong><span>v1.7 · 14项目</span><small>连接、权限、服务器、协议、连接广告</small></button><button><strong>清理</strong><span>v1.5 · 8项目</span><small>扫描、清理、结果、大小、清理广告</small></button><button><strong>Launcher</strong><span>v1.3 · 6项目</span><small>引导、默认桌面、主题、桌面交互</small></button></div></div><div className="surface"><div className="surface-title"><div><h2>套利 VPN · 规则解析</h2><p>发布前预览事件、参数和冲突</p></div><Badge tone="blue">46事件</Badge></div><div className="resolution-list"><div><span>公共基础包</span><strong>生命周期、会话、网络</strong><em>18</em></div><div><span>主品类</span><strong>套利VPN v1.7</strong><em>12</em></div><div><span>能力包</span><strong>广告＋VPN＋订阅</strong><em>19</em></div><div><span>项目覆盖</span><strong>新增2 · 禁用1</strong><em>+1</em></div><div><span>合并去重</span><strong>同名事件条件取并集</strong><em>-4</em></div></div><div className="conclusion-block warn"><strong>配置冲突 1 项</strong><p>项目覆盖尝试将 subscription_status 从 P1 降为 P2，发布前需要审批。</p></div></div><aside className="surface"><div className="surface-title"><div><h2>发布检查</h2><p>规则完整性</p></div></div><div className="publish-checks"><div><span>✓</span><p>产品漏斗每个P0阶段均绑定事件</p></div><div><span>✓</span><p>缓存/非缓存广告逻辑完整</p></div><div><span>✓</span><p>Firebase参数≤22</p></div><div><span>!</span><p>订阅Provider有1个P1未配置</p></div></div><button className="primary-button full" onClick={() => openDialog("publish-approval")}>提交发布审批</button></aside></section>
       <section className="surface"><div className="surface-title"><div><h2>事件与字段包</h2><p>客户端接入和中台验收的唯一来源</p></div><div className="dimension-tabs"><button className="active">事件</button><button>公共字段</button><button>枚举</button><button>Provider</button></div></div><div className="table-wrap"><table><thead><tr><th>事件</th><th>业务阶段</th><th>优先级</th><th>适用条件</th><th>参数数</th><th>移动端可得性</th><th>降级口径</th><th>状态</th></tr></thead><tbody>{[["jk_ad_request","广告请求","P0","真实Load前","13","稳定可得","缺失阻断","已发布"],["jk_ad_impression","广告展示","P0","SDK回调","11","依赖广告SDK","缺失阻断","已发布"],["connect_success","VPN连接","P0","成功回调","10","依赖业务模块","缺失阻断","已发布"],["background_reason","生命周期","P2","后台时","4","推断可得","unknown/省略","已发布"]].map(row => <tr key={row[0]}>{row.map((cell,index)=><td key={index}>{index===2?<Badge tone={cell==="P0"?"bad":"neutral"}>{cell}</Badge>:index===7?<Badge tone="good">{cell}</Badge>:cell}</td>)}</tr>)}</tbody></table></div></section>
+      <FirebaseConfiguration openDialog={openDialog} />
     </div>
   );
 
@@ -239,8 +228,8 @@ function ModulePage({ module, project, openModule, openDialog, notify }: { modul
   );
 }
 
-function ActionDialog({ dialog, project, onClose, onSubmit }: { dialog: DialogKey; project: string; onClose: () => void; onSubmit: (message: string) => void }) {
-  const meta: Record<DialogKey, { title: string; description: string; submit: string }> = {
+function LegacyActionDialog({ dialog, project, onClose, onSubmit }: { dialog: Exclude<DialogKey, "firebase-connection" | "firebase-binding">; project: string; onClose: () => void; onSubmit: (message: string) => void }) {
+  const meta: Record<Exclude<DialogKey, "firebase-connection" | "firebase-binding">, { title: string; description: string; submit: string }> = {
     "project-report": { title: "导出项目日报", description: "选择范围、指标和接收方式", submit: "创建导出任务" },
     diagnosis: { title: "新建诊断任务", description: "将异常指标、范围和负责人写入诊断闭环", submit: "创建诊断任务" },
     "admob-report": { title: "导出 AdMob 报表", description: "按结算日期和广告维度生成报表", submit: "创建导出任务" },
@@ -354,7 +343,7 @@ export default function Home() {
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <div className="brand"><span className="brand-mark">JK</span><span><strong>变现与埋点</strong><small>质量分析中心</small></span></div>
+        <div className="brand"><span className="brand-mark">JK</span><span><strong>变现与埋点</strong><small>质量分析中心 · V5</small></span></div>
         <div className="nav-group-label">经营分析</div>
         {moduleMenus.filter((item) => item.group === "经营分析").map((item) => <button key={item.key} className={`main-nav-item ${module === item.key ? "active" : ""}`} onClick={() => openModule(item.key)}><span>{item.index}</span>{item.label}</button>)}
         <div className="nav-group-label">质量治理</div>
@@ -645,7 +634,7 @@ export default function Home() {
           )}
         </main>
       </div>
-      {dialog && <ActionDialog dialog={dialog} project={project} onClose={() => setDialog(null)} onSubmit={(message) => { if (dialog === "retest-run" || dialog === "tracking-run") setIssueStatus("重测中"); setDialog(null); notify(message); }} />}
+      {dialog && <ActionDialog dialog={dialog} project={project} onClose={() => setDialog(null)} onSubmit={(result: DialogResult) => { if (dialog === "retest-run" || dialog === "tracking-run") setIssueStatus("重测中"); notify(`${result.message} · ${result.id}`); }} />}
       {notice && <div className="toast" role="status"><span>✓</span>{notice}</div>}
     </div>
   );
