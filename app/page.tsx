@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ActionDialog, type DialogKey, type DialogResult } from "./action-dialog";
 import { FirebaseConfiguration } from "./firebase-configuration";
-import { trackingConfigs, type TrackingConfigRecord } from "./tracking-config-data";
+import { trackingConfigs, trackingEventCatalog, type TrackingConfigRecord } from "./tracking-config-data";
 
 type PageKey =
   | "overview"
@@ -21,6 +21,7 @@ type TrendMetric = "viewer" | "opportunity";
 type AdMobDimension = "format" | "placement" | "country";
 type ConfigPackageTab = "events" | "fields" | "enums" | "providers";
 type TaskFilter = "all" | "failed" | "running";
+type TrackingResultFilter = "all" | "passed" | "failed" | "pending";
 type FunnelStage = { label: string; event: string; value: string; rate: string; delta: string };
 type TransitionSelection = { from: string; to: string; rate: string; scope: "users" | "events" };
 type ModuleKey = "global" | "project" | "funnel" | "admob" | "firebase" | "reconcile" | "tracking" | "config" | "tasks";
@@ -85,28 +86,6 @@ const projectDisplayProfiles: Record<string, { name: string; packageName: string
   "CLEAN-MAX-03": { name: "Clean Max", packageName: "com.jkcl.clean.max", category: "清理", owner: "Mia", version: "3.2.0 (320)", health: "78", healthTone: "warn", newUsers: "14,702", revenueDelta: "-1.8%", arpDau: "$0.0276", retention: "29.7%" },
   "AIVORA-LAUNCHER": { name: "Aivora Launcher", packageName: "com.aivora.launcher", category: "Launcher", owner: "Liam", version: "1.4.0 (140)", health: "86", healthTone: "good", newUsers: "12,618", revenueDelta: "+2.1%", arpDau: "$0.0344", retention: "41.1%" },
   "TURBO-CLEAN-05": { name: "Turbo Cleaner", packageName: "com.jkcl.turbo.clean", category: "清理", owner: "Noah", version: "2.1.6 (216)", health: "61", healthTone: "bad", newUsers: "9,864", revenueDelta: "-12.6%", arpDau: "$0.0238", retention: "25.9%" },
-};
-
-const trackingProfiles: Record<string, { category: string; spec: string; expected: number; scenes: Array<{ name: string; progress: string; status: string; tone: "good" | "warn" | "neutral"; events: Array<string[]> }> }> = {
-  "套利 VPN": { category: "套利 VPN", spec: "CFG-VPN-1.8-PROD · SNP-VPN-180-001", expected: 80, scenes: [
-    { name: "01 首次启动与授权", progress: "6/6", status: "通过", tone: "good", events: [["app_first_open","已执行","1/1","100%","完整","PASSED"],["consent_result","已执行","1/1","100%","完整","PASSED"]] },
-    { name: "02 VPN连接成功", progress: "9/9", status: "通过", tone: "good", events: [["connect_start","已执行","1/1","100%","完整","PASSED"],["connect_success","已执行","1/1","100%","完整","PASSED"]] },
-    { name: "03 非缓存插屏广告", progress: "7/9", status: "执行中", tone: "warn", events: [["jk_ad_opportunity","已执行","1/1","100%","完整","PASSED"],["jk_ad_request","已执行","1/1","100%","完整","PASSED"],["jk_ad_impression","已执行","1/1","100%","缺opportunity_id","CHAIN_INVALID"],["jk_ad_dismiss","已执行","0/1","—","缺终态","NOT_RECEIVED"]] },
-    { name: "04 缓存广告命中", progress: "0/8", status: "未执行", tone: "neutral", events: [["jk_ad_cache_hit","未执行","不判定","—","—","SCENE_NOT_EXECUTED"],["jk_ad_show_attempt","未执行","不判定","—","—","SCENE_NOT_EXECUTED"]] },
-    { name: "05 VPN断开与重连", progress: "0/7", status: "未执行", tone: "neutral", events: [["disconnect_success","未执行","不判定","—","—","SCENE_NOT_EXECUTED"],["reconnect_success","未执行","不判定","—","—","SCENE_NOT_EXECUTED"]] },
-  ] },
-  "清理": { category: "清理", spec: "清理 v1.5＋广告 v1.7", expected: 39, scenes: [
-    { name: "01 首次启动与授权", progress: "6/6", status: "通过", tone: "good", events: [["app_first_open","已执行","1/1","100%","完整","PASSED"],["consent_result","已执行","1/1","100%","完整","PASSED"]] },
-    { name: "02 扫描与结果", progress: "8/8", status: "通过", tone: "good", events: [["scan_start","已执行","1/1","100%","完整","PASSED"],["scan_result","已执行","1/1","100%","完整","PASSED"]] },
-    { name: "03 清理完成广告", progress: "5/8", status: "执行中", tone: "warn", events: [["clean_success","已执行","1/1","100%","完整","PASSED"],["jk_ad_opportunity","已执行","1/1","100%","完整","PASSED"],["jk_ad_impression","已执行","0/1","—","缺展示终态","NOT_RECEIVED"]] },
-    { name: "04 缓存广告命中", progress: "0/8", status: "未执行", tone: "neutral", events: [["jk_ad_cache_hit","未执行","不判定","—","—","SCENE_NOT_EXECUTED"]] },
-  ] },
-  "Launcher": { category: "Launcher", spec: "Launcher v1.3＋广告 v1.7", expected: 42, scenes: [
-    { name: "01 首次启动与默认桌面", progress: "7/7", status: "通过", tone: "good", events: [["launcher_first_open","已执行","1/1","100%","完整","PASSED"],["default_launcher_result","已执行","1/1","100%","完整","PASSED"]] },
-    { name: "02 主题与桌面交互", progress: "8/8", status: "通过", tone: "good", events: [["theme_apply","已执行","1/1","100%","完整","PASSED"],["home_gesture","已执行","3/3","100%","完整","PASSED"]] },
-    { name: "03 首页广告", progress: "6/8", status: "执行中", tone: "warn", events: [["jk_ad_opportunity","已执行","1/1","100%","完整","PASSED"],["jk_ad_impression","已执行","1/1","98.4%","缺screen_name","PARAM_INVALID"]] },
-    { name: "04 后台恢复", progress: "0/6", status: "未执行", tone: "neutral", events: [["app_foreground","未执行","不判定","—","—","SCENE_NOT_EXECUTED"]] },
-  ] },
 };
 
 const productStages = [
@@ -275,21 +254,57 @@ function Segmented({ items, active, onChange, label }: { items: Array<{ key: str
   );
 }
 
-function ModulePage({ module, project, configs, onProjectChange, openModule, openDialog, notify }: { module: Exclude<ModuleKey, "funnel">; project: string; configs: TrackingConfigRecord[]; onProjectChange: (project: string) => void; openModule: (next: ModuleKey) => void; openDialog: (dialog: DialogKey) => void; notify: (message: string) => void }) {
+function ModulePage({ module, project, configs, onProjectChange, openModule, openDialog, openConfigEditor, notify }: { module: Exclude<ModuleKey, "funnel">; project: string; configs: TrackingConfigRecord[]; onProjectChange: (project: string) => void; openModule: (next: ModuleKey) => void; openDialog: (dialog: DialogKey) => void; openConfigEditor: (config: TrackingConfigRecord | null) => void; notify: (message: string) => void }) {
   const [admobDimension, setAdmobDimension] = useState<AdMobDimension>("format");
-  const [selectedScene, setSelectedScene] = useState(0);
-  const [trackingOnlyIssues, setTrackingOnlyIssues] = useState(false);
+  const [trackingResultFilter, setTrackingResultFilter] = useState<TrackingResultFilter>("all");
+  const [trackingConfigId, setTrackingConfigId] = useState("CFG-VPN-1.8-PROD");
+  const [selectedTestCapability, setSelectedTestCapability] = useState("all");
   const [configPackageTab, setConfigPackageTab] = useState<ConfigPackageTab>("events");
   const [selectedCategory, setSelectedCategory] = useState("套利 VPN");
   const [selectedConfigId, setSelectedConfigId] = useState("CFG-VPN-1.8-PROD");
   const [taskFilter, setTaskFilter] = useState<TaskFilter>("all");
   const projectItem = projects.find((item) => item.code === project) ?? projects[0];
   const displayProfile = projectDisplayProfiles[project] ?? projectDisplayProfiles["IRAN-VPN-01"];
-  const selectedTracking = trackingProfiles[projectItem.category] ?? trackingProfiles["套利 VPN"];
   const selectedConfigRecord = configs.find((config) => config.id === selectedConfigId) ?? configs[0];
-  const activeSceneIndex = Math.min(selectedScene, selectedTracking.scenes.length - 1);
-  const activeScene = selectedTracking.scenes[activeSceneIndex];
-  const trackingEventRows = activeScene.events.filter((row) => !trackingOnlyIssues || !["PASSED", "SCENE_NOT_EXECUTED"].includes(row[5]));
+  const compatibleTrackingConfigs = configs.filter((config) => config.status === "PUBLISHED" && config.projects.includes(project));
+  const selectedTrackingConfig = compatibleTrackingConfigs.find((config) => config.id === trackingConfigId) ?? compatibleTrackingConfigs[0];
+  const expectedTrackingEvents = trackingEventCatalog.filter((event) => selectedTrackingConfig?.selectedEventIds?.includes(event.id));
+  const trackingOutcomes: Record<string, "PASSED" | "NOT_RECEIVED" | "SCENE_NOT_EXECUTED" | "PARAM_INVALID" | "CHAIN_INVALID"> = {
+    jk_ad_impression: "CHAIN_INVALID",
+    jk_ad_dismiss: "NOT_RECEIVED",
+    jk_ad_cache_hit: "SCENE_NOT_EXECUTED",
+    reconnect_success: "SCENE_NOT_EXECUTED",
+    app_background: "PARAM_INVALID",
+  };
+  const expectedResults = expectedTrackingEvents.map((event) => ({ event, conclusion: trackingOutcomes[event.name] ?? "PASSED" }));
+  const resultCounts = {
+    passed: expectedResults.filter((item) => item.conclusion === "PASSED").length,
+    failed: expectedResults.filter((item) => ["NOT_RECEIVED", "PARAM_INVALID", "CHAIN_INVALID"].includes(item.conclusion)).length,
+    pending: expectedResults.filter((item) => item.conclusion === "SCENE_NOT_EXECUTED").length,
+  };
+  const capabilityTasks = Array.from(new Set(expectedTrackingEvents.map((event) => event.capability))).map((capability) => {
+    const events = expectedResults.filter((item) => item.event.capability === capability);
+    const failed = events.filter((item) => ["NOT_RECEIVED", "PARAM_INVALID", "CHAIN_INVALID"].includes(item.conclusion)).length;
+    const pending = events.filter((item) => item.conclusion === "SCENE_NOT_EXECUTED").length;
+    const guide = events[0]?.event;
+    return { capability, events, failed, pending, passed: events.length - failed - pending, guide, status: failed ? "异常" : pending ? "待操作" : "已完成" };
+  });
+  const visibleExpectedResults = expectedResults.filter((item) => {
+    const matchesCapability = selectedTestCapability === "all" || item.event.capability === selectedTestCapability;
+    const matchesResult = trackingResultFilter === "all"
+      || (trackingResultFilter === "passed" && item.conclusion === "PASSED")
+      || (trackingResultFilter === "failed" && ["NOT_RECEIVED", "PARAM_INVALID", "CHAIN_INVALID"].includes(item.conclusion))
+      || (trackingResultFilter === "pending" && item.conclusion === "SCENE_NOT_EXECUTED");
+    return matchesCapability && matchesResult;
+  });
+
+  function changeTrackingProduct(nextProject: string) {
+    onProjectChange(nextProject);
+    const nextConfig = configs.find((config) => config.status === "PUBLISHED" && config.projects.includes(nextProject));
+    setTrackingConfigId(nextConfig?.id ?? "");
+    setSelectedTestCapability("all");
+    setTrackingResultFilter("all");
+  }
   const admobRows: Record<AdMobDimension, string[][]> = {
     format: [["插屏","128,420","100%","72.4%","90,216","21,904","4.12","$38.42","$3,466","正常"],["激励视频","31,842","99.8%","81.6%","25,912","12,404","2.09","$42.18","$1,093","正常"],["Banner","41,682","100%","51.4%","21,500","18,621","1.15","$12.19","$262","预警"]],
     placement: [["vpn_connect_success","86,204","100%","74.8%","62,104","18,406","3.37","$41.20","$2,558","正常"],["vpn_home_banner","41,682","100%","51.4%","21,500","18,621","1.15","$12.19","$262","预警"],["server_select","38,214","99.7%","67.2%","24,908","9,682","2.57","$36.44","$908","正常"],["vpn_disconnect","35,844","100%","76.5%","29,116","8,204","3.55","$37.54","$1,093","正常"]],
@@ -358,18 +373,31 @@ function ModulePage({ module, project, configs, onProjectChange, openModule, ope
 
   if (module === "tracking") return (
     <div className="page-stack">
-      <section className="acceptance-flow">{[["选择项目与配置",`${project} · CFG-VPN-1.8-PROD`],["冻结应收快照","SNP-VPN-180-001 · 80事件"],["执行测试场景",`${selectedTracking.scenes.filter((scene) => scene.status !== "未执行").length}/${selectedTracking.scenes.length} 已执行`],["采集与逐项校验","74/80 已收到"],["反馈与发布门禁","BLOCKED"]].map((row,index) => <div key={row[0]} className={index < 2 ? "done" : index === 2 ? "current" : ""}><span>{index<2?"✓":index+1}</span><strong>{row[0]}</strong><small>{row[1]}</small></div>)}</section>
-      <section className="run-banner"><div><strong>RUN-20260812-{project.replaceAll("-","").slice(0,8)}-001</strong><p>{displayProfile.version} · Pixel 8 · {selectedTracking.spec}</p></div><span><i />实时采集中</span><Badge tone="blue">80/100配置覆盖</Badge><button onClick={() => notify("验收 Run 已暂停")}>暂停</button><button onClick={() => notify("已生成当前验收报告")}>生成报告</button></section>
-      <section className="run-config-strip surface"><div><span>配置名称</span><strong>VPN 正式版打点配置 V1.8</strong><small>config_id · CFG-VPN-1.8-PROD</small></div><div><span>不可变快照</span><strong>SNP-VPN-180-001</strong><small>发布于 2026-08-12 15:40</small></div><div><span>判定范围</span><strong>80 个事件 · 12 个场景</strong><small>P0 45 · P1 25 · P2 10</small></div><div><span>当前结果</span><strong>74收到 · 3未收到</strong><small>2未执行 · 1参数错 · 1链路错</small></div></section>
-      <section className="metric-grid six"><Metric label="配置覆盖" value="80/100" note="只验收已选80个" /><Metric label="收到事件" value="74" note="应收80 · 未收到3" /><Metric label="未执行" value="2" note="不计作未收到" /><Metric label="参数错误" value="1" note="P0缺失阻断" tone="bad" /><Metric label="关联链错误" value="1" note="Context不完整" tone="bad" /><Metric label="发布门禁" value="BLOCKED" note="P0通过率97.8%" tone="bad" /></section>
-      <section className="tracking-layout"><div className="surface"><div className="surface-title"><div><h2>测试场景</h2><p>来自所选配置快照；未执行场景不误判为漏打</p></div><Badge tone="blue">{selectedTracking.category}</Badge></div><div className="scene-list">{selectedTracking.scenes.map((scene,index) => <button key={scene.name} className={activeSceneIndex === index ? "selected" : ""} onClick={() => { setSelectedScene(index); setTrackingOnlyIssues(false); }}><div><strong>{scene.name}</strong><small>{scene.progress}事件</small></div><Badge tone={scene.tone}>{scene.status}</Badge><div className="scene-progress"><i style={{width:scene.status==="通过"?"100%":scene.status==="执行中"?"70%":"0%"}} /></div></button>)}</div></div><div className="surface"><div className="surface-title"><div><h2>{activeScene.name} · 事件验收矩阵</h2><p>逐项标记收到、未收到、未执行、参数错误和链路错误</p></div><button className={`text-button ${trackingOnlyIssues ? "active" : ""}`} onClick={() => setTrackingOnlyIssues(!trackingOnlyIssues)}>{trackingOnlyIssues ? "显示全部" : "仅看失败"}</button></div><div className="table-wrap"><table><thead><tr><th>事件</th><th>执行</th><th>接收</th><th>参数</th><th>关联链</th><th>结论</th></tr></thead><tbody>{trackingEventRows.length ? trackingEventRows.map(row => <tr key={row[0]}>{row.map((cell,index) => <td key={index}>{index===5?<Badge tone={cell==="PASSED"?"good":cell==="SCENE_NOT_EXECUTED"?"neutral":"bad"}>{cell}</Badge>:cell}</td>)}</tr>) : <tr><td colSpan={6}><div className="empty-table-state"><strong>当前场景没有失败项</strong><span>关闭“仅看失败”可查看全部已接收事件。</span></div></td></tr>}</tbody></table></div></div><aside className="surface"><div className="surface-title"><div><h2>发布门禁</h2><p>只按快照中的P0事件计算</p></div><Badge tone="bad">BLOCKED</Badge></div><div className="gate-list"><div><span>P0事件</span><strong>97.8%</strong><Badge tone="bad">失败</Badge></div><div><span>P0参数</span><strong>97.8%</strong><Badge tone="bad">失败</Badge></div><div><span>P0关联链</span><strong>97.8%</strong><Badge tone="bad">失败</Badge></div></div><div className="conclusion-block bad"><strong>主要原因</strong><p>已执行场景中3个事件未收到，另有1个P0参数和1条Context关联链不完整。</p></div><button className="primary-button full" onClick={() => openDialog("retest-run")}>发起失败项重测</button></aside></section>
+      <section className="tracking-product-selector surface">
+        <div><span className="eyebrow">第一步 · 选择需要验收的产品</span><h2>产品打点测试执行助手</h2><p>系统根据“产品 + 已发布配置快照”生成应测事件和可执行操作，不再按品类总事件数验收。</p></div>
+        <label><span>测试产品</span><select value={project} onChange={(event) => changeTrackingProduct(event.target.value)}>{projects.filter((item) => configs.some((config) => config.status === "PUBLISHED" && config.projects.includes(item.code))).map((item) => <option key={item.code} value={item.code}>{item.code} · {item.name}</option>)}</select></label>
+        <label><span>已发布配置</span><select value={selectedTrackingConfig?.id ?? ""} onChange={(event) => { setTrackingConfigId(event.target.value); setSelectedTestCapability("all"); setTrackingResultFilter("all"); }}>{compatibleTrackingConfigs.map((config) => <option key={config.id} value={config.id}>{config.name} {config.version} · {config.selectedCount}个事件</option>)}</select></label>
+        <button className="primary-button" onClick={() => openDialog("tracking-run")}>新建本次验收 Run</button>
+      </section>
+
+      {selectedTrackingConfig ? <>
+        <section className="acceptance-flow">{[["选择产品与配置",`${project} · ${selectedTrackingConfig.version}`],["冻结应收快照",`${selectedTrackingConfig.snapshotId} · ${selectedTrackingConfig.selectedCount}事件`],["按指引执行操作",`${capabilityTasks.filter((task) => task.status === "已完成").length}/${capabilityTasks.length} 类已完成`],["自动接收与校验",`${resultCounts.passed}/${selectedTrackingConfig.selectedCount} 通过`],["反馈与发布门禁",resultCounts.failed ? "BLOCKED" : "PASSED"]].map((row,index) => <div key={row[0]} className={index < 2 ? "done" : index === 2 ? "current" : ""}><span>{index<2?"✓":index+1}</span><strong>{row[0]}</strong><small>{row[1]}</small></div>)}</section>
+        <section className="run-config-strip surface"><div><span>当前产品</span><strong>{project} · {displayProfile.name}</strong><small>{displayProfile.packageName} · {displayProfile.version}</small></div><div><span>应收配置</span><strong>{selectedTrackingConfig.name} {selectedTrackingConfig.version}</strong><small>{selectedTrackingConfig.id} · {selectedTrackingConfig.snapshotId}</small></div><div><span>必须验证</span><strong>{selectedTrackingConfig.selectedCount} 个事件 · {capabilityTasks.length} 类操作</strong><small>P0 {selectedTrackingConfig.p0Count} · P1 {selectedTrackingConfig.p1Count} · P2 {selectedTrackingConfig.p2Count}</small></div><div><span>当前结果</span><strong>{resultCounts.passed}成功 · {resultCounts.failed}失败 · {resultCounts.pending}未执行</strong><small>未执行不算漏打；执行后未收到才算失败</small></div></section>
+        <section className="metric-grid six"><Metric label="需要验证" value={String(selectedTrackingConfig.selectedCount)} note={`来自 ${selectedTrackingConfig.snapshotId}`} /><Metric label="成功" value={String(resultCounts.passed)} note="事件、参数、链路均通过" tone="good" /><Metric label="失败" value={String(resultCounts.failed)} note="需按操作指引复测" tone="bad" /><Metric label="未执行" value={String(resultCounts.pending)} note="先完成对应产品操作" /><Metric label="事件通过率" value={`${((resultCounts.passed / Math.max(selectedTrackingConfig.selectedCount, 1)) * 100).toFixed(1)}%`} note="P0要求100%" tone={resultCounts.failed ? "bad" : "good"} /><Metric label="发布门禁" value={resultCounts.failed ? "BLOCKED" : "PASSED"} note={resultCounts.failed ? "存在失败事件" : "可以发布"} tone={resultCounts.failed ? "bad" : "good"} /></section>
+
+        <section className="surface"><div className="surface-title"><div><h2>操作任务</h2><p>按事件分类汇总为测试人员能执行的页面任务；完成操作后系统自动检测关联事件。</p></div><Badge tone="blue">{capabilityTasks.length} 个操作分类</Badge></div><div className="test-task-list">{capabilityTasks.map((task) => <article key={task.capability} className={`test-task-card ${task.status === "异常" ? "failed" : task.status === "待操作" ? "pending" : "passed"}`}><header><div><Badge tone={task.status === "异常" ? "bad" : task.status === "待操作" ? "warn" : "good"}>{task.status}</Badge><strong>{task.capability}测试</strong></div><span>{task.passed}/{task.events.length} 通过</span></header><dl><div><dt>操作页面</dt><dd>{task.guide?.page}</dd></div><div><dt>需要做什么</dt><dd>{task.guide?.operation}</dd></div><div><dt>建议点击</dt><dd>{task.guide?.clickTarget}</dd></div><div><dt>预期结果</dt><dd>{task.guide?.expectedResult}</dd></div></dl><footer><button className="secondary-button" onClick={() => { setSelectedTestCapability(task.capability); setTrackingResultFilter("all"); }}>查看 {task.events.length} 个事件</button><button className="primary-button" onClick={() => notify(`${task.capability}操作已标记执行，正在等待Firebase事件`)}>{task.status === "待操作" ? "开始并标记已执行" : "重新检测"}</button></footer></article>)}</div></section>
+
+        <section className="surface"><div className="surface-title"><div><h2>事件接收结果</h2><p>逐项对照所选配置中的事件；可按分类和结论筛选。</p></div><select className="compact-select" value={selectedTestCapability} onChange={(event) => setSelectedTestCapability(event.target.value)}><option value="all">全部分类</option>{capabilityTasks.map((task) => <option key={task.capability}>{task.capability}</option>)}</select></div><div className="event-result-tabs">{[["all",`全部 ${expectedResults.length}`],["passed",`成功 ${resultCounts.passed}`],["failed",`失败 ${resultCounts.failed}`],["pending",`未执行 ${resultCounts.pending}`]].map(([key,label]) => <button key={key} className={trackingResultFilter === key ? "active" : ""} onClick={() => setTrackingResultFilter(key as TrackingResultFilter)}>{label}</button>)}</div><div className="table-wrap event-result-table"><table><thead><tr><th>事件</th><th>分类 / 页面</th><th>优先级</th><th>接收</th><th>参数</th><th>关联链</th><th>结论</th><th>操作</th></tr></thead><tbody>{visibleExpectedResults.slice(0, 40).map(({ event, conclusion }) => <tr key={event.id} className={conclusion === "PASSED" ? "" : "row-warn"}><td><strong>{event.name}</strong><small>{event.id}</small></td><td><strong>{event.capability}</strong><small>{event.page}</small></td><td><Badge tone={event.priority === "P0" ? "bad" : event.priority === "P1" ? "warn" : "neutral"}>{event.priority}</Badge></td><td>{conclusion === "NOT_RECEIVED" ? "0/1" : conclusion === "SCENE_NOT_EXECUTED" ? "待操作" : "1/1"}</td><td>{conclusion === "PARAM_INVALID" ? "错误" : conclusion === "SCENE_NOT_EXECUTED" || conclusion === "NOT_RECEIVED" ? "—" : "通过"}</td><td>{conclusion === "CHAIN_INVALID" ? "错误" : conclusion === "SCENE_NOT_EXECUTED" || conclusion === "NOT_RECEIVED" ? "—" : "通过"}</td><td><Badge tone={conclusion === "PASSED" ? "good" : conclusion === "SCENE_NOT_EXECUTED" ? "neutral" : "bad"}>{conclusion}</Badge></td><td><button className="text-button" onClick={() => { setSelectedTestCapability(event.capability); setTrackingResultFilter(conclusion === "PASSED" ? "passed" : conclusion === "SCENE_NOT_EXECUTED" ? "pending" : "failed"); }}>查看指引</button></td></tr>)}</tbody></table>{visibleExpectedResults.length > 40 && <div className="table-more-note">当前展示前40项，共 {visibleExpectedResults.length} 项；可按分类或结果缩小范围。</div>}</div></section>
+
+        {(resultCounts.failed > 0 || resultCounts.pending > 0) && <section className="surface"><div className="surface-title"><div><h2>失败与未执行操作指引</h2><p>失败项告诉测试人员“在哪里操作、点哪里、应该收到什么”；未执行项不计作漏打。</p></div><button className="primary-button" onClick={() => openDialog("retest-run")}>发起失败项重测</button></div><div className="failure-guidance">{expectedResults.filter((item) => item.conclusion !== "PASSED").map(({ event, conclusion }) => <article key={event.id}><div className="failure-title"><Badge tone={conclusion === "SCENE_NOT_EXECUTED" ? "warn" : "bad"}>{conclusion}</Badge><strong>{event.name}</strong><span>{event.capability} · {event.priority}</span></div><div className="failure-reason"><strong>{conclusion === "SCENE_NOT_EXECUTED" ? "尚未执行产品操作" : conclusion === "NOT_RECEIVED" ? "已执行操作，但Firebase未收到事件" : conclusion === "PARAM_INVALID" ? "事件已收到，但必填参数不合规" : "事件已收到，但Context关联链不完整"}</strong><p>{conclusion === "SCENE_NOT_EXECUTED" ? "先按下方路径操作，再开始等待事件；当前不计入漏打。" : "按下方路径重新操作并检测；仍失败时交给对应客户端模块负责人。"}</p></div><dl><div><dt>在哪里操作</dt><dd>{event.page}</dd></div><div><dt>执行什么</dt><dd>{event.operation}</dd></div><div><dt>建议点击哪里</dt><dd>{event.clickTarget}</dd></div><div><dt>完成后应收到</dt><dd><code>{event.name}</code> · {event.expectedResult}</dd></div></dl><footer><button onClick={() => notify(`${event.name} 已标记场景执行，等待事件上报`)}>标记操作已执行</button><button onClick={() => notify(`${event.name} 已重新检测，最近30秒暂无新事件`)}>重新检测</button></footer></article>)}</div></section>}
+      </> : <section className="surface empty-table-state"><strong>当前产品没有已发布的打点配置</strong><span>请先在“规范与项目配置”中关联项目、选择事件并发布配置快照。</span><button className="primary-button" onClick={() => openModule("config")}>去配置</button></section>}
     </div>
   );
 
   if (module === "config") return (
     <div className="page-stack">
-      <section className="config-head surface"><div><div className="eyebrow">事件主库 → 配置 → 发布快照 → 验收Run</div><h2>打点配置管理</h2><p>从全量100个事件中选择本版本需要的事件；只有已发布配置才能被测试任务引用</p></div><div><Badge tone="blue">事件主库 100</Badge><button className="primary-button" onClick={() => openDialog("config-version")}>＋ 新建打点配置</button></div></section>
-      <section className="surface"><div className="surface-title"><div><h2>配置版本</h2><p>发布后生成不可变 snapshot_id；修改配置必须创建新版本，历史Run不受影响</p></div><Badge tone="neutral">共 {configs.length} 个版本</Badge></div><div className="table-wrap"><table><thead><tr><th>配置名称 / ID</th><th>版本</th><th>品类</th><th>关联项目</th><th>已选 / 全量</th><th>P0 / P1 / P2</th><th>场景</th><th>状态</th><th>快照</th><th>操作</th></tr></thead><tbody>{configs.map((config) => <tr key={config.id} className={`clickable-row ${selectedConfigRecord.id === config.id ? "row-selected" : ""}`} onClick={() => setSelectedConfigId(config.id)}><td><strong>{config.name}</strong><small>{config.id}</small></td><td>{config.version}</td><td>{config.category}</td><td>{config.projects.join("、")}</td><td><strong>{config.selectedCount} / {config.totalCount}</strong><small>配置覆盖 {config.selectedCount}%</small></td><td>{config.p0Count} / {config.p1Count} / {config.p2Count}</td><td>{config.sceneCount}</td><td><Badge tone={config.status === "PUBLISHED" ? "good" : config.status === "REVIEWING" ? "blue" : "warn"}>{config.status === "PUBLISHED" ? "已发布" : config.status === "REVIEWING" ? "评审中" : "草稿"}</Badge></td><td>{config.snapshotId ? <strong>{config.snapshotId}</strong> : "—"}</td><td><div className="row-actions"><button onClick={(event) => { event.stopPropagation(); openDialog("config-version"); }}>复制/编辑</button>{config.status === "DRAFT" && <button onClick={(event) => { event.stopPropagation(); openDialog("publish-approval"); }}>发布</button>}<button onClick={(event) => { event.stopPropagation(); notify(`${config.id} 详情已展开`); }}>详情</button></div></td></tr>)}</tbody></table></div></section>
+      <section className="config-head surface"><div><div className="eyebrow">事件主库 → 分类勾选/单点剔除 → 配置 → 发布快照 → 验收Run</div><h2>打点配置管理</h2><p>从全量100个事件中按分类整选，也可取消单个事件；草稿可反复编辑，只有已发布配置才能被测试任务引用。</p></div><div><Badge tone="blue">事件主库 100</Badge><button className="primary-button" onClick={() => openConfigEditor(null)}>＋ 新建打点配置</button></div></section>
+      <section className="surface"><div className="surface-title"><div><h2>配置版本</h2><p>草稿可原地编辑；发布后生成不可变 snapshot_id，修改已发布配置时会复制为新版本。</p></div><Badge tone="neutral">共 {configs.length} 个版本</Badge></div><div className="table-wrap"><table><thead><tr><th>配置名称 / ID</th><th>版本</th><th>品类</th><th>关联项目</th><th>已选 / 全量</th><th>P0 / P1 / P2</th><th>场景</th><th>状态</th><th>快照</th><th>操作</th></tr></thead><tbody>{configs.map((config) => <tr key={config.id} className={`clickable-row ${selectedConfigRecord.id === config.id ? "row-selected" : ""}`} onClick={() => setSelectedConfigId(config.id)}><td><strong>{config.name}</strong><small>{config.id}</small></td><td>{config.version}</td><td>{config.category}</td><td>{config.projects.join("、")}</td><td><strong>{config.selectedCount} / {config.totalCount}</strong><small>配置覆盖 {config.selectedCount}%</small></td><td>{config.p0Count} / {config.p1Count} / {config.p2Count}</td><td>{config.sceneCount}</td><td><Badge tone={config.status === "PUBLISHED" ? "good" : config.status === "REVIEWING" ? "blue" : "warn"}>{config.status === "PUBLISHED" ? "已发布" : config.status === "REVIEWING" ? "评审中" : "草稿"}</Badge></td><td>{config.snapshotId ? <strong>{config.snapshotId}</strong> : "—"}</td><td><div className="row-actions"><button onClick={(event) => { event.stopPropagation(); openConfigEditor(config); }}>{config.status === "PUBLISHED" ? "复制为新版本" : "编辑草稿"}</button>{config.status === "DRAFT" && <button onClick={(event) => { event.stopPropagation(); openConfigEditor(config); }}>编辑并发布</button>}<button onClick={(event) => { event.stopPropagation(); notify(`${config.id} 详情已展开`); }}>详情</button></div></td></tr>)}</tbody></table></div></section>
       <section className="selected-config-summary surface"><div><span>当前查看</span><strong>{selectedConfigRecord.name} {selectedConfigRecord.version}</strong><small>{selectedConfigRecord.id}</small></div><div><span>事件范围</span><strong>{selectedConfigRecord.selectedCount}/{selectedConfigRecord.totalCount}</strong><small>仅这 {selectedConfigRecord.selectedCount} 个进入验收分母</small></div><div><span>优先级</span><strong>P0 {selectedConfigRecord.p0Count} · P1 {selectedConfigRecord.p1Count} · P2 {selectedConfigRecord.p2Count}</strong><small>P0必须100%</small></div><div><span>发布引用</span><strong>{selectedConfigRecord.snapshotId ?? "尚未生成"}</strong><small>{selectedConfigRecord.status === "PUBLISHED" ? "可用于新建验收Run" : "发布后才可用于测试"}</small></div></section>
       <section className="config-layout"><div className="surface"><div className="surface-title"><div><h2>项目主品类</h2><p>作为配置筛选模板，不直接决定验收分母</p></div><button className="text-button" onClick={() => openDialog("project-category")}>＋新增</button></div><div className="category-list">{[["套利 VPN","v1.7 · 14项目","连接、权限、服务器、协议、连接广告"],["清理","v1.5 · 8项目","扫描、清理、结果、大小、清理广告"],["Launcher","v1.3 · 6项目","引导、默认桌面、主题、桌面交互"]].map((row)=><button key={row[0]} className={selectedCategory===row[0]?"selected":""} onClick={()=>setSelectedCategory(row[0])}><strong>{row[0]}</strong><span>{row[1]}</span><small>{row[2]}</small></button>)}</div></div><div className="surface"><div className="surface-title"><div><h2>{selectedConfigRecord.name} · 范围组成</h2><p>配置最终范围来自人工选择，并保留能力包来源</p></div><Badge tone="blue">{selectedConfigRecord.selectedCount}事件</Badge></div><div className="resolution-list"><div><span>公共基础包</span><strong>生命周期、会话、网络</strong><em>18</em></div><div><span>主品类建议</span><strong>{selectedConfigRecord.category} 当前版本</strong><em>22</em></div><div><span>能力包建议</span><strong>广告＋VPN＋订阅</strong><em>44</em></div><div><span>人工取消</span><strong>本版本不适用事件</strong><em>-7</em></div><div><span>项目追加</span><strong>特定业务与诊断事件</strong><em>+3</em></div></div><div className="conclusion-block good"><strong>最终选择 {selectedConfigRecord.selectedCount}/100</strong><p>能力包只负责推荐；最终以配置中逐项勾选并发布的事件快照为准。</p></div></div><aside className="surface"><div className="surface-title"><div><h2>发布检查</h2><p>规则完整性</p></div></div><div className="publish-checks"><div><span>✓</span><p>已选择{selectedConfigRecord.selectedCount}个事件并完成优先级</p></div><div><span>✓</span><p>{selectedConfigRecord.sceneCount}个场景均绑定应测事件</p></div><div><span>✓</span><p>P0参数和关联链已配置</p></div><div><span>{selectedConfigRecord.status === "PUBLISHED" ? "✓" : "!"}</span><p>{selectedConfigRecord.status === "PUBLISHED" ? `已生成快照 ${selectedConfigRecord.snapshotId}` : "尚未发布，不能创建验收Run"}</p></div></div><button className="primary-button full" onClick={() => selectedConfigRecord.status === "PUBLISHED" ? notify(`${selectedConfigRecord.snapshotId} 为只读快照`) : openDialog("publish-approval")}>{selectedConfigRecord.status === "PUBLISHED" ? "查看发布快照" : "校验并发布"}</button></aside></section>
       <section className="surface"><div className="surface-title"><div><h2>事件与字段包</h2><p>切换查看事件、字段、枚举和Provider，不再使用静态页签</p></div><div className="dimension-tabs">{[["events","事件"],["fields","公共字段"],["enums","枚举"],["providers","Provider"]].map(([key,label])=><button key={key} className={configPackageTab===key?"active":""} onClick={()=>setConfigPackageTab(key as ConfigPackageTab)}>{label}</button>)}</div></div><div className="table-wrap"><table><thead><tr>{configTables[configPackageTab].headers.map(header=><th key={header}>{header}</th>)}</tr></thead><tbody>{configTables[configPackageTab].rows.map(row => <tr key={row[0]}>{row.map((cell,index)=><td key={index}>{(cell==="P0"||cell==="条件P0")?<Badge tone="bad">{cell}</Badge>:(["已发布","正常"].includes(cell))?<Badge tone="good">{cell}</Badge>:cell==="预警"?<Badge tone="warn">{cell}</Badge>:cell}</td>)}</tr>)}</tbody></table></div></section>
@@ -457,6 +485,7 @@ export default function Home() {
   const [filtersApplied, setFiltersApplied] = useState(0);
   const [dialog, setDialog] = useState<DialogKey | null>(null);
   const [configRecords, setConfigRecords] = useState<TrackingConfigRecord[]>(trackingConfigs);
+  const [editingConfig, setEditingConfig] = useState<TrackingConfigRecord | null>(null);
 
   useEffect(() => {
     if (!dialog) return;
@@ -521,6 +550,11 @@ export default function Home() {
     if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
+  function openConfigEditor(config: TrackingConfigRecord | null) {
+    setEditingConfig(config);
+    setDialog("config-version");
+  }
+
   function resetFilters() {
     setProject("IRAN-VPN-01");
     setRange("今天");
@@ -539,7 +573,7 @@ export default function Home() {
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <div className="brand"><span className="brand-mark">JK</span><span><strong>变现与埋点</strong><small>质量分析中心 · V9</small></span></div>
+        <div className="brand"><span className="brand-mark">JK</span><span><strong>变现与埋点</strong><small>质量分析中心 · V10</small></span></div>
         <div className="nav-group-label">经营分析</div>
         {moduleMenus.filter((item) => item.group === "经营分析").map((item) => <button key={item.key} className={`main-nav-item ${module === item.key ? "active" : ""}`} onClick={() => openModule(item.key)}><span>{item.index}</span>{item.label}</button>)}
         <div className="nav-group-label">质量治理</div>
@@ -556,7 +590,7 @@ export default function Home() {
         <main className="main-content">
           <section className="page-heading">
             <div><h1>{currentModule.title}</h1><p>{currentModule.description}</p></div>
-            <div className="heading-actions"><button className="secondary-button" onClick={() => module === "funnel" ? go("snapshot") : notify("数据已刷新至最新水位")}>{module === "funnel" ? "查看口径 V1.7" : "刷新数据"}</button><button className="primary-button" onClick={() => setDialog(moduleDialog[module])}>{["project", "funnel", "tracking", "config", "tasks"].includes(module) ? "＋ " : ""}{currentModule.action}</button></div>
+            <div className="heading-actions"><button className="secondary-button" onClick={() => module === "funnel" ? go("snapshot") : notify("数据已刷新至最新水位")}>{module === "funnel" ? "查看口径 V1.7" : "刷新数据"}</button><button className="primary-button" onClick={() => module === "config" ? openConfigEditor(null) : setDialog(moduleDialog[module])}>{["project", "funnel", "tracking", "config", "tasks"].includes(module) ? "＋ " : ""}{currentModule.action}</button></div>
           </section>
 
           {module === "funnel" && <section className="workflow-strip" aria-label="漏斗诊断流程">
@@ -589,7 +623,7 @@ export default function Home() {
           </section>
           <section className="freshness-note"><div><strong>数据使用提示：</strong>{sourceStatus[module].note}</div><button onClick={() => module === "funnel" ? go("snapshot") : notify(`${currentModule.title}数据口径说明已展开`)}>查看数据口径</button></section>
 
-          {module !== "funnel" && <ModulePage module={module as Exclude<ModuleKey, "funnel">} project={project} configs={configRecords} onProjectChange={setProject} openModule={openModule} openDialog={setDialog} notify={notify} />}
+          {module !== "funnel" && <ModulePage module={module as Exclude<ModuleKey, "funnel">} project={project} configs={configRecords} onProjectChange={setProject} openModule={openModule} openDialog={setDialog} openConfigEditor={openConfigEditor} notify={notify} />}
 
           {module === "funnel" && page === "overview" && (
             <div className="page-stack">
@@ -844,32 +878,36 @@ export default function Home() {
           )}
         </main>
       </div>
-      {dialog && <ActionDialog dialog={dialog} project={project} configs={configRecords} onClose={() => setDialog(null)} onSubmit={(result: DialogResult) => {
+      {dialog && <ActionDialog dialog={dialog} project={project} configs={configRecords} editingConfig={dialog === "config-version" ? editingConfig : null} onClose={() => { setDialog(null); setEditingConfig(null); }} onSubmit={(result: DialogResult) => {
         if (dialog === "retest-run" || dialog === "tracking-run") setIssueStatus("重测中");
         if (dialog === "config-version") {
           const projectCodes = Array.isArray(result.payload.project_codes) ? result.payload.project_codes : [String(result.payload.project_codes ?? project)];
           const categoryCode = String(result.payload.category_code ?? "vpn");
           const version = String(result.payload.config_version ?? "V1.8");
-          const snapshotId = `SNP-${categoryCode.toUpperCase()}-${version.replace(/\D/g, "")}-${String(configRecords.length + 1).padStart(3, "0")}`;
+          const publish = result.payload.save_action !== "draft";
+          const existingConfigId = String(result.payload.existing_config_id ?? "");
+          const snapshotId = publish ? `SNP-${categoryCode.toUpperCase()}-${version.replace(/\D/g, "")}-${String(configRecords.length + 1).padStart(3, "0")}` : undefined;
+          const platformCode = String(result.payload.platform_scope ?? "android_ios");
           const createdConfig: TrackingConfigRecord = {
-            id: result.id,
+            id: existingConfigId || result.id,
             name: String(result.payload.config_name ?? "新建打点配置"),
             version,
             category: categoryCode === "clean" ? "清理" : categoryCode === "launcher" ? "Launcher" : "套利 VPN",
             projects: projectCodes,
-            platform: String(result.payload.platform_scope ?? "android_ios"),
+            platform: platformCode === "android" ? "Android" : platformCode === "ios" ? "iOS" : "Android+iOS",
             selectedCount: Number(result.payload.selected_event_count ?? 0),
             totalCount: 100,
             p0Count: Number(result.payload.p0_event_count ?? 0),
             p1Count: Number(result.payload.p1_event_count ?? 0),
             p2Count: Number(result.payload.p2_event_count ?? 0),
-            sceneCount: 12,
-            status: "PUBLISHED",
+            sceneCount: new Set(trackingEventCatalog.filter((event) => (result.payload.event_ids as string[] | undefined)?.includes(event.id)).map((event) => event.scene)).size,
+            selectedEventIds: Array.isArray(result.payload.event_ids) ? result.payload.event_ids : [],
+            status: publish ? "PUBLISHED" : "DRAFT",
             snapshotId,
             updatedBy: "Oliver",
             updatedAt: "刚刚",
           };
-          setConfigRecords((records) => [createdConfig, ...records]);
+          setConfigRecords((records) => existingConfigId ? records.map((record) => record.id === existingConfigId ? createdConfig : record) : [createdConfig, ...records]);
         }
         notify(`${result.message} · ${result.id}`);
       }} />}

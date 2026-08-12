@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { defaultSelectedEventIds, trackingConfigs, trackingEventCatalog, type TrackingConfigRecord } from "./tracking-config-data";
 
 export type DialogKey =
@@ -126,9 +126,23 @@ function makeResultId(prefix: string) {
   return `${prefix}-${stamp}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 }
 
-export function ActionDialog({ dialog, project, configs = trackingConfigs, onClose, onSubmit }: { dialog: DialogKey; project: string; configs?: TrackingConfigRecord[]; onClose: () => void; onSubmit: (result: DialogResult) => void }) {
+function nextConfigVersion(version: string) {
+  const match = version.match(/^V(\d+)\.(\d+)$/);
+  return match ? `V${match[1]}.${Number(match[2]) + 1}` : "V1.0";
+}
+
+function configCategoryCode(category?: string) {
+  if (category === "清理") return "clean";
+  if (category === "Launcher") return "launcher";
+  return "vpn";
+}
+
+export function ActionDialog({ dialog, project, configs = trackingConfigs, editingConfig = null, onClose, onSubmit }: { dialog: DialogKey; project: string; configs?: TrackingConfigRecord[]; editingConfig?: TrackingConfigRecord | null; onClose: () => void; onSubmit: (result: DialogResult) => void }) {
   const meta = dialogMeta[dialog];
   const isDictionary = dialog === "event-dictionary";
+  const isEditingDraft = dialog === "config-version" && editingConfig?.status === "DRAFT";
+  const isCopyingPublished = dialog === "config-version" && editingConfig?.status === "PUBLISHED";
+  const formRef = useRef<HTMLFormElement>(null);
   const [phase, setPhase] = useState<"form" | "submitting" | "success">("form");
   const [errors, setErrors] = useState<string[]>([]);
   const [result, setResult] = useState<DialogResult | null>(null);
@@ -140,7 +154,7 @@ export function ActionDialog({ dialog, project, configs = trackingConfigs, onClo
   const [configKeyword, setConfigKeyword] = useState("");
   const [configCapability, setConfigCapability] = useState("all");
   const [configSelectionView, setConfigSelectionView] = useState<"all" | "selected" | "warning">("all");
-  const [selectedConfigEventIds, setSelectedConfigEventIds] = useState<string[]>(defaultSelectedEventIds);
+  const [selectedConfigEventIds, setSelectedConfigEventIds] = useState<string[]>(editingConfig?.selectedEventIds ?? defaultSelectedEventIds);
   const [runProject, setRunProject] = useState(project);
   const firstRunConfig = configs.find((config) => config.status === "PUBLISHED" && config.projects.includes(project)) ?? configs.find((config) => config.status === "PUBLISHED")!;
   const [runConfigId, setRunConfigId] = useState(firstRunConfig?.id ?? "");
@@ -179,6 +193,11 @@ export function ActionDialog({ dialog, project, configs = trackingConfigs, onClo
   const visibleConfigEventPage = visibleConfigEvents.slice(0, 20);
   const visibleIds = visibleConfigEvents.map((event) => event.id);
   const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedConfigEventIds.includes(id));
+  const capabilityGroups = Array.from(new Set(trackingEventCatalog.map((event) => event.capability))).map((capability) => {
+    const eventIds = trackingEventCatalog.filter((event) => event.capability === capability).map((event) => event.id);
+    const selectedCount = eventIds.filter((id) => selectedConfigEventIds.includes(id)).length;
+    return { capability, eventIds, totalCount: eventIds.length, selectedCount, allSelected: selectedCount === eventIds.length, partial: selectedCount > 0 && selectedCount < eventIds.length };
+  });
 
   const dictionaryRows = useMemo(() => [
     ["jk_ad_request", "广告请求", "P0", "13", "稳定可得", "V1.7"],
@@ -193,7 +212,7 @@ export function ActionDialog({ dialog, project, configs = trackingConfigs, onClo
     return matchesKeyword && matchesPriority;
   });
 
-  function validate(payload: Record<string, string | string[]>) {
+  function validate(payload: Record<string, string | string[]>, saveAction: "draft" | "publish" = "publish") {
     const nextErrors: string[] = [];
     const requireOne = (key: string, message: string) => { if (!payload[key] || (Array.isArray(payload[key]) && payload[key].length === 0)) nextErrors.push(message); };
     if (["project-report", "admob-report"].includes(dialog)) {
@@ -209,7 +228,7 @@ export function ActionDialog({ dialog, project, configs = trackingConfigs, onClo
       if (selectedConfigEventIds.length === 0) nextErrors.push("请至少选择一个应测事件");
       if (selectedPriorityCounts.P0 === 0) nextErrors.push("当前配置至少需要一个 P0 事件");
       requireOne("project_codes", "请至少关联一个项目");
-      if (payload.confirm_immutable_snapshot !== "1") nextErrors.push("请确认发布快照不可直接修改");
+      if (saveAction === "publish" && payload.confirm_immutable_snapshot !== "1") nextErrors.push("请确认发布快照不可直接修改");
     }
     if (dialog === "tracking-run") {
       if (!selectedRunConfig) nextErrors.push("当前项目没有可用的已发布打点配置，请先发布配置快照");
@@ -220,19 +239,51 @@ export function ActionDialog({ dialog, project, configs = trackingConfigs, onClo
     return nextErrors;
   }
 
+  function buildConfigPayload(payload: Record<string, string | string[]>, saveAction: "draft" | "publish") {
+    payload.event_ids = selectedConfigEventIds;
+    payload.selected_event_count = String(selectedConfigEventIds.length);
+    payload.p0_event_count = String(selectedPriorityCounts.P0);
+    payload.p1_event_count = String(selectedPriorityCounts.P1);
+    payload.p2_event_count = String(selectedPriorityCounts.P2);
+    payload.snapshot_mode = "immutable_on_publish";
+    payload.save_action = saveAction;
+    if (isEditingDraft && editingConfig) payload.existing_config_id = editingConfig.id;
+    if (isCopyingPublished && editingConfig) payload.base_config_id = editingConfig.id;
+    return payload;
+  }
+
+  function completeSubmission(payload: Record<string, string | string[]>, saveAction: "draft" | "publish" = "publish") {
+    const nextErrors = validate(payload, saveAction);
+    if (nextErrors.length) {
+      setErrors(nextErrors);
+      return;
+    }
+    setErrors([]);
+    setPhase("submitting");
+    window.setTimeout(() => {
+      const actionTitle = dialog === "config-version" ? (saveAction === "draft" ? "打点配置草稿" : "打点配置快照") : meta.title;
+      const created: DialogResult = {
+        id: isEditingDraft && editingConfig ? editingConfig.id : makeResultId(meta.prefix),
+        idLabel: meta.idLabel,
+        title: actionTitle,
+        message: saveAction === "draft" ? `${actionTitle}已保存，可继续编辑` : `${actionTitle}已创建`,
+        endpoint: meta.endpoint,
+        payload,
+      };
+      setResult(created);
+      setPhase("success");
+      onSubmit(created);
+    }, 520);
+  }
+
   function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (isDictionary) return onClose();
     const form = event.currentTarget;
     if (!form.reportValidity()) return;
-    const payload = normalizeForm(form);
+    let payload = normalizeForm(form);
     if (dialog === "config-version") {
-      payload.event_ids = selectedConfigEventIds;
-      payload.selected_event_count = String(selectedConfigEventIds.length);
-      payload.p0_event_count = String(selectedPriorityCounts.P0);
-      payload.p1_event_count = String(selectedPriorityCounts.P1);
-      payload.p2_event_count = String(selectedPriorityCounts.P2);
-      payload.snapshot_mode = "immutable_on_publish";
+      payload = buildConfigPayload(payload, "publish");
     }
     if (dialog === "tracking-run" && selectedRunConfig) {
       payload.tracking_config_id = selectedRunConfig.id;
@@ -242,26 +293,20 @@ export function ActionDialog({ dialog, project, configs = trackingConfigs, onClo
       payload.p0_event_count = String(selectedRunConfig.p0Count);
       payload.expected_scene_count = String(selectedRunConfig.sceneCount);
     }
-    const nextErrors = validate(payload);
-    if (nextErrors.length) {
-      setErrors(nextErrors);
+    completeSubmission(payload);
+  }
+
+  function saveConfigDraft() {
+    const form = formRef.current;
+    if (!form) return;
+    const basicFields = Array.from(form.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('[name="config_name"], [name="config_version"], [name="category_code"], [name="project_codes"], [name="platform_scope"]'));
+    const invalid = basicFields.find((input) => input.required && !input.checkValidity());
+    if (invalid) {
+      invalid.reportValidity();
       return;
     }
-    setErrors([]);
-    setPhase("submitting");
-    window.setTimeout(() => {
-      const created: DialogResult = {
-        id: makeResultId(meta.prefix),
-        idLabel: meta.idLabel,
-        title: meta.title,
-        message: `${meta.title}已创建`,
-        endpoint: meta.endpoint,
-        payload,
-      };
-      setResult(created);
-      setPhase("success");
-      onSubmit(created);
-    }, 520);
+    const payload = buildConfigPayload(normalizeForm(form), "draft");
+    completeSubmission(payload, "draft");
   }
 
   function nextConfigStep() {
@@ -332,10 +377,18 @@ export function ActionDialog({ dialog, project, configs = trackingConfigs, onClo
       : Array.from(new Set([...current, ...visibleIds])));
   }
 
+  function toggleCapability(capability: string) {
+    const group = capabilityGroups.find((item) => item.capability === capability);
+    if (!group) return;
+    setSelectedConfigEventIds((current) => group.allSelected
+      ? current.filter((id) => !group.eventIds.includes(id))
+      : Array.from(new Set([...current, ...group.eventIds])));
+  }
+
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
       <section className={`modal-panel modal-panel-v5 ${dialog === "config-version" ? "modal-panel-config-wizard" : ""}`} role="dialog" aria-modal="true" aria-labelledby="action-dialog-title">
-        <header><div><div className="dialog-version">V9 · 配置快照工作流</div><h2 id="action-dialog-title">{phase === "success" ? `${meta.title}成功` : meta.title}</h2><p>{phase === "success" ? "系统已返回业务ID，后续状态可在对应任务或配置页面追踪。" : meta.description}</p></div><button type="button" aria-label="关闭弹窗" onClick={onClose}>×</button></header>
+        <header><div><div className="dialog-version">V10 · 分类配置与操作验收</div><h2 id="action-dialog-title">{phase === "success" ? `${result?.title ?? meta.title}成功` : dialog === "config-version" ? isEditingDraft ? "编辑打点配置草稿" : isCopyingPublished ? "复制为新配置版本" : meta.title : meta.title}</h2><p>{phase === "success" ? "系统已返回业务ID，后续状态可在对应任务或配置页面追踪。" : meta.description}</p></div><button type="button" aria-label="关闭弹窗" onClick={onClose}>×</button></header>
 
         {phase === "success" && result ? (
           <div className="dialog-result">
@@ -348,7 +401,7 @@ export function ActionDialog({ dialog, project, configs = trackingConfigs, onClo
             <footer><button type="button" className="secondary-button" onClick={onClose}>关闭</button><button type="button" className="primary-button" onClick={onClose}>进入详情页</button></footer>
           </div>
         ) : (
-          <form onSubmit={submit} noValidate={false}>
+          <form ref={formRef} onSubmit={submit} noValidate={false}>
             <div className="modal-body">
               {errors.length > 0 && <div className="form-errors" role="alert"><strong>请完成以下内容</strong>{errors.map((error) => <p key={error}>• {error}</p>)}</div>}
 
@@ -432,18 +485,19 @@ export function ActionDialog({ dialog, project, configs = trackingConfigs, onClo
 
               {dialog === "config-version" && <>
                 <div className={`modal-form-grid config-step-panel ${configStep === 1 ? "" : "config-step-hidden"}`}>
-                  <Field label="配置名称" required span><input name="config_name" defaultValue="VPN 正式版打点配置" maxLength={80} required /></Field>
-                  <Field label="配置版本" required help="同一品类内唯一"><input name="config_version" defaultValue="V1.8" pattern="^V[0-9]+\.[0-9]+$" required /></Field>
-                  <Field label="适用品类" required><select name="category_code" required><option value="vpn">套利 VPN</option><option value="clean">清理</option><option value="launcher">Launcher</option></select></Field>
-                  <Field label="关联项目" required span help="发布后，只有这些项目可以在验收Run中选择该配置"><Checks name="project_codes" items={[{value:"IRAN-VPN-01",label:"IRAN-VPN-01",checked:true},{value:"FAST-VPN-02",label:"FAST-VPN-02",checked:true},{value:"CLEAN-MAX-03",label:"CLEAN-MAX-03"},{value:"AIVORA-LAUNCHER",label:"AIVORA-LAUNCHER"}]} /></Field>
-                  <Field label="适用平台" required><select name="platform_scope" required><option value="android_ios">Android＋iOS</option><option value="android">仅Android</option><option value="ios">仅iOS</option></select></Field>
-                  <Field label="基础配置"><select name="base_config_id"><option value="CFG-VPN-1.7-PROD">VPN 正式版 V1.7（复制80项）</option><option value="blank">空白配置</option></select></Field>
+                  <Field label="配置名称" required span><input name="config_name" defaultValue={editingConfig ? `${editingConfig.name}${isCopyingPublished ? " - 新版本" : ""}` : "VPN 正式版打点配置"} maxLength={80} required /></Field>
+                  <Field label="配置版本" required help="同一品类内唯一"><input name="config_version" defaultValue={editingConfig ? isCopyingPublished ? nextConfigVersion(editingConfig.version) : editingConfig.version : "V1.8"} pattern="^V[0-9]+\.[0-9]+$" required /></Field>
+                  <Field label="适用品类" required><select name="category_code" defaultValue={configCategoryCode(editingConfig?.category)} required><option value="vpn">套利 VPN</option><option value="clean">清理</option><option value="launcher">Launcher</option></select></Field>
+                  <Field label="关联项目" required span help="发布后，只有这些项目可以在验收Run中选择该配置"><Checks name="project_codes" items={[{value:"IRAN-VPN-01",label:"IRAN-VPN-01",checked:editingConfig ? editingConfig.projects.includes("IRAN-VPN-01") : true},{value:"FAST-VPN-02",label:"FAST-VPN-02",checked:editingConfig ? editingConfig.projects.includes("FAST-VPN-02") : true},{value:"CLEAN-MAX-03",label:"CLEAN-MAX-03",checked:editingConfig?.projects.includes("CLEAN-MAX-03")},{value:"AIVORA-LAUNCHER",label:"AIVORA-LAUNCHER",checked:editingConfig?.projects.includes("AIVORA-LAUNCHER")}]} /></Field>
+                  <Field label="适用平台" required><select name="platform_scope" defaultValue={editingConfig?.platform === "Android" || editingConfig?.platform === "android" ? "android" : editingConfig?.platform === "iOS" || editingConfig?.platform === "ios" ? "ios" : "android_ios"} required><option value="android_ios">Android＋iOS</option><option value="android">仅Android</option><option value="ios">仅iOS</option></select></Field>
+                  <Field label="基础配置"><select name="base_config_id" defaultValue={editingConfig?.id ?? "CFG-VPN-1.7-PROD"}><option value={editingConfig?.id ?? "CFG-VPN-1.7-PROD"}>{editingConfig ? `${editingConfig.name} ${editingConfig.version}` : "VPN 正式版 V1.7（复制80项）"}</option><option value="blank">空白配置</option></select></Field>
                   <Field label="负责人" required><select name="owner_user_id" required><option value="u_oliver">数据产品 / Oliver</option><option value="team_client_arch">客户端架构组</option></select></Field>
                   <Field label="计划发布时间" required><input name="planned_release_date" type="date" defaultValue="2026-08-18" required /></Field>
-                  <Field label="配置说明" required span><textarea name="description" defaultValue="从全量100个事件中选择本版本必须实现并验收的80个事件。" required /></Field>
+                  <Field label="配置说明" required span><textarea name="description" defaultValue={`从全量100个事件中选择本版本必须实现并验收的${editingConfig?.selectedCount ?? 80}个事件。`} required /></Field>
                 </div>
                 <div className={`config-event-picker config-step-panel ${configStep === 2 ? "" : "config-step-hidden"}`}>
                   <div className="picker-summary"><div><span>全量事件库</span><strong>100</strong></div><div className="selected"><span>本配置已选</span><strong>{selectedConfigEventIds.length}</strong></div><div><span>P0</span><strong>{selectedPriorityCounts.P0}</strong></div><div><span>P1</span><strong>{selectedPriorityCounts.P1}</strong></div><div><span>P2</span><strong>{selectedPriorityCounts.P2}</strong></div></div>
+                  <div className="capability-selector" aria-label="按分类选择事件">{capabilityGroups.map((group) => <button type="button" key={group.capability} className={`capability-card ${group.allSelected ? "selected" : group.partial ? "partial" : ""}`} onClick={() => toggleCapability(group.capability)} aria-pressed={group.allSelected}><span className="capability-check" aria-hidden="true">{group.allSelected ? "✓" : group.partial ? "−" : ""}</span><strong>{group.capability}</strong><small>{group.selectedCount}/{group.totalCount}</small><em>{group.allSelected ? "已全选" : group.partial ? "部分选择" : "未选择"}</em></button>)}</div>
                   <div className="picker-tools"><input value={configKeyword} onChange={(event) => setConfigKeyword(event.target.value)} placeholder="搜索事件名、阶段或Provider" /><select value={configCapability} onChange={(event) => setConfigCapability(event.target.value)}><option value="all">全部能力包</option>{Array.from(new Set(trackingEventCatalog.map((event) => event.capability))).map((capability) => <option key={capability}>{capability}</option>)}</select><div className="dimension-tabs"><button type="button" className={configSelectionView === "all" ? "active" : ""} onClick={() => setConfigSelectionView("all")}>全部</button><button type="button" className={configSelectionView === "selected" ? "active" : ""} onClick={() => setConfigSelectionView("selected")}>只看已选</button><button type="button" className={configSelectionView === "warning" ? "active" : ""} onClick={() => setConfigSelectionView("warning")}>只看冲突</button></div></div>
                   <div className="picker-bulk"><label><input type="checkbox" checked={allVisibleSelected} onChange={toggleVisibleConfigEvents} /> 全选当前筛选结果（{visibleConfigEvents.length}）</label><span>当前显示第 1–{Math.min(20, visibleConfigEvents.length)} 条，共 {visibleConfigEvents.length} 条</span></div>
                   <div className="table-wrap picker-table"><table><thead><tr><th>选择</th><th>事件名</th><th>阶段 / 能力包</th><th>级别</th><th>参数</th><th>场景</th><th>Provider</th><th>状态</th></tr></thead><tbody>{visibleConfigEventPage.map((event) => <tr key={event.id} className={selectedConfigEventIds.includes(event.id) ? "row-selected" : ""}><td><input type="checkbox" checked={selectedConfigEventIds.includes(event.id)} onChange={() => toggleConfigEvent(event.id)} aria-label={`选择${event.name}`} /></td><td><strong>{event.name}</strong><small>{event.id}</small></td><td><strong>{event.stage}</strong><small>{event.capability}</small></td><td><span className={`badge badge-${event.priority === "P0" ? "bad" : event.priority === "P1" ? "warn" : "neutral"}`}>{event.priority}</span></td><td>{event.parameterCount}</td><td>{event.scene}</td><td>{event.provider}</td><td><span className={`badge badge-${event.state === "READY" ? "good" : "warn"}`}>{event.state === "READY" ? "可用" : "待补配置"}</span></td></tr>)}</tbody></table></div>
@@ -536,6 +590,7 @@ export function ActionDialog({ dialog, project, configs = trackingConfigs, onClo
             </div>
             <footer>
               <button type="button" className="secondary-button" onClick={onClose}>取消</button>
+              {dialog === "config-version" && <button type="button" className="secondary-button" onClick={saveConfigDraft}>{phase === "submitting" ? "正在保存…" : isEditingDraft ? "保存草稿修改" : "保存草稿"}</button>}
               {dialog === "config-version" && configStep > 1 && <button type="button" className="secondary-button" onClick={() => setConfigStep((step) => Math.max(1, step - 1))}>上一步</button>}
               {dialog === "config-version" && configStep < 4 ? <button type="button" className="primary-button" onClick={nextConfigStep}>{configStep === 1 ? "下一步：选择打点" : configStep === 2 ? `下一步：确认 ${selectedConfigEventIds.length} 个事件` : "下一步：校验发布"}</button> : <button type="submit" className="primary-button" disabled={phase === "submitting"}>{phase === "submitting" ? "正在提交…" : meta.submit}</button>}
             </footer>
