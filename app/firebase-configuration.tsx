@@ -36,7 +36,7 @@ export function FirebaseConfiguration({ openDialog }: { openDialog: (dialog: Dia
   return (
     <section className="surface firebase-config-v5">
       <div className="surface-title firebase-config-head">
-        <div><div className="eyebrow">V5 · 外部数据源治理</div><h2>Firebase 多账户与 App 关联</h2><p>连接凭证 → Firebase Project → Firebase App → 公司App档案 → 项目代号</p></div>
+        <div><div className="eyebrow">V8 · 外部数据源治理</div><h2>Firebase 多账户与 App 关联</h2><p>连接凭证 → Firebase Project → Firebase App → 公司App档案 → 项目代号</p></div>
         <div className="config-actions"><button className="secondary-button" onClick={() => openDialog("firebase-connection")}>＋ 新建连接</button><button className="primary-button" onClick={() => openDialog("firebase-binding")}>＋ 关联 Firebase App</button></div>
       </div>
 

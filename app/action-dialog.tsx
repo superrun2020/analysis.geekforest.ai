@@ -236,7 +236,7 @@ export function ActionDialog({ dialog, project, onClose, onSubmit }: { dialog: D
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
       <section className="modal-panel modal-panel-v5" role="dialog" aria-modal="true" aria-labelledby="action-dialog-title">
-        <header><div><div className="dialog-version">V5 · 可实施表单</div><h2 id="action-dialog-title">{phase === "success" ? `${meta.title}成功` : meta.title}</h2><p>{phase === "success" ? "系统已返回业务ID，后续状态可在对应任务或配置页面追踪。" : meta.description}</p></div><button type="button" aria-label="关闭弹窗" onClick={onClose}>×</button></header>
+        <header><div><div className="dialog-version">V8 · 可实施表单</div><h2 id="action-dialog-title">{phase === "success" ? `${meta.title}成功` : meta.title}</h2><p>{phase === "success" ? "系统已返回业务ID，后续状态可在对应任务或配置页面追踪。" : meta.description}</p></div><button type="button" aria-label="关闭弹窗" onClick={onClose}>×</button></header>
 
         {phase === "success" && result ? (
           <div className="dialog-result">
