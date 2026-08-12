@@ -17,6 +17,8 @@ type PageKey =
 type FunnelMode = "product" | "monetization";
 type UnitMode = "users" | "events";
 type TrendMetric = "viewer" | "opportunity";
+type FunnelStage = { label: string; event: string; value: string; rate: string; delta: string };
+type TransitionSelection = { from: string; to: string; rate: string; scope: "users" | "events" };
 type ModuleKey = "global" | "project" | "funnel" | "admob" | "firebase" | "reconcile" | "tracking" | "config" | "tasks";
 const moduleMenus: Array<{ key: ModuleKey; index: string; label: string; group: "经营分析" | "质量治理" }> = [
   { key: "global", index: "01", label: "全局项目总览", group: "经营分析" },
@@ -68,9 +70,9 @@ const pages: Array<{ key: PageKey; label: string; hint: string }> = [
 const projects = [
   { code: "IRAN-VPN-01", name: "Iran Fast VPN", category: "套利 VPN", dau: "128,430", viewer: "23.1%", opportunity: "28.4%", completion: "42.6%", revenue: "$4,821", status: "严重", issue: "Eligible → Opportunity" },
   { code: "FAST-VPN-02", name: "Fast VPN", category: "套利 VPN", dau: "96,510", viewer: "35.8%", opportunity: "42.1%", completion: "48.9%", revenue: "$4,103", status: "正常", issue: "—" },
-  { code: "CLEAN-MAX-03", name: "Clean Max", category: "清理", dau: "76,210", viewer: "38.7%", opportunity: "45.1%", completion: "51.2%", revenue: "$2,104", status: "预警", issue: "Load → Show Attempt" },
+  { code: "CLEAN-MAX-03", name: "Clean Max", category: "清理", dau: "76,210", viewer: "38.7%", opportunity: "45.1%", completion: "51.2%", revenue: "$2,104", status: "预警", issue: "机会履约率下降" },
   { code: "AIVORA-LAUNCHER", name: "Aivora Launcher", category: "Launcher", dau: "54,870", viewer: "31.4%", opportunity: "37.6%", completion: "46.3%", revenue: "$1,887", status: "正常", issue: "—" },
-  { code: "TURBO-CLEAN-05", name: "Turbo Cleaner", category: "清理", dau: "41,360", viewer: "19.8%", opportunity: "24.5%", completion: "39.1%", revenue: "$986", status: "严重", issue: "Opportunity → Request" },
+  { code: "TURBO-CLEAN-05", name: "Turbo Cleaner", category: "清理", dau: "41,360", viewer: "19.8%", opportunity: "24.5%", completion: "39.1%", revenue: "$986", status: "严重", issue: "机会未履约率高" },
 ];
 
 const productStages = [
@@ -82,25 +84,100 @@ const productStages = [
   { label: "稳定连接", event: "session_active", value: "54,729", rate: "85.1%", delta: "-2.1%" },
 ];
 
-const monetizationUserStages = [
-  { label: "DAU", event: "app_active", value: "128,430", rate: "100%", delta: "+2.8%" },
-  { label: "Eligible", event: "jk_ad_eligible", value: "83,106", rate: "64.7%", delta: "-1.3%" },
-  { label: "Opportunity", event: "jk_ad_opportunity", value: "36,474", rate: "43.9%", delta: "-12.8%" },
-  { label: "Request", event: "jk_ad_request", value: "34,921", rate: "95.7%", delta: "-0.9%" },
-  { label: "Load", event: "jk_ad_load_success", value: "34,085", rate: "97.6%", delta: "+0.4%" },
-  { label: "Show Attempt", event: "jk_ad_show_attempt", value: "31,682", rate: "93.0%", delta: "-1.8%" },
-  { label: "AV", event: "jk_ad_impression", value: "29,671", rate: "93.7%", delta: "-0.7%" },
-  { label: "Paid", event: "jk_ad_paid_event", value: "29,404", rate: "99.1%", delta: "+0.1%" },
-];
-
-const monetizationEventStages = [
-  { label: "Opportunity", event: "jk_ad_opportunity", value: "214,306", rate: "100%", delta: "+4.9%" },
-  { label: "Request", event: "jk_ad_request", value: "201,944", rate: "94.2%", delta: "-0.8%" },
-  { label: "Load", event: "jk_ad_load_success", value: "199,925", rate: "99.0%", delta: "+0.1%" },
-  { label: "Show Attempt", event: "jk_ad_show_attempt", value: "144,871", rate: "72.5%", delta: "-2.6%" },
+const monetizationEventStages: FunnelStage[] = [
+  { label: "Eligibility Check", event: "jk_ad_eligibility_check", value: "356,410", rate: "100%", delta: "+3.8%" },
+  { label: "Eligible", event: "jk_ad_eligibility_check · eligible=1", value: "283,006", rate: "79.4%", delta: "-1.1%" },
+  { label: "Opportunity", event: "jk_ad_opportunity", value: "214,306", rate: "75.7%", delta: "-6.4%" },
+  { label: "Show Attempt", event: "jk_ad_show_attempt", value: "144,871", rate: "67.6%", delta: "-2.6%" },
   { label: "Impression", event: "jk_ad_impression", value: "137,628", rate: "95.0%", delta: "-0.4%" },
   { label: "Paid Event", event: "jk_ad_paid_event", value: "136,392", rate: "99.1%", delta: "+0.1%" },
 ];
+
+const opportunityFulfillment = {
+  opportunity: 214306,
+  cacheHit: 146812,
+  cacheMiss: 67494,
+  realtimeRequest: 63204,
+  realtimeLoad: 61940,
+  showFromCache: 101810,
+  showFromRealtime: 43061,
+  showAttempt: 144871,
+  unfulfilled: 69435,
+};
+
+const preloadInventory = {
+  trigger: 258420,
+  request: 243118,
+  loadSuccess: 226102,
+  cacheStore: 221504,
+  cacheHit: 146812,
+  expired: 31806,
+  evicted: 12702,
+  unusedReady: 30184,
+};
+
+const projectFunnelProfiles: Record<string, { userStages: FunnelStage[]; viewerTrend: number[]; opportunityTrend: number[]; fulfillmentRate: string; preloadSuccess: string; cacheHitRate: string }> = {
+  "IRAN-VPN-01": {
+    userStages: [
+      { label: "DAU", event: "app_active", value: "128,430", rate: "100%", delta: "+2.8%" },
+      { label: "Eligibility Check", event: "jk_ad_eligibility_check", value: "101,284", rate: "78.9%", delta: "-0.8%" },
+      { label: "Eligible", event: "eligible=1", value: "83,106", rate: "82.1%", delta: "-1.3%" },
+      { label: "Opportunity", event: "jk_ad_opportunity", value: "36,474", rate: "43.9%", delta: "-12.8%" },
+      { label: "Show Attempt", event: "jk_ad_show_attempt", value: "31,682", rate: "86.9%", delta: "-1.8%" },
+      { label: "AV", event: "jk_ad_impression", value: "29,671", rate: "93.7%", delta: "-0.7%" },
+      { label: "Paid", event: "jk_ad_paid_event", value: "29,404", rate: "99.1%", delta: "+0.1%" },
+    ],
+    viewerTrend: [34.9, 35.4, 34.6, 35.1, 31.8, 26.7, 23.1], opportunityTrend: [41.2, 41.6, 40.8, 40.9, 37.6, 32.9, 28.4], fulfillmentRate: "86.9%", preloadSuccess: "93.0%", cacheHitRate: "68.5%",
+  },
+  "FAST-VPN-02": {
+    userStages: [
+      { label: "DAU", event: "app_active", value: "96,510", rate: "100%", delta: "+1.6%" },
+      { label: "Eligibility Check", event: "jk_ad_eligibility_check", value: "79,426", rate: "82.3%", delta: "+0.4%" },
+      { label: "Eligible", event: "eligible=1", value: "69,153", rate: "87.1%", delta: "+0.2%" },
+      { label: "Opportunity", event: "jk_ad_opportunity", value: "40,631", rate: "58.8%", delta: "+0.8%" },
+      { label: "Show Attempt", event: "jk_ad_show_attempt", value: "36,984", rate: "91.0%", delta: "+0.3%" },
+      { label: "AV", event: "jk_ad_impression", value: "34,551", rate: "93.4%", delta: "+0.5%" },
+      { label: "Paid", event: "jk_ad_paid_event", value: "34,274", rate: "99.2%", delta: "+0.1%" },
+    ],
+    viewerTrend: [34.8, 35.1, 35.3, 35.0, 35.5, 35.6, 35.8], opportunityTrend: [41.4, 41.7, 41.8, 41.6, 41.9, 42.0, 42.1], fulfillmentRate: "91.0%", preloadSuccess: "94.6%", cacheHitRate: "72.4%",
+  },
+  "CLEAN-MAX-03": {
+    userStages: [
+      { label: "DAU", event: "app_active", value: "76,210", rate: "100%", delta: "+0.9%" },
+      { label: "Eligibility Check", event: "jk_ad_eligibility_check", value: "63,402", rate: "83.2%", delta: "+0.1%" },
+      { label: "Eligible", event: "eligible=1", value: "55,924", rate: "88.2%", delta: "-0.3%" },
+      { label: "Opportunity", event: "jk_ad_opportunity", value: "34,371", rate: "61.5%", delta: "-0.7%" },
+      { label: "Show Attempt", event: "jk_ad_show_attempt", value: "31,108", rate: "90.5%", delta: "-5.1%" },
+      { label: "AV", event: "jk_ad_impression", value: "29,493", rate: "94.8%", delta: "-0.8%" },
+      { label: "Paid", event: "jk_ad_paid_event", value: "29,198", rate: "99.0%", delta: "0.0%" },
+    ],
+    viewerTrend: [39.4, 39.0, 39.2, 38.9, 38.6, 38.9, 38.7], opportunityTrend: [46.2, 46.0, 45.8, 45.5, 45.2, 45.3, 45.1], fulfillmentRate: "90.5%", preloadSuccess: "88.2%", cacheHitRate: "61.6%",
+  },
+  "AIVORA-LAUNCHER": {
+    userStages: [
+      { label: "DAU", event: "app_active", value: "54,870", rate: "100%", delta: "+4.1%" },
+      { label: "Eligibility Check", event: "jk_ad_eligibility_check", value: "43,106", rate: "78.6%", delta: "+0.6%" },
+      { label: "Eligible", event: "eligible=1", value: "38,950", rate: "90.4%", delta: "+0.2%" },
+      { label: "Opportunity", event: "jk_ad_opportunity", value: "20,632", rate: "53.0%", delta: "-0.5%" },
+      { label: "Show Attempt", event: "jk_ad_show_attempt", value: "18,604", rate: "90.2%", delta: "-0.4%" },
+      { label: "AV", event: "jk_ad_impression", value: "17,229", rate: "92.6%", delta: "+0.3%" },
+      { label: "Paid", event: "jk_ad_paid_event", value: "17,108", rate: "99.3%", delta: "+0.1%" },
+    ],
+    viewerTrend: [30.5, 30.8, 31.0, 30.9, 31.2, 31.1, 31.4], opportunityTrend: [36.9, 37.1, 37.0, 37.4, 37.2, 37.5, 37.6], fulfillmentRate: "90.2%", preloadSuccess: "92.1%", cacheHitRate: "70.8%",
+  },
+  "TURBO-CLEAN-05": {
+    userStages: [
+      { label: "DAU", event: "app_active", value: "41,360", rate: "100%", delta: "-0.4%" },
+      { label: "Eligibility Check", event: "jk_ad_eligibility_check", value: "32,111", rate: "77.6%", delta: "-1.2%" },
+      { label: "Eligible", event: "eligible=1", value: "27,840", rate: "86.7%", delta: "-0.9%" },
+      { label: "Opportunity", event: "jk_ad_opportunity", value: "10,133", rate: "36.4%", delta: "-8.1%" },
+      { label: "Show Attempt", event: "jk_ad_show_attempt", value: "8,854", rate: "87.4%", delta: "-3.4%" },
+      { label: "AV", event: "jk_ad_impression", value: "8,189", rate: "92.5%", delta: "-1.0%" },
+      { label: "Paid", event: "jk_ad_paid_event", value: "8,098", rate: "98.9%", delta: "-0.2%" },
+    ],
+    viewerTrend: [28.1, 27.4, 25.8, 24.0, 22.7, 20.9, 19.8], opportunityTrend: [33.9, 32.8, 30.6, 29.3, 27.6, 25.6, 24.5], fulfillmentRate: "87.4%", preloadSuccess: "84.8%", cacheHitRate: "49.7%",
+  },
+};
 
 const reasons = [
   { code: "NO_OPPORTUNITY", label: "满足资格但没有生成广告机会", users: "24,613", share: 52.8, impact: "$1,482", owner: "产品 / 客户端" },
@@ -109,6 +186,15 @@ const reasons = [
   { code: "APP_BACKGROUND", label: "触发前 App 进入后台", users: "3,921", share: 8.4, impact: "$236", owner: "客户端" },
   { code: "EVENT_NOT_RECEIVED", label: "客户端触发但 Firebase 未收到", users: "1,937", share: 4.2, impact: "$117", owner: "数据 / 客户端" },
   { code: "UNKNOWN", label: "暂时无法分类", users: "948", share: 2.0, impact: "$57", owner: "数据" },
+];
+
+const fulfillmentReasons = [
+  { code: "CACHE_CONTEXT_LOST", label: "缓存对象未绑定当前机会，无法继续展示", users: "28,417", share: 40.9, impact: "$1,116", owner: "客户端 / 广告" },
+  { code: "SHOW_CONDITION_BLOCKED", label: "到达机会后被页面状态、频控或订阅状态阻止", users: "16,842", share: 24.3, impact: "$662", owner: "产品 / 广告策略" },
+  { code: "REALTIME_LOAD_FAILED", label: "缓存未命中后的实时加载失败或超时", users: "11,204", share: 16.1, impact: "$441", owner: "广告 SDK" },
+  { code: "APP_BACKGROUND", label: "履约完成前 App 进入后台", users: "7,983", share: 11.5, impact: "$314", owner: "客户端" },
+  { code: "EVENT_NOT_RECEIVED", label: "客户端已执行但 Firebase 未收到关联事件", users: "3,601", share: 5.2, impact: "$142", owner: "数据 / 客户端" },
+  { code: "UNKNOWN", label: "暂时无法分类", users: "1,388", share: 2.0, impact: "$55", owner: "数据" },
 ];
 
 const cohortRows = [
@@ -120,13 +206,15 @@ const cohortRows = [
 ];
 
 const eventRows = [
-  { time: "10:27:04.132", name: "jk_ad_eligible", result: "有效", detail: "eligible=1 · placement=vpn_connect_success", id: "evt_2a18", source: "Firebase" },
-  { time: "10:27:04.146", name: "jk_ad_opportunity", result: "缺失", detail: "预期事件未收到 · scene 已执行", id: "—", source: "质量引擎" },
-  { time: "10:27:04.188", name: "jk_ad_request", result: "有效", detail: "request_id=req_91a · retry_index=0", id: "evt_2a19", source: "Firebase" },
-  { time: "10:27:04.943", name: "jk_ad_load_success", result: "有效", detail: "ad_instance_id=ins_671 · response_id 可选省略", id: "evt_2a20", source: "Firebase" },
-  { time: "10:27:05.106", name: "jk_ad_show_attempt", result: "P1缺失", detail: "visibility_reason 缺失 · 不阻断 P0", id: "evt_2a21", source: "Firebase" },
-  { time: "10:27:05.419", name: "jk_ad_impression", result: "链路异常", detail: "request_id 正常 · opportunity_id 未关联", id: "evt_2a22", source: "Firebase" },
-  { time: "10:27:05.438", name: "jk_ad_paid_event", result: "有效", detail: "value_micros=2814 · currency=USD", id: "evt_2a23", source: "Firebase" },
+  { time: "10:20:01.012", name: "jk_ad_request", result: "有效", detail: "request_type=preload · opportunity_id省略", id: "evt_2a10", source: "Firebase", requestType: "preload", cacheStatus: "—" },
+  { time: "10:20:01.806", name: "jk_ad_load_success", result: "有效", detail: "ad_instance_id=ins_671 · preload", id: "evt_2a11", source: "Firebase", requestType: "preload", cacheStatus: "loaded" },
+  { time: "10:20:01.842", name: "jk_ad_cache_store", result: "有效", detail: "cache_slot=vpn_interstitial · ttl=3600s", id: "evt_2a12", source: "Firebase", requestType: "preload", cacheStatus: "stored" },
+  { time: "10:27:04.132", name: "jk_ad_eligibility_check", result: "有效", detail: "eligible=1 · placement=vpn_connect_success", id: "evt_2a18", source: "Firebase", requestType: "—", cacheStatus: "ready" },
+  { time: "10:27:04.146", name: "jk_ad_opportunity", result: "有效", detail: "opportunity_id=opp_82c · scene已到达", id: "evt_2a19", source: "Firebase", requestType: "—", cacheStatus: "ready" },
+  { time: "10:27:04.188", name: "jk_ad_cache_hit", result: "有效", detail: "ad_instance_id=ins_671 · 绑定当前opportunity", id: "evt_2a20", source: "Firebase", requestType: "—", cacheStatus: "hit" },
+  { time: "10:27:05.106", name: "jk_ad_show_attempt", result: "P1缺失", detail: "visibility_reason 缺失 · 不阻断 P0", id: "evt_2a21", source: "Firebase", requestType: "—", cacheStatus: "consumed" },
+  { time: "10:27:05.419", name: "jk_ad_impression", result: "链路异常", detail: "缓存实例正常 · opportunity_id 未关联", id: "evt_2a22", source: "Firebase", requestType: "—", cacheStatus: "consumed" },
+  { time: "10:27:05.438", name: "jk_ad_paid_event", result: "有效", detail: "value_micros=2814 · currency=USD", id: "evt_2a23", source: "Firebase", requestType: "—", cacheStatus: "consumed" },
 ];
 
 function Badge({ children, tone = "neutral" }: { children: React.ReactNode; tone?: "neutral" | "good" | "warn" | "bad" | "blue" }) {
@@ -285,7 +373,7 @@ export default function Home() {
   const [funnelMode, setFunnelMode] = useState<FunnelMode>("monetization");
   const [unitMode, setUnitMode] = useState<UnitMode>("users");
   const [dimension, setDimension] = useState("国家");
-  const [selectedEvent, setSelectedEvent] = useState(5);
+  const [selectedEvent, setSelectedEvent] = useState(7);
   const [evidenceMode, setEvidenceMode] = useState("ad");
   const [onlyErrors, setOnlyErrors] = useState(false);
   const [rawOpen, setRawOpen] = useState(false);
@@ -293,6 +381,8 @@ export default function Home() {
   const [notice, setNotice] = useState("");
   const [baseline, setBaseline] = useState("近7日均值");
   const [trendMetric, setTrendMetric] = useState<TrendMetric>("viewer");
+  const [transition, setTransition] = useState<TransitionSelection>({ from: "Eligible", to: "Opportunity", rate: "43.9%", scope: "users" });
+  const [filtersApplied, setFiltersApplied] = useState(0);
   const [dialog, setDialog] = useState<DialogKey | null>(null);
 
   useEffect(() => {
@@ -307,10 +397,11 @@ export default function Home() {
     };
   }, [dialog]);
 
+  const activeProfile = projectFunnelProfiles[project] ?? projectFunnelProfiles["IRAN-VPN-01"];
   const stages = useMemo(() => {
     if (funnelMode === "product") return productStages;
-    return unitMode === "users" ? monetizationUserStages : monetizationEventStages;
-  }, [funnelMode, unitMode]);
+    return unitMode === "users" ? activeProfile.userStages : monetizationEventStages;
+  }, [funnelMode, unitMode, activeProfile]);
 
   const currentPage = pages.find((item) => item.key === page)!;
   const currentModule = moduleCopy[module];
@@ -318,10 +409,16 @@ export default function Home() {
     .map((event, index) => ({ event, index }))
     .filter(({ event }) => !onlyErrors || event.result !== "有效");
   const issuePhase = issueStatus === "重测中" ? 3 : 2;
-  const trendValues = trendMetric === "viewer"
-    ? [34.9, 35.4, 34.6, 35.1, 31.8, 26.7, 23.1]
-    : [41.2, 41.6, 40.8, 40.9, 37.6, 32.9, 28.4];
+  const trendValues = trendMetric === "viewer" ? activeProfile.viewerTrend : activeProfile.opportunityTrend;
   const trendLabel = trendMetric === "viewer" ? "广告浏览者比例" : "Opportunity机会覆盖率";
+  const isFulfillmentDiagnosis = transition.from === "Opportunity" && transition.to === "Show Attempt";
+  const diagnosisReasons = isFulfillmentDiagnosis ? fulfillmentReasons : reasons;
+  const transitionStages = funnelMode === "product" ? productStages : transition.scope === "events" ? monetizationEventStages : activeProfile.userStages;
+  const fromStage = transitionStages.find((stage) => stage.label === transition.from);
+  const toStage = transitionStages.find((stage) => stage.label === transition.to);
+  const transitionLoss = fromStage && toStage
+    ? Math.max(0, Number(fromStage.value.replaceAll(",", "")) - Number(toStage.value.replaceAll(",", ""))).toLocaleString()
+    : "—";
 
   function notify(message: string) {
     setNotice(message);
@@ -343,7 +440,13 @@ export default function Home() {
   function resetFilters() {
     setProject("IRAN-VPN-01");
     setRange("今天");
+    setFiltersApplied((value) => value + 1);
     notify("筛选条件已恢复默认");
+  }
+
+  function openTransition(from: FunnelStage, to: FunnelStage) {
+    setTransition({ from: from.label, to: to.label, rate: to.rate, scope: unitMode });
+    go("diagnosis");
   }
 
   return (
@@ -389,8 +492,8 @@ export default function Home() {
             <label>平台<select><option>Android</option><option>iOS</option><option>全部</option></select></label>
             <label>国家<select><option>全部国家</option><option>伊朗</option><option>埃及</option><option>土耳其</option></select></label>
             <label>App版本<select><option>1.8.0 (108)</option><option>1.7.4 (104)</option><option>全部版本</option></select></label>
-            <div className="filter-actions"><button onClick={resetFilters}>重置</button><button onClick={() => notify("筛选条件已应用，数据已刷新")}>应用筛选</button></div>
-            <div className="data-state"><span className="status-dot" /><strong>实时预估</strong><small>Firebase · 延迟约 8 分钟</small></div>
+            <div className="filter-actions"><button onClick={resetFilters}>重置</button><button onClick={() => { setFiltersApplied((value) => value + 1); notify(`${project} · ${range} 筛选已应用`); }}>应用筛选</button></div>
+            <div className="data-state"><span className="status-dot" /><strong>实时预估</strong><small>Firebase · 延迟约 8 分钟 · 刷新#{filtersApplied}</small></div>
           </section>
 
           <section className="context-toolbar">
@@ -414,7 +517,7 @@ export default function Home() {
 
               <section className="signal-strip">
                 <div className="signal-item bad"><span>用户覆盖异常</span><strong>AV / DAU 29.4%</strong><p>主要问题在广告请求之前，优先看 Eligible 与 Opportunity 覆盖。</p></div>
-                <div className="signal-item good"><span>请求后链路健康</span><strong>Request → Load 99.0%</strong><p>匹配与加载正常，不应先优化 AdMob 填充。</p></div>
+                <div className="signal-item good"><span>机会履约分支</span><strong>Show Attempt / Opportunity 89.7%</strong><p>缓存命中与实时请求合并判断，预加载请求不进入主漏斗。</p></div>
                 <div className="signal-item warn"><span>展示集中</span><strong>Impression / AV 3.42</strong><p>少数用户承担较多展示，需同时控制频次与扩大覆盖。</p></div>
                 <button onClick={() => go("workbench")}>查看完整判断依据 →</button>
               </section>
@@ -429,9 +532,9 @@ export default function Home() {
                 <aside className="surface">
                   <div className="surface-title"><div><h2>优先处理</h2><p>按影响用户与收入排序</p></div></div>
                   <div className="issue-list">
-                    <button onClick={() => { setProject("IRAN-VPN-01"); go("diagnosis"); }}><span className="rank bad">1</span><div><strong>IRAN-VPN-01</strong><p>Eligible→Opportunity 下降 12.8pp</p><small>影响 46,632 用户 · 约 $2,807/日</small></div></button>
-                    <button onClick={() => { setProject("TURBO-CLEAN-05"); go("diagnosis"); }}><span className="rank bad">2</span><div><strong>TURBO-CLEAN-05</strong><p>Opportunity→Request 下降 9.4pp</p><small>影响 3,887 用户 · 约 $391/日</small></div></button>
-                    <button onClick={() => { setProject("CLEAN-MAX-03"); go("diagnosis"); }}><span className="rank warn">3</span><div><strong>CLEAN-MAX-03</strong><p>Load→Show Attempt 下降 5.1pp</p><small>影响 2,043 用户 · 约 $218/日</small></div></button>
+                    <button onClick={() => { setProject("IRAN-VPN-01"); setTransition({from:"Eligible",to:"Opportunity",rate:"43.9%",scope:"users"}); go("diagnosis"); }}><span className="rank bad">1</span><div><strong>IRAN-VPN-01</strong><p>Eligible→Opportunity 下降 12.8pp</p><small>影响 46,632 用户 · 约 $2,807/日</small></div></button>
+                    <button onClick={() => { setProject("TURBO-CLEAN-05"); setTransition({from:"Opportunity",to:"Show Attempt",rate:"87.4%",scope:"users"}); go("diagnosis"); }}><span className="rank bad">2</span><div><strong>TURBO-CLEAN-05</strong><p>机会未履约率升至 12.6%</p><small>优先排查缓存命中与实时加载分支</small></div></button>
+                    <button onClick={() => { setProject("CLEAN-MAX-03"); setTransition({from:"Opportunity",to:"Show Attempt",rate:"90.5%",scope:"users"}); go("diagnosis"); }}><span className="rank warn">3</span><div><strong>CLEAN-MAX-03</strong><p>Opportunity→Show Attempt 下降 5.1pp</p><small>影响 2,043 用户 · 约 $218/日</small></div></button>
                   </div>
                   <button className="full-link" onClick={() => go("diagnosis")}>进入异常诊断 →</button>
                 </aside>
@@ -440,9 +543,13 @@ export default function Home() {
               <section className="surface">
                 <div className="surface-title"><div><h2>全项目变现链路</h2><p>用户覆盖漏斗与事件效率必须分开判断</p></div><Badge tone="blue">Firebase T+0</Badge></div>
                 <div className="dual-funnel">
-                  <div><h3>用户覆盖漏斗</h3><div className="mini-funnel">{["DAU 397,380", "Eligible 263,941", "Opportunity 138,283", "Request UV 132,940", "AV 116,842"].map((item, index) => <div key={item} style={{ width: `${100 - index * 10}%` }}>{item}<small>{index === 0 ? "100%" : ["66.4%", "52.4%", "96.1%", "87.9%"][index - 1]}</small></div>)}</div></div>
-                  <div><h3>事件效率漏斗</h3><div className="mini-funnel blue">{["Opportunity 828,492", "Request 786,318", "Load 778,455", "Show Attempt 566,201", "Impression 537,891"].map((item, index) => <div key={item} style={{ width: `${100 - index * 8}%` }}>{item}<small>{index === 0 ? "100%" : ["94.9%", "99.0%", "72.7%", "95.0%"][index - 1]}</small></div>)}</div></div>
+                  <div><h3>用户覆盖主漏斗</h3><div className="mini-funnel">{["DAU 397,380", "Eligibility Check 319,220", "Eligible 263,941", "Opportunity 138,283", "Show Attempt 124,106", "AV 116,842"].map((item, index) => <div key={item} style={{ width: `${100 - index * 8}%` }}>{item}<small>{index === 0 ? "100%" : ["80.3%", "82.7%", "52.4%", "89.7%", "94.1%"][index - 1]}</small></div>)}</div></div>
+                  <div><h3>机会履约事件漏斗</h3><div className="mini-funnel blue">{["Opportunity 828,492", "履约入口 801,904", "Show Attempt 566,201", "Impression 537,891", "Paid Event 532,512"].map((item, index) => <div key={item} style={{ width: `${100 - index * 8}%` }}>{item}<small>{index === 0 ? "100%" : ["96.8%", "70.6%", "95.0%", "99.0%"][index - 1]}</small></div>)}</div></div>
                 </div>
+              </section>
+              <section className="two-column">
+                <div className="surface"><div className="surface-title"><div><h2>机会履约方式</h2><p>缓存命中与实时请求是并列分支，不计作线性流失</p></div><Badge tone="good">履约率 89.7%</Badge></div><div className="overview-fulfillment"><div><span>Cache Hit</span><strong>551,801</strong><small>66.6%机会</small></div><div><span>Cache Miss</span><strong>276,691</strong><small>33.4%机会</small></div><div><span>Realtime Request</span><strong>259,406</strong><small>仅缓存未命中后</small></div><div><span>未履约机会</span><strong>85,977</strong><small>10.3%需诊断</small></div></div></div>
+                <aside className="surface"><div className="surface-title"><div><h2>预加载库存健康</h2><p>与用户机会漏斗独立统计</p></div><Badge tone="warn">浪费率 20.1%</Badge></div><div className="inventory-mini"><div><span>预加载成功率</span><strong>93.0%</strong></div><div><span>缓存命中率</span><strong>66.6%</strong></div><div><span>过期＋淘汰</span><strong>20.1%</strong></div></div></aside>
               </section>
             </div>
           )}
@@ -458,13 +565,19 @@ export default function Home() {
               </section>
 
               <section className="surface funnel-surface">
-                <div className="surface-title"><div><h2>{unitMode === "users" ? "用户到达漏斗" : "事件转化漏斗"}</h2><p>点击转化箭头进入步骤诊断</p></div><div className="legend"><span className="dot blue" />当前 <span className="dot neutral" />昨日同期</div></div>
+                <div className="surface-title"><div><h2>{funnelMode === "product" ? "产品用户到达漏斗" : unitMode === "users" ? "用户覆盖主漏斗" : "事件覆盖与展示漏斗"}</h2><p>{funnelMode === "monetization" ? "Request/Load仅存在于履约分支；点击箭头诊断当前步骤" : "点击转化箭头进入步骤诊断"}</p></div><div className="legend"><span className="dot blue" />当前 <span className="dot neutral" />昨日同期</div></div>
                 <div className={`funnel-stages ${stages.length > 6 ? "dense" : ""}`}>
-                  {stages.map((stage, index) => <div className="stage-group" key={stage.label}><button className={`funnel-stage ${stage.delta.startsWith("-") && Math.abs(parseFloat(stage.delta)) > 5 ? "stage-alert" : ""}`} onClick={() => index > 0 && go("diagnosis")}><span>{stage.label}</span><strong>{stage.value}</strong><small>{stage.event}</small></button>{index < stages.length - 1 && <button className={`conversion-arrow ${stages[index + 1].delta.startsWith("-") ? "down" : ""}`} onClick={() => go("diagnosis")}><strong>{stages[index + 1].rate}</strong><span>→</span><small>{stages[index + 1].delta}</small></button>}</div>)}
+                  {stages.map((stage, index) => <div className="stage-group" key={stage.label}><button className={`funnel-stage ${stage.delta.startsWith("-") && Math.abs(parseFloat(stage.delta)) > 5 ? "stage-alert" : ""}`} onClick={() => index > 0 && openTransition(stages[index - 1], stage)}><span>{stage.label}</span><strong>{stage.value}</strong><small>{stage.event}</small></button>{index < stages.length - 1 && <button className={`conversion-arrow ${stages[index + 1].delta.startsWith("-") ? "down" : ""}`} onClick={() => openTransition(stage, stages[index + 1])}><strong>{stages[index + 1].rate}</strong><span>→</span><small>{stages[index + 1].delta}</small></button>}</div>)}
                 </div>
-                <div className="funnel-summary"><div><span>首尾转化率</span><strong>{funnelMode === "product" ? "42.6%" : unitMode === "users" ? "22.9%" : "63.6%"}</strong></div><div><span>最大流失步骤</span><strong>{funnelMode === "product" ? "首页 → 点击连接" : "Eligible → Opportunity"}</strong></div><div><span>流失用户</span><strong>{funnelMode === "product" ? "35,443" : "46,632"}</strong></div><div><span>预计收入影响</span><strong className="negative">$2,807 / 日</strong></div></div>
-                {funnelMode === "monetization" && <div className="denominator-audit"><div><span>广告浏览者比例</span><strong>AV / DAU = 23.1%</strong><small>衡量覆盖用户</small></div><div><span>机会覆盖率</span><strong>Opportunity UV / DAU = 28.4%</strong><small>定位请求前问题</small></div><div><span>展示成功率</span><strong>Impression / Show Attempt = 95.0%</strong><small>衡量请求后效率</small></div><div><span>人均展示</span><strong>Impression / AV = 3.42</strong><small>衡量展示集中度</small></div></div>}
+                <div className="funnel-summary"><div><span>首尾转化率</span><strong>{funnelMode === "product" ? "42.6%" : unitMode === "users" ? activeProfile.userStages.at(-1)?.rate : "38.3%"}</strong></div><div><span>最大流失步骤</span><strong>{funnelMode === "product" ? "首页 → 点击连接" : unitMode === "users" ? "Eligible → Opportunity" : "Opportunity → Show Attempt"}</strong></div><div><span>{unitMode === "events" ? "流失事件" : "流失用户"}</span><strong>{funnelMode === "product" ? "35,443" : unitMode === "users" ? "46,632" : "69,435"}</strong></div><div><span>预计收入影响</span><strong className="negative">$2,807 / 日</strong></div></div>
+                {funnelMode === "monetization" && unitMode === "users" && <div className="denominator-audit"><div><span>广告浏览者比例</span><strong>AV / DAU = {activeProfile.viewerTrend.at(-1)}%</strong><small>衡量覆盖用户</small></div><div><span>机会覆盖率</span><strong>Opportunity UV / DAU = {activeProfile.opportunityTrend.at(-1)}%</strong><small>定位请求前问题</small></div><div><span>机会履约率</span><strong>Show Attempt UV / Opportunity UV = {activeProfile.fulfillmentRate}</strong><small>覆盖缓存与实时两条路径</small></div><div><span>人均展示</span><strong>Impression / AV = 3.42</strong><small>衡量展示集中度</small></div></div>}
+                {funnelMode === "monetization" && unitMode === "events" && <div className="denominator-audit"><div><span>资格通过率</span><strong>Eligible / Check = 79.4%</strong><small>按检查事件</small></div><div><span>机会生成率</span><strong>Opportunity / Eligible = 75.7%</strong><small>按事件次数</small></div><div><span>机会履约率</span><strong>Show Attempt / Opportunity = 67.6%</strong><small>不以Request为分母</small></div><div><span>展示成功率</span><strong>Impression / Show Attempt = 95.0%</strong><small>衡量SDK展示效率</small></div></div>}
               </section>
+
+              {funnelMode === "monetization" && <section className="fulfillment-layout">
+                <div className="surface"><div className="surface-title"><div><h2>机会履约分支</h2><p>同一个Opportunity只能进入缓存命中或缓存未命中分支</p></div><Badge tone="blue">按 opportunity_id 去重</Badge></div><div className="fulfillment-flow"><div className="flow-origin"><span>Opportunity</span><strong>{opportunityFulfillment.opportunity.toLocaleString()}</strong><small>100%</small></div><div className="flow-split"><span>分流</span></div><div className="flow-branch good"><span>Cache Hit</span><strong>{opportunityFulfillment.cacheHit.toLocaleString()}</strong><small>68.5% · 无新请求</small></div><div className="flow-branch warn"><span>Cache Miss</span><strong>{opportunityFulfillment.cacheMiss.toLocaleString()}</strong><small>31.5%</small></div><div className="flow-request"><span>Realtime Request</span><strong>{opportunityFulfillment.realtimeRequest.toLocaleString()}</strong><small>is_preload=0</small></div><div className="flow-request"><span>Realtime Load</span><strong>{opportunityFulfillment.realtimeLoad.toLocaleString()}</strong><small>98.0%</small></div><div className="flow-merge"><span>Show Attempt</span><strong>{opportunityFulfillment.showAttempt.toLocaleString()}</strong><small>{activeProfile.fulfillmentRate}机会履约</small></div></div><div className="fulfillment-metrics"><div><span>缓存命中率</span><strong>{activeProfile.cacheHitRate}</strong></div><div><span>Miss后请求率</span><strong>93.6%</strong></div><div><span>实时加载成功率</span><strong>98.0%</strong></div><div><span>机会未履约</span><strong className="negative">{opportunityFulfillment.unfulfilled.toLocaleString()}</strong></div></div></div>
+                <aside className="surface"><div className="surface-title"><div><h2>预加载与缓存库存</h2><p>发生在真实业务场景之前，不进入主漏斗</p></div><Badge tone="warn">独立口径</Badge></div><div className="preload-chain">{[["Preload Trigger",preloadInventory.trigger,"100%"],["Preload Request",preloadInventory.request,"94.1%"],["Load Success",preloadInventory.loadSuccess,activeProfile.preloadSuccess],["Cache Store",preloadInventory.cacheStore,"98.0%"]].map(([label,value,rate],index)=><div key={String(label)}><span>{index+1}</span><p><strong>{label}</strong><small>{Number(value).toLocaleString()} · {rate}</small></p></div>)}</div><div className="inventory-outcomes"><div><span>Cache Hit</span><strong>{preloadInventory.cacheHit.toLocaleString()}</strong></div><div><span>Expired</span><strong>{preloadInventory.expired.toLocaleString()}</strong></div><div><span>Evicted</span><strong>{preloadInventory.evicted.toLocaleString()}</strong></div><div><span>未消费库存</span><strong>{preloadInventory.unusedReady.toLocaleString()}</strong></div></div><div className="conclusion-block warn"><strong>缓存浪费率 20.1%</strong><p>(Expired + Evicted) / Cache Store。建议按广告位、TTL和网络类型继续拆解。</p></div></aside>
+              </section>}
 
               <section className="two-column">
                 <div className="surface">
@@ -474,10 +587,10 @@ export default function Home() {
                 </div>
                 <aside className="surface diagnostic-card">
                   <div className="surface-title"><div><h2>智能诊断</h2><p>基于漏斗与数据质量规则</p></div><Badge tone="bad">严重</Badge></div>
-                  <h3>问题发生在广告请求之前</h3>
-                  <p>AdMob 匹配率 100%、展示率 70.2% 基本正常，但 Opportunity 用户覆盖率从 41.2% 降至 28.4%。</p>
-                  <ul><li>请求后链路基本健康</li><li>请求集中在少数活跃用户</li><li>伊朗地区 1.8.0 版本下降最明显</li></ul>
-                  <button className="primary-button full" onClick={() => go("diagnosis")}>诊断 Eligible → Opportunity</button>
+                  <h3>{project === "IRAN-VPN-01" ? "主要问题在真实机会生成之前" : "当前项目按分支判断履约健康"}</h3>
+                  <p>{project === "IRAN-VPN-01" ? "Opportunity覆盖从41.2%降至28.4%；预加载请求独立统计，缓存命中与实时请求按履约分支判断。" : `${project} 当前机会履约率 ${activeProfile.fulfillmentRate}，缓存命中率 ${activeProfile.cacheHitRate}。`}</p>
+                  <ul><li>预加载请求已从主漏斗剔除</li><li>缓存命中不再要求产生新Request</li><li>实时请求仅以Cache Miss为前置条件</li></ul>
+                  <button className="primary-button full" onClick={() => { setTransition({from:"Eligible",to:"Opportunity",rate:activeProfile.userStages[3].rate,scope:"users"}); go("diagnosis"); }}>诊断 Eligible → Opportunity</button>
                 </aside>
               </section>
             </div>
@@ -486,12 +599,12 @@ export default function Home() {
           {module === "funnel" && page === "diagnosis" && (
             <div className="page-stack">
               <section className="transition-banner">
-                <div><span>上一步</span><strong>Eligible 用户</strong><em>83,106</em></div><span className="transition-arrow">→<small>43.9%</small></span><div><span>下一步</span><strong>Opportunity 用户</strong><em>36,474</em></div><div className="transition-loss"><span>流失用户</span><strong>46,632</strong><small>较基线多流失 10,641</small></div>
+                <div><span>上一步</span><strong>{transition.from} {transition.scope === "events" ? "事件" : "用户"}</strong><em>{fromStage?.value ?? "—"}</em></div><span className="transition-arrow">→<small>{transition.rate}</small></span><div><span>下一步</span><strong>{transition.to} {transition.scope === "events" ? "事件" : "用户"}</strong><em>{toStage?.value ?? "—"}</em></div><div className="transition-loss"><span>{transition.scope === "events" ? "流失事件" : "流失用户"}</span><strong>{transitionLoss}</strong><small>按所选步骤与口径重新计算</small></div>
               </section>
               <section className="metric-grid five">
-                <Metric label="当前转化率" value="43.9%" note="基线 56.7%" tone="bad" />
+                <Metric label="当前转化率" value={transition.rate} note={`步骤 ${transition.from} → ${transition.to}`} tone="bad" />
                 <Metric label="下降幅度" value="-12.8pp" note="连续下降 3 天" tone="bad" />
-                <Metric label="异常流失用户" value="10,641" note="排除正常业务流失" />
+                <Metric label={transition.scope === "events" ? "异常流失事件" : "异常流失用户"} value={isFulfillmentDiagnosis ? "21,806" : transition.scope === "events" ? "21,806" : "10,641"} note="排除正常业务流失" />
                 <Metric label="预计损失展示" value="40,436" note="按历史 3.8 次/AV" />
                 <Metric label="预计收入影响" value="$2,807" note="每天" tone="bad" />
               </section>
@@ -504,11 +617,11 @@ export default function Home() {
               <section className="two-column wide-left">
                 <div className="surface">
                   <div className="surface-title"><div><h2>流失原因拆解</h2><p>按服务端规则与事件链自动分类</p></div><button className="text-button" onClick={() => go("snapshot")}>查看判定规则</button></div>
-                  <div className="reason-list">{reasons.map((reason) => <button key={reason.code} onClick={() => go("evidence")}><div className="reason-title"><strong>{reason.code}</strong><span>{reason.users} 用户 · {reason.share}%</span></div><p>{reason.label}</p><div className="reason-bar"><span style={{ width: `${reason.share}%` }} /></div><div className="reason-meta"><span>影响 {reason.impact}/日</span><Badge tone={reason.code === "UNKNOWN" ? "neutral" : reason.share > 20 ? "bad" : "warn"}>{reason.owner}</Badge></div></button>)}</div>
+                  <div className="reason-list">{diagnosisReasons.map((reason) => <button key={reason.code} onClick={() => go("evidence")}><div className="reason-title"><strong>{reason.code}</strong><span>{reason.users} {transition.scope === "events" ? "事件" : "用户"} · {reason.share}%</span></div><p>{reason.label}</p><div className="reason-bar"><span style={{ width: `${reason.share}%` }} /></div><div className="reason-meta"><span>影响 {reason.impact}/日</span><Badge tone={reason.code === "UNKNOWN" ? "neutral" : reason.share > 20 ? "bad" : "warn"}>{reason.owner}</Badge></div></button>)}</div>
                 </div>
                 <aside className="surface">
                   <div className="surface-title"><div><h2>诊断结论</h2><p>优先验证可行动原因</p></div></div>
-                  <div className="conclusion-block bad"><strong>主要原因</strong><p>1.8.0 版本把 Opportunity 生成放在页面动画完成后；伊朗弱网用户在动画结束前离开或进入后台。</p></div>
+                  <div className="conclusion-block bad"><strong>主要原因</strong><p>{isFulfillmentDiagnosis ? "机会已经生成，但缓存实例 Context 丢失或缓存未命中后的实时加载失败，导致没有执行 Show Attempt。" : "1.8.0 版本把 Opportunity 生成放在页面动画完成后；伊朗弱网用户在动画结束前离开或进入后台。"}</p></div>
                   <div className="conclusion-block warn"><strong>数据风险</strong><p>4.2% 流失用户存在事件未收到，需要结合 Firebase DebugView 与本地 outbox 继续确认。</p></div>
                   <div className="action-stack"><button className="primary-button" onClick={() => go("cohort")}>进入分群对比</button><button className="secondary-button" onClick={() => go("evidence")}>查看事件证据</button><button className="secondary-button" onClick={() => setDialog("diagnosis")}>创建问题任务</button></div>
                 </aside>
@@ -519,10 +632,10 @@ export default function Home() {
           {module === "funnel" && page === "cohort" && (
             <div className="page-stack">
               <section className="surface">
-                <div className="surface-title cohort-header"><div><h2>Eligible → Opportunity 分群对比</h2><p>找出贡献最大的问题人群，而不只是转化率最低的人群</p></div><div className="dimension-tabs">{["国家", "App版本", "广告位", "网络类型", "新老用户", "VPN状态"].map((item) => <button key={item} className={dimension === item ? "active" : ""} onClick={() => setDimension(item)}>{item}</button>)}</div></div>
+                <div className="surface-title cohort-header"><div><h2>{transition.from} → {transition.to} 分群对比</h2><p>按当前选择的{transition.scope === "events" ? "事件" : "用户"}步骤，找出贡献最大的问题人群</p></div><div className="dimension-tabs">{["国家", "App版本", "广告位", "网络类型", "新老用户", "VPN状态"].map((item) => <button key={item} className={dimension === item ? "active" : ""} onClick={() => setDimension(item)}>{item}</button>)}</div></div>
                 <div className="comparison-controls"><label>基准<select value={baseline} onChange={(event) => setBaseline(event.target.value)}><option>近7日均值</option><option>昨日同期</option><option>上周同期</option><option>版本1.7.4</option></select></label><label>排序<select><option>异常流失贡献</option><option>转化下降幅度</option><option>收入影响</option><option>用户规模</option></select></label><label>最小样本<select><option>≥ 1,000 用户</option><option>≥ 500 用户</option><option>不限</option></select></label><span>当前与 <strong>{baseline}</strong> 比较</span></div>
                 <div className="cohort-summary"><div><span>当前维度</span><strong>{dimension}</strong></div><div><span>最大异常分群</span><strong>{dimension === "国家" ? "伊朗" : dimension === "App版本" ? "1.8.0 (108)" : "vpn_connect_success"}</strong></div><div><span>贡献异常流失</span><strong>92.4%</strong></div><div><span>建议优先级</span><Badge tone="bad">P0</Badge></div></div>
-                <div className="table-wrap"><table><thead><tr><th>{dimension}</th><th>Eligible用户</th><th>历史基线</th><th>当前转化率</th><th>变化</th><th>异常流失用户</th><th>收入影响/日</th><th>证据</th></tr></thead><tbody>{cohortRows.map((row) => <tr key={row.value} className={row.level === "bad" ? "row-bad" : ""}><td><strong>{dimension === "国家" ? row.value : dimension === "App版本" ? ["1.8.0 (108)", "1.7.4 (104)", "1.7.2 (102)", "1.6.9 (98)", "其他"][cohortRows.indexOf(row)] : dimension === "广告位" ? ["vpn_connect_success", "vpn_home_banner", "server_select", "vpn_disconnect", "home_resume"][cohortRows.indexOf(row)] : row.value}</strong></td><td>{row.volume}</td><td>{row.base}</td><td><span className={`heat-cell ${row.level}`}>{row.current}</span></td><td className={row.change.startsWith("-") ? "negative" : "positive"}>{row.change}</td><td>{row.lost}</td><td>{row.impact}</td><td><button className="table-link" onClick={() => go("evidence")}>查看</button></td></tr>)}</tbody></table></div>
+                <div className="table-wrap"><table><thead><tr><th>{dimension}</th><th>{transition.from}{transition.scope === "events" ? "事件" : "用户"}</th><th>历史基线</th><th>当前转化率</th><th>变化</th><th>异常流失{transition.scope === "events" ? "事件" : "用户"}</th><th>收入影响/日</th><th>证据</th></tr></thead><tbody>{cohortRows.map((row) => <tr key={row.value} className={row.level === "bad" ? "row-bad" : ""}><td><strong>{dimension === "国家" ? row.value : dimension === "App版本" ? ["1.8.0 (108)", "1.7.4 (104)", "1.7.2 (102)", "1.6.9 (98)", "其他"][cohortRows.indexOf(row)] : dimension === "广告位" ? ["vpn_connect_success", "vpn_home_banner", "server_select", "vpn_disconnect", "home_resume"][cohortRows.indexOf(row)] : row.value}</strong></td><td>{row.volume}</td><td>{row.base}</td><td><span className={`heat-cell ${row.level}`}>{row.current}</span></td><td className={row.change.startsWith("-") ? "negative" : "positive"}>{row.change}</td><td>{row.lost}</td><td>{row.impact}</td><td><button className="table-link" onClick={() => go("evidence")}>查看</button></td></tr>)}</tbody></table></div>
               </section>
               <section className="two-column">
                 <div className="surface">
@@ -541,45 +654,45 @@ export default function Home() {
           {module === "funnel" && page === "path" && (
             <div className="page-stack">
               <section className="surface">
-                <div className="surface-title"><div><h2>伊朗 · 1.8.0 流失用户路径</h2><p>观察没有进入 Opportunity 前后的真实行为，不把“页面离开”和“App 后台”混为一谈</p></div><Badge tone="blue">46,632 用户</Badge></div>
+                <div className="surface-title"><div><h2>伊朗 · 1.8.0 · {transition.from} → {transition.to} 流失路径</h2><p>{isFulfillmentDiagnosis ? "拆开缓存命中与实时加载两条履约路径，定位机会为何没有进入 Show Attempt" : "观察没有进入 Opportunity 前后的真实行为，不把“页面离开”和“App 后台”混为一谈"}</p></div><Badge tone="blue">{transitionLoss} {transition.scope === "events" ? "事件" : "用户"}</Badge></div>
                 <div className="path-canvas">
-                  <div className="path-column"><h3>流失前事件</h3><div className="path-node"><strong>connect_success</strong><span>38,204 · 81.9%</span></div><div className="path-node muted"><strong>vpn_home_view</strong><span>5,887 · 12.6%</span></div><div className="path-node muted"><strong>app_foreground</strong><span>2,541 · 5.5%</span></div></div>
+                  <div className="path-column"><h3>流失前事件</h3><div className="path-node"><strong>{isFulfillmentDiagnosis ? "jk_ad_opportunity" : "connect_success"}</strong><span>38,204 · 81.9%</span></div><div className="path-node muted"><strong>{isFulfillmentDiagnosis ? "jk_ad_cache_hit / miss" : "vpn_home_view"}</strong><span>5,887 · 12.6%</span></div><div className="path-node muted"><strong>{isFulfillmentDiagnosis ? "jk_ad_load_success" : "app_foreground"}</strong><span>2,541 · 5.5%</span></div></div>
                   <div className="path-connectors"><span>81.9%</span><i /><span>12.6%</span><i /><span>5.5%</span></div>
-                  <div className="path-column center"><h3>当前流失点</h3><div className="path-node alert"><strong>NO_OPPORTUNITY</strong><span>46,632 用户</span><small>Eligible 后 30 秒内未生成机会</small></div></div>
+                  <div className="path-column center"><h3>当前流失点</h3><div className="path-node alert"><strong>{isFulfillmentDiagnosis ? "NO_SHOW_ATTEMPT" : "NO_OPPORTUNITY"}</strong><span>{transitionLoss} {transition.scope === "events" ? "事件" : "用户"}</span><small>{isFulfillmentDiagnosis ? "Opportunity 后未走完缓存或实时履约分支" : "Eligible 后 30 秒内未生成机会"}</small></div></div>
                   <div className="path-connectors right"><span>52.8%</span><i /><span>20.1%</span><i /><span>8.4%</span></div>
-                  <div className="path-column"><h3>流失后事件</h3><div className="path-node"><strong>app_background</strong><span>24,613 · 52.8%</span></div><div className="path-node muted"><strong>vpn_disconnect</strong><span>9,384 · 20.1%</span></div><div className="path-node muted"><strong>screen_view</strong><span>3,921 · 8.4%</span></div></div>
+                  <div className="path-column"><h3>流失后事件</h3><div className="path-node"><strong>{isFulfillmentDiagnosis ? "cache_context_lost" : "app_background"}</strong><span>24,613 · 52.8%</span></div><div className="path-node muted"><strong>{isFulfillmentDiagnosis ? "realtime_load_failed" : "vpn_disconnect"}</strong><span>9,384 · 20.1%</span></div><div className="path-node muted"><strong>{isFulfillmentDiagnosis ? "app_background" : "screen_view"}</strong><span>3,921 · 8.4%</span></div></div>
                 </div>
               </section>
               <section className="path-classification">
-                <div><Badge tone="bad">52.8%</Badge><strong>App进入后台</strong><p>收到 app_background，进程仍存活；不能记为用户离开页面。</p></div>
-                <div><Badge tone="warn">20.1%</Badge><strong>页面离开</strong><p>收到 screen_leave，但 App 仍在前台；属于产品路径流失。</p></div>
+                <div><Badge tone="bad">52.8%</Badge><strong>{isFulfillmentDiagnosis ? "缓存上下文异常" : "App进入后台"}</strong><p>{isFulfillmentDiagnosis ? "广告实例存在，但未关联当前 opportunity_id，无法确认履约链。" : "收到 app_background，进程仍存活；不能记为用户离开页面。"}</p></div>
+                <div><Badge tone="warn">20.1%</Badge><strong>{isFulfillmentDiagnosis ? "实时加载失败" : "页面离开"}</strong><p>{isFulfillmentDiagnosis ? "仅统计 Cache Miss 后真实发起的 realtime request。" : "收到 screen_leave，但 App 仍在前台；属于产品路径流失。"}</p></div>
                 <div><Badge tone="neutral">8.4%</Badge><strong>进程终止/无后续</strong><p>窗口内无后续事件，只能标记 unknown_exit，不强行推断。</p></div>
                 <div><Badge tone="blue">18.7%</Badge><strong>业务阻止</strong><p>频控、订阅或展示条件明确阻止，不算埋点缺失。</p></div>
               </section>
               <section className="three-column">
                 <div className="surface"><div className="surface-title"><div><h2>终止原因</h2><p>服务端推断分类</p></div></div><div className="donut-row"><div className="donut"><span>52.8%</span></div><div className="donut-legend"><span><i className="c1" />App进入后台 52.8%</span><span><i className="c2" />离开页面 20.1%</span><span><i className="c3" />频控阻止 12.5%</span><span><i className="c4" />其他 14.6%</span></div></div></div>
                 <div className="surface"><div className="surface-title"><div><h2>关键时间间隔</h2><p>P50 / P90</p></div></div><div className="timing-list"><div><span>连接成功 → 后台</span><strong>1.8s / 5.6s</strong></div><div><span>Eligible → 页面离开</span><strong>2.3s / 8.1s</strong></div><div><span>页面动画时长</span><strong>2.0s / 3.2s</strong></div><div><span>机会等待窗口</span><strong>30s</strong></div></div></div>
-                <aside className="surface diagnostic-card"><div className="surface-title"><div><h2>路径结论</h2><p>产品行为与打点证据一致</p></div></div><h3>动画完成后才创建机会过晚</h3><p>52.8% 流失用户在动画完成前进入后台，建议将 Opportunity 提前到连接成功页可见时。</p><button className="primary-button full" onClick={() => go("evidence")}>抽查事件时间线</button></aside>
+                <aside className="surface diagnostic-card"><div className="surface-title"><div><h2>路径结论</h2><p>产品行为与打点证据一致</p></div></div><h3>{isFulfillmentDiagnosis ? "缓存 Context 丢失是主要履约阻塞" : "动画完成后才创建机会过晚"}</h3><p>{isFulfillmentDiagnosis ? "优先检查缓存对象是否保存 instanceContext，并在取出时绑定当前 opportunity_id；实时加载失败单独按 error_code 拆解。" : "52.8% 流失用户在动画完成前进入后台，建议将 Opportunity 提前到连接成功页可见时。"}</p><button className="primary-button full" onClick={() => go("evidence")}>抽查事件时间线</button></aside>
               </section>
             </div>
           )}
 
           {module === "funnel" && page === "evidence" && (
             <div className="page-stack">
-              <section className="evidence-head surface"><div><div className="eyebrow">样本 user_pseudo_id · u_8f1a***92</div><h2>事件证据时间线</h2><p>IRAN-VPN-01 · Android 1.8.0 · Iran · session=s_728c</p></div><Segmented label="证据模式" active={evidenceMode} onChange={setEvidenceMode} items={[{ key: "user", label: "用户事件链" }, { key: "ad", label: "广告关联链" }]} /></section>
+              <section className="evidence-head surface"><div><div className="eyebrow">样本 user_pseudo_id · u_8f1a***92</div><h2>{transition.from} → {transition.to} 事件证据</h2><p>{project} · Android 1.8.0 · Iran · session=s_728c</p></div><Segmented label="证据模式" active={evidenceMode} onChange={setEvidenceMode} items={[{ key: "user", label: "用户事件链" }, { key: "ad", label: "广告关联链" }]} /></section>
               <section className="two-column wide-left evidence-layout">
                 <div className="surface">
-                  <div className="surface-title"><div><h2>{evidenceMode === "ad" ? "Opportunity → Paid 关联链" : "用户会话完整时间线"}</h2><p>event_id 去重 · event_time 排序 · 未知事件进入隔离区</p></div><div><Badge tone="bad">1 个链路异常</Badge> <Badge tone="warn">1 个P1缺失</Badge></div></div>
+                  <div className="surface-title"><div><h2>{evidenceMode === "ad" ? "预加载库存 → 当前机会 → Paid 关联链" : "用户会话完整时间线"}</h2><p>event_id 去重 · event_time 排序 · 预加载不要求 opportunity_id</p></div><div><Badge tone="bad">1 个链路异常</Badge> <Badge tone="warn">1 个P1缺失</Badge></div></div>
                   <div className="evidence-controls"><label>事件/ID<input placeholder="搜索 event_name 或 request_id" /></label><label>来源<select><option>全部来源</option><option>Firebase</option><option>质量引擎</option></select></label><button className={onlyErrors ? "active" : ""} onClick={() => setOnlyErrors(!onlyErrors)}>{onlyErrors ? "显示全部事件" : "仅看异常 3"}</button></div>
                   <div className="event-timeline">{visibleEvents.map(({ event, index }) => <button key={`${event.time}-${event.name}`} className={`${selectedEvent === index ? "selected" : ""} ${event.result === "缺失" || event.result === "链路异常" ? "event-bad" : ""}`} onClick={() => setSelectedEvent(index)}><span className="event-time">{event.time}</span><span className="event-dot" /><div><strong>{event.name}</strong><p>{event.detail}</p><small>{event.id} · {event.source}</small></div><Badge tone={event.result === "有效" ? "good" : event.result === "P1缺失" ? "warn" : "bad"}>{event.result}</Badge></button>)}</div>
                 </div>
                 <aside className="surface event-detail">
                   <div className="surface-title"><div><h2>事件详情</h2><p>{eventRows[selectedEvent].name}</p></div></div>
                   <div className="validation-summary"><Badge tone={eventRows[selectedEvent].result === "有效" ? "good" : "bad"}>{eventRows[selectedEvent].result}</Badge><strong>{eventRows[selectedEvent].time}</strong></div>
-                  <dl><div><dt>event_id</dt><dd>{eventRows[selectedEvent].id}</dd></div><div><dt>opportunity_id</dt><dd className={selectedEvent === 5 ? "negative" : ""}>{selectedEvent === 5 ? "缺失" : "opp_82c"}</dd></div><div><dt>request_id</dt><dd>req_91a</dd></div><div><dt>ad_instance_id</dt><dd>{selectedEvent > 2 ? "ins_671" : "—"}</dd></div><div><dt>placement</dt><dd>vpn_connect_success</dd></div><div><dt>ad_format</dt><dd>interstitial</dd></div><div><dt>数据来源</dt><dd>{eventRows[selectedEvent].source}</dd></div></dl>
-                  {selectedEvent === 5 && <div className="conclusion-block bad"><strong>CHAIN_INVALID</strong><p>缓存广告对象取出时没有绑定当前 opportunity_id；request_id 和 ad_instance_id 正常。</p></div>}
+                  <dl><div><dt>event_id</dt><dd>{eventRows[selectedEvent].id}</dd></div><div><dt>opportunity_id</dt><dd className={eventRows[selectedEvent].name === "jk_ad_impression" ? "negative" : ""}>{eventRows[selectedEvent].name === "jk_ad_impression" ? "缺失" : selectedEvent < 3 ? "—（预加载不传）" : "opp_82c"}</dd></div><div><dt>request_id</dt><dd>{selectedEvent < 3 ? "req_pre_91a" : "—（缓存命中无新请求）"}</dd></div><div><dt>request_type</dt><dd>{eventRows[selectedEvent].requestType}</dd></div><div><dt>is_preload</dt><dd>{eventRows[selectedEvent].requestType === "preload" ? "1" : "0 / 不适用"}</dd></div><div><dt>cache_status</dt><dd>{eventRows[selectedEvent].cacheStatus}</dd></div><div><dt>ad_instance_id</dt><dd>{selectedEvent > 0 ? "ins_671" : "—"}</dd></div><div><dt>placement</dt><dd>vpn_connect_success</dd></div><div><dt>数据来源</dt><dd>{eventRows[selectedEvent].source}</dd></div></dl>
+                  {eventRows[selectedEvent].name === "jk_ad_impression" && <div className="conclusion-block bad"><strong>CHAIN_INVALID</strong><p>缓存广告对象取出时没有绑定当前 opportunity_id；预加载 request_id 和 ad_instance_id 正常。</p></div>}
                   <div className="detail-actions"><button onClick={() => { setRawOpen(!rawOpen); }}>{rawOpen ? "收起原始参数" : "查看原始参数"}</button><button onClick={() => notify("事件证据链接已复制")}>复制证据链接</button></div>
-                  {rawOpen && <pre className="raw-payload">{`{\n  "event_name": "${eventRows[selectedEvent].name}",\n  "event_id": "${eventRows[selectedEvent].id}",\n  "request_id": "req_91a",\n  "opportunity_id": ${selectedEvent === 5 ? "null" : "\"opp_82c\""},\n  "schema_version": "1.7"\n}`}</pre>}
+                  {rawOpen && <pre className="raw-payload">{`{\n  "event_name": "${eventRows[selectedEvent].name}",\n  "event_id": "${eventRows[selectedEvent].id}",\n  "request_type": "${eventRows[selectedEvent].requestType}",\n  "is_preload": ${eventRows[selectedEvent].requestType === "preload" ? 1 : 0},\n  "cache_status": "${eventRows[selectedEvent].cacheStatus}",\n  "request_id": ${selectedEvent < 3 ? "\"req_pre_91a\"" : "null"},\n  "opportunity_id": ${eventRows[selectedEvent].name === "jk_ad_impression" ? "null" : selectedEvent < 3 ? "null" : "\"opp_82c\""},\n  "schema_version": "1.7"\n}`}</pre>}
                   <button className="primary-button full" onClick={() => { go("issues"); notify("事件证据已加入问题单"); }}>将证据加入问题单</button>
                 </aside>
               </section>
@@ -589,13 +702,13 @@ export default function Home() {
           {module === "funnel" && page === "issues" && (
             <div className="page-stack">
               <section className="surface">
-                <div className="surface-title"><div><h2>ISSUE-20260811-024 · Opportunity 覆盖率异常</h2><p>IRAN-VPN-01 · P0 · 负责人：客户端增长组 / Oliver · SLA 剩余 18 小时</p></div><Badge tone={issueStatus === "重测中" ? "blue" : "warn"}>{issueStatus}</Badge></div>
+                <div className="surface-title"><div><h2>ISSUE-20260811-024 · {transition.from} → {transition.to} 异常</h2><p>{project} · P0 · 负责人：客户端增长组 / Oliver · SLA 剩余 18 小时</p></div><Badge tone={issueStatus === "重测中" ? "blue" : "warn"}>{issueStatus}</Badge></div>
                 <div className="issue-workflow">{[["已发现", "8/11 10:32"], ["已定位", "8/11 11:08"], ["修复中", "预计 8/12"], ["打点重测", issueStatus === "重测中" ? "采集中" : "待开始"], ["灰度验证", "待开始"], ["关闭", "指标恢复"]].map(([label, time], index) => <div key={label} className={`${index < issuePhase ? "done" : index === issuePhase ? "current" : ""}`}><span>{index < issuePhase ? "✓" : index + 1}</span><strong>{label}</strong><small>{time}</small></div>)}</div>
               </section>
               <section className="two-column wide-left">
                 <div className="surface">
                   <div className="surface-title"><div><h2>问题定义与修复计划</h2><p>所有结论必须关联漏斗版本和事件证据</p></div><button className="secondary-button" onClick={() => go("evidence")}>查看证据</button></div>
-                  <div className="issue-form-grid"><div><label>异常步骤</label><strong>Eligible → Opportunity</strong></div><div><label>影响范围</label><strong>伊朗 · Android 1.8.0</strong></div><div><label>异常开始</label><strong>2026-08-09 14:20</strong></div><div><label>预计收入影响</label><strong className="negative">$2,807 / 日</strong></div><div className="span-2"><label>根因</label><strong>连接成功页动画完成后才生成 Opportunity，弱网用户提前进入后台；同时缓存对象没有完整保存 instanceContext。</strong></div><div className="span-2"><label>修复方案</label><strong>页面可见立即创建 Opportunity；缓存广告取出时绑定当前 opportunity_id；补充 background_reason。</strong></div><div><label>修复版本</label><strong>1.8.1 (109)</strong></div><div><label>关联测试 Run</label><strong>待生成</strong></div></div>
+                  <div className="issue-form-grid"><div><label>异常步骤</label><strong>{transition.from} → {transition.to}</strong></div><div><label>影响范围</label><strong>伊朗 · Android 1.8.0</strong></div><div><label>异常开始</label><strong>2026-08-09 14:20</strong></div><div><label>预计收入影响</label><strong className="negative">$2,807 / 日</strong></div><div className="span-2"><label>根因</label><strong>{isFulfillmentDiagnosis ? "缓存对象没有完整保存 instanceContext，取出后未绑定当前 opportunity_id；部分 Cache Miss 的 realtime load 超时。" : "连接成功页动画完成后才生成 Opportunity，弱网用户提前进入后台。"}</strong></div><div className="span-2"><label>修复方案</label><strong>{isFulfillmentDiagnosis ? "广告对象与 instanceContext 一起缓存；命中时绑定当前 opportunity_id；实时加载按 error_code 与耗时分层告警。" : "页面可见立即创建 Opportunity；补充 background_reason，并验证场景到达窗口。"}</strong></div><div><label>修复版本</label><strong>1.8.1 (109)</strong></div><div><label>关联测试 Run</label><strong>待生成</strong></div></div>
                   <div className="action-bar"><button className="secondary-button" onClick={() => notify("修复说明已保存")}>保存修复说明</button><button className="primary-button" onClick={() => setDialog("retest-run")}>发起打点重测</button></div>
                 </div>
                 <aside className="surface">
@@ -615,26 +728,29 @@ export default function Home() {
           {module === "funnel" && page === "snapshot" && (
             <div className="page-stack">
               <section className="snapshot-head surface"><div><div className="eyebrow">只读执行快照</div><h2>IRAN-VPN-01 · 漏斗口径 V1.7</h2><p>生效于 2026-08-01 · 套利 VPN v1.7 ＋ 广告 v1.7 ＋ VPN v1.7</p></div><div><Badge tone="good">已发布</Badge> <button className="secondary-button" onClick={() => notify("已定位到项目类型设置中的 V1.7 配置")}>前往项目类型设置</button></div></section>
-              <section className="metric-grid five"><Metric label="产品漏斗" value="6 步" note="严格顺序" /><Metric label="变现用户漏斗" value="8 步" note="UV 去重" /><Metric label="变现事件漏斗" value="6 步" note="event_id 去重" /><Metric label="转化窗口" value="30 分钟" note="跨会话不合并" /><Metric label="规范版本" value="V1.7" note="schema_version 1.7" /></section>
+              <section className="metric-grid five"><Metric label="产品漏斗" value="6 步" note="严格顺序" /><Metric label="变现用户主漏斗" value="7 步" note="UV 去重" /><Metric label="变现事件主漏斗" value="6 步" note="event_id 去重" /><Metric label="履约与库存" value="2 条分支" note="独立于主漏斗" /><Metric label="规范版本" value="V1.7" note="schema_version 1.7" /></section>
               <section className="surface">
                 <div className="surface-title"><div><h2>变现用户漏斗定义</h2><p>Firebase 实时口径；AdMob 数据仅用于结算对账</p></div><Badge tone="blue">User Funnel</Badge></div>
                 <div className="table-wrap"><table><thead><tr><th>步骤</th><th>事件</th><th>用户判定</th><th>条件/窗口</th><th>关键关联字段</th><th>优先级</th><th>数据源</th></tr></thead><tbody>{[
                   ["DAU", "app_active", "当日活跃去重用户", "自然日", "user_pseudo_id", "P0", "Firebase"],
-                  ["Eligible", "jk_ad_eligible", "eligible=1 的去重用户", "活跃后", "session_id", "P0", "Firebase"],
+                  ["Eligibility Check", "jk_ad_eligibility_check", "执行过资格检查的去重用户", "活跃后", "session_id / placement", "P0", "Firebase"],
+                  ["Eligible", "jk_ad_eligibility_check", "eligible=1 的去重用户", "检查后", "session_id / eligible", "P0", "Firebase"],
                   ["Opportunity", "jk_ad_opportunity", "生成真实展示机会", "Eligible后30分钟", "opportunity_id", "P0", "Firebase"],
-                  ["Request", "jk_ad_request", "发起真实Load的用户", "Opportunity后", "request_id / opportunity_id", "P0", "Firebase"],
-                  ["Load", "jk_ad_load_success", "SDK加载成功用户", "Request后", "ad_instance_id / request_id", "P0", "Firebase"],
-                  ["Show Attempt", "jk_ad_show_attempt", "业务调用show的用户", "Load后", "ad_instance_id", "P0", "Firebase"],
-                  ["AV", "jk_ad_impression", "至少1次Impression用户", "Show Attempt后", "opportunity_id / request_id", "P0", "Firebase"],
+                  ["Show Attempt", "jk_ad_show_attempt", "缓存或实时分支履约后调用show", "Opportunity后", "opportunity_id / ad_instance_id", "P0", "Firebase"],
+                  ["AV", "jk_ad_impression", "至少1次Impression用户", "Show Attempt后", "opportunity_id / ad_instance_id", "P0", "Firebase"],
                   ["Paid", "jk_ad_paid_event", "收到Paid回调用户", "Impression后", "ad_instance_id", "条件P0", "Firebase"],
                 ].map((row) => <tr key={row[0]}>{row.map((cell, index) => <td key={index}>{index === 5 ? <Badge tone="bad">{cell}</Badge> : cell}</td>)}</tr>)}</tbody></table></div>
+              </section>
+              <section className="two-column snapshot-branches">
+                <div className="surface"><div className="surface-title"><div><h2>机会履约分支定义</h2><p>同一 opportunity_id 只能先进入缓存命中或缓存未命中分支</p></div><Badge tone="blue">Fulfillment</Badge></div><div className="definition-list"><div><strong>Cache Hit</strong><p>命中时不产生新 request_id；必须把当前 opportunity_id 绑定到缓存广告的 ad_instance_id。</p></div><div><strong>Cache Miss</strong><p>未命中后才允许 Realtime Request；request_type=realtime、is_preload=0，并携带 opportunity_id。</p></div><div><strong>Realtime Load</strong><p>以 request_id 关联加载结果；失败和超时必须有 error_code/error_domain。</p></div><div><strong>Show Attempt</strong><p>缓存或实时分支在这里汇合；按 opportunity_id 去重计算机会履约率。</p></div></div></div>
+                <aside className="surface"><div className="surface-title"><div><h2>预加载库存定义</h2><p>发生在业务场景之前，只评估库存效率</p></div><Badge tone="warn">Inventory</Badge></div><div className="definition-list"><div><strong>Preload Trigger → Request</strong><p>request_type=preload、is_preload=1，禁止传 opportunity_id。</p></div><div><strong>Load Success → Cache Store</strong><p>生成并保存 ad_instance_id；广告对象必须与 instanceContext 一起进入缓存。</p></div><div><strong>Hit / Expired / Evicted</strong><p>分别计算消费、过期和淘汰；不能将预加载 Request 放进用户主漏斗。</p></div></div></aside>
               </section>
               <section className="two-column">
                 <div className="surface"><div className="surface-title"><div><h2>统一计算规则</h2><p>避免不同页面出现不同答案</p></div></div><div className="rule-grid"><div><span>用户去重</span><strong>project_code + user_pseudo_id</strong></div><div><span>事件去重</span><strong>event_id</strong></div><div><span>顺序模式</span><strong>严格按 event_time</strong></div><div><span>同一步重复</span><strong>仅取首次到达</strong></div><div><span>缺失事件</span><strong>进入质量隔离区，不补算</strong></div><div><span>未知 jk_ 事件</span><strong>allowlist 外进入隔离表</strong></div></div></div>
                 <aside className="surface"><div className="surface-title"><div><h2>数据时效</h2><p>页面必须明确显示数据状态</p></div></div><div className="source-list"><div><Badge tone="blue">T+0</Badge><strong>Firebase 实时预估</strong><small>用户与事件漏斗，延迟约 5–15 分钟</small></div><div><Badge tone="good">T+3</Badge><strong>AdMob 已结算</strong><small>收入、匹配率、展示率与广告浏览者</small></div><div><Badge tone="neutral">对账</Badge><strong>Firebase × AdMob</strong><small>只在已结算日期输出最终差异</small></div></div></aside>
               </section>
               <section className="two-column">
-                <div className="surface"><div className="surface-title"><div><h2>核心指标公式</h2><p>页面、导出和告警统一引用</p></div></div><div className="formula-list"><div><strong>广告浏览者比例</strong><code>COUNT_DISTINCT(impression_user) / DAU</code><p>回答有多少活跃用户真正看到了广告。</p></div><div><strong>Opportunity覆盖率</strong><code>COUNT_DISTINCT(opportunity_user) / DAU</code><p>定位广告请求之前的机会覆盖问题。</p></div><div><strong>展示尝试成功率</strong><code>impression_count / show_attempt_count</code><p>定位真实调用 Show 后的展示失败。</p></div><div><strong>人均展示次数</strong><code>impression_count / AV</code><p>判断展示是否集中在少数用户。</p></div></div></div>
+                <div className="surface"><div className="surface-title"><div><h2>核心指标公式</h2><p>页面、导出和告警统一引用；总Request不可作为机会主漏斗分母</p></div></div><div className="formula-list"><div><strong>广告浏览者比例</strong><code>COUNT_DISTINCT(impression_user) / DAU</code><p>回答有多少活跃用户真正看到了广告。</p></div><div><strong>Opportunity覆盖率</strong><code>COUNT_DISTINCT(opportunity_user) / DAU</code><p>定位真实广告机会覆盖问题。</p></div><div><strong>机会履约率</strong><code>COUNT_DISTINCT(opportunity_id with cache_hit or realtime_request) / COUNT_DISTINCT(opportunity_id)</code><p>缓存与实时两条路径合并判断。</p></div><div><strong>缓存命中率</strong><code>cache_hit / (cache_hit + cache_miss)</code><p>判断现有库存能否满足真实机会。</p></div><div><strong>预加载成功率</strong><code>preload_load_success / preload_request</code><p>仅评估预加载库存生产效率。</p></div><div><strong>缓存浪费率</strong><code>(cache_expired + cache_evicted) / cache_store</code><p>定位TTL、缓存容量和触发策略问题。</p></div><div><strong>展示尝试成功率</strong><code>impression_count / show_attempt_count</code><p>定位真实调用 Show 后的展示失败。</p></div><div><strong>人均展示次数</strong><code>impression_count / AV</code><p>判断展示是否集中在少数用户。</p></div></div></div>
                 <aside className="surface"><div className="surface-title"><div><h2>版本变更</h2><p>当前口径相对 V1.6</p></div><Badge tone="blue">V1.7</Badge></div><div className="version-diff"><div><span>新增</span><p>ip_before_connect / ip_after_connect 诊断字段</p></div><div><span>调整</span><p>ip_after_connect 在广告拉取事件中传输派生信息</p></div><div><span>明确</span><p>完整 IP 不进入 Firebase，且不作为漏斗步骤</p></div><button onClick={() => setDialog("version-diff-report")}>导出版本差异</button></div></aside>
               </section>
             </div>
