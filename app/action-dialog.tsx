@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { defaultSelectedEventIds, trackingConfigs, trackingEventCatalog, type TrackingConfigRecord } from "./tracking-config-data";
 
 export type DialogKey =
   | "project-report"
@@ -43,9 +44,9 @@ const dialogMeta: Record<DialogKey, DialogMeta> = {
   "version-diff-report": { title: "导出版本差异", description: "选择对比版本、影响范围和输出内容", submit: "创建导出任务", endpoint: "POST /api/v1/export-jobs", idLabel: "export_job_id", prefix: "DIF" },
   "event-dictionary": { title: "Firebase 事件字典", description: "查看已发布事件、优先级、参数与移动端可得性", submit: "关闭", endpoint: "GET /api/v1/event-dictionary", idLabel: "", prefix: "" },
   "reconcile-run": { title: "发起重新对账", description: "冻结日期边界、数据源、指标和口径版本", submit: "开始重新对账", endpoint: "POST /api/v1/reconciliation-runs", idLabel: "reconciliation_run_id", prefix: "REC" },
-  "tracking-run": { title: "新建验收 Run", description: "冻结项目、App、构建、设备和应测事件快照", submit: "创建并开始验收", endpoint: "POST /api/v1/tracking-runs", idLabel: "run_id", prefix: "RUN" },
+  "tracking-run": { title: "新建验收 Run", description: "选择已发布打点配置，并冻结项目、App、构建、设备和应收事件快照", submit: "按配置创建验收", endpoint: "POST /api/v1/tracking-runs", idLabel: "run_id", prefix: "RUN" },
   "retest-run": { title: "发起失败项重测", description: "继承原快照并只验证选中的失败事件和关联链", submit: "创建重测 Run", endpoint: "POST /api/v1/tracking-runs/retest", idLabel: "run_id", prefix: "RET" },
-  "config-version": { title: "新建配置版本", description: "基于已发布版本创建具备独立规范号的草稿", submit: "创建版本草稿", endpoint: "POST /api/v1/config-versions", idLabel: "config_version_id", prefix: "CFG" },
+  "config-version": { title: "新建打点配置", description: "从全量事件库选择本版本应测打点，并生成可供验收引用的发布快照", submit: "校验并发布快照", endpoint: "POST /api/v1/tracking-configs", idLabel: "config_id", prefix: "CFG" },
   "project-category": { title: "新增项目主品类", description: "定义品类、平台、默认能力包、漏斗与P0门禁", submit: "创建主品类", endpoint: "POST /api/v1/project-categories", idLabel: "category_id", prefix: "CAT" },
   "publish-approval": { title: "提交发布审批", description: "提交门禁结果、灰度范围、风险和回滚方案", submit: "提交审批", endpoint: "POST /api/v1/release-approvals", idLabel: "approval_id", prefix: "APP" },
   "alert-rule": { title: "新建告警规则", description: "配置计算窗口、触发/恢复阈值、降噪与通知范围", submit: "创建告警规则", endpoint: "POST /api/v1/alert-rules", idLabel: "alert_rule_id", prefix: "ALT" },
@@ -94,6 +95,13 @@ const internalAppCatalog = [
   { projectCode: "AIVORA-LAUNCHER", id: "app_aivora_android", name: "Aivora Launcher Android", platform: "Android", appIdentifier: "com.aivora.launcher" },
 ] as const;
 
+const runAppProfiles: Record<string, { category: string; platform: string; appIdentifier: string; appVersion: string; buildNumber: string }> = {
+  "IRAN-VPN-01": { category: "套利 VPN", platform: "Android", appIdentifier: "com.jkcl.iran.vpn", appVersion: "1.8.1", buildNumber: "109" },
+  "FAST-VPN-02": { category: "套利 VPN", platform: "Android", appIdentifier: "com.jkcl.fast.vpn", appVersion: "2.3.1", buildNumber: "231" },
+  "CLEAN-MAX-03": { category: "清理", platform: "Android", appIdentifier: "com.jkcl.clean.max", appVersion: "3.2.0", buildNumber: "320" },
+  "AIVORA-LAUNCHER": { category: "Launcher", platform: "Android", appIdentifier: "com.aivora.launcher", appVersion: "1.4.0", buildNumber: "140" },
+};
+
 function Field({ label, required, help, span, children }: { label: string; required?: boolean; help?: string; span?: boolean; children: React.ReactNode }) {
   return <label className={span ? "span-2" : undefined}><span className="field-label">{label}{required && <em>*</em>}</span>{children}{help && <small className="field-help">{help}</small>}</label>;
 }
@@ -118,7 +126,7 @@ function makeResultId(prefix: string) {
   return `${prefix}-${stamp}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 }
 
-export function ActionDialog({ dialog, project, onClose, onSubmit }: { dialog: DialogKey; project: string; onClose: () => void; onSubmit: (result: DialogResult) => void }) {
+export function ActionDialog({ dialog, project, configs = trackingConfigs, onClose, onSubmit }: { dialog: DialogKey; project: string; configs?: TrackingConfigRecord[]; onClose: () => void; onSubmit: (result: DialogResult) => void }) {
   const meta = dialogMeta[dialog];
   const isDictionary = dialog === "event-dictionary";
   const [phase, setPhase] = useState<"form" | "submitting" | "success">("form");
@@ -128,6 +136,14 @@ export function ActionDialog({ dialog, project, onClose, onSubmit }: { dialog: D
   const [authType, setAuthType] = useState("service_account");
   const [dictionaryKeyword, setDictionaryKeyword] = useState("");
   const [dictionaryPriority, setDictionaryPriority] = useState("all");
+  const [configStep, setConfigStep] = useState(1);
+  const [configKeyword, setConfigKeyword] = useState("");
+  const [configCapability, setConfigCapability] = useState("all");
+  const [configSelectionView, setConfigSelectionView] = useState<"all" | "selected" | "warning">("all");
+  const [selectedConfigEventIds, setSelectedConfigEventIds] = useState<string[]>(defaultSelectedEventIds);
+  const [runProject, setRunProject] = useState(project);
+  const firstRunConfig = configs.find((config) => config.status === "PUBLISHED" && config.projects.includes(project)) ?? configs.find((config) => config.status === "PUBLISHED")!;
+  const [runConfigId, setRunConfigId] = useState(firstRunConfig?.id ?? "");
   const [connectionId, setConnectionId] = useState<keyof typeof firebaseInventory>("conn-growth");
   const initialProject = Object.keys(firebaseInventory[connectionId].projects)[0];
   const [firebaseProjectId, setFirebaseProjectId] = useState(initialProject);
@@ -144,6 +160,25 @@ export function ActionDialog({ dialog, project, onClose, onSubmit }: { dialog: D
   const internalAppOptions = internalAppCatalog.filter((item) => item.projectCode === internalProjectCode);
   const selectedInternalApp = internalAppOptions.find((item) => item.id === internalAppId) ?? internalAppOptions[0];
   const packageMatches = selectedInternalApp?.platform === selectedApp.platform && selectedInternalApp?.appIdentifier === selectedApp.packageName;
+
+  const compatibleRunConfigs = configs.filter((config) => config.status === "PUBLISHED" && config.projects.includes(runProject));
+  const selectedRunConfig = compatibleRunConfigs.find((config) => config.id === runConfigId) ?? compatibleRunConfigs[0] ?? firstRunConfig;
+  const selectedRunApp = runAppProfiles[runProject] ?? runAppProfiles["IRAN-VPN-01"];
+  const selectedConfigEvents = trackingEventCatalog.filter((event) => selectedConfigEventIds.includes(event.id));
+  const selectedPriorityCounts = {
+    P0: selectedConfigEvents.filter((event) => event.priority === "P0").length,
+    P1: selectedConfigEvents.filter((event) => event.priority === "P1").length,
+    P2: selectedConfigEvents.filter((event) => event.priority === "P2").length,
+  };
+  const visibleConfigEvents = trackingEventCatalog.filter((event) => {
+    const matchesKeyword = !configKeyword || `${event.name} ${event.stage} ${event.capability} ${event.provider}`.toLowerCase().includes(configKeyword.toLowerCase());
+    const matchesCapability = configCapability === "all" || event.capability === configCapability;
+    const matchesView = configSelectionView === "all" || (configSelectionView === "selected" && selectedConfigEventIds.includes(event.id)) || (configSelectionView === "warning" && event.state === "WARNING");
+    return matchesKeyword && matchesCapability && matchesView;
+  });
+  const visibleConfigEventPage = visibleConfigEvents.slice(0, 20);
+  const visibleIds = visibleConfigEvents.map((event) => event.id);
+  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedConfigEventIds.includes(id));
 
   const dictionaryRows = useMemo(() => [
     ["jk_ad_request", "广告请求", "P0", "13", "稳定可得", "V1.7"],
@@ -170,7 +205,16 @@ export function ActionDialog({ dialog, project, onClose, onSubmit }: { dialog: D
     if (dialog === "project-category") requireOne("capability_packages", "请至少选择一个默认能力包");
     if (dialog === "alert-rule") requireOne("notification_targets", "请至少选择一个通知对象");
     if (dialog === "publish-approval" && payload.risk_accepted !== "1") nextErrors.push("存在发布提醒，必须确认已接受风险");
-    if (dialog === "config-version" && payload.spec_version === payload.base_spec_version) nextErrors.push("新规范版本不能与基础版本相同");
+    if (dialog === "config-version") {
+      if (selectedConfigEventIds.length === 0) nextErrors.push("请至少选择一个应测事件");
+      if (selectedPriorityCounts.P0 === 0) nextErrors.push("当前配置至少需要一个 P0 事件");
+      requireOne("project_codes", "请至少关联一个项目");
+      if (payload.confirm_immutable_snapshot !== "1") nextErrors.push("请确认发布快照不可直接修改");
+    }
+    if (dialog === "tracking-run") {
+      if (!selectedRunConfig) nextErrors.push("当前项目没有可用的已发布打点配置，请先发布配置快照");
+      if (!payload.tracking_config_id) nextErrors.push("请选择已发布的打点配置");
+    }
     if (dialog === "firebase-binding" && !packageMatches) nextErrors.push("Firebase App与公司App档案的包名或平台不一致");
     if (dialog === "firebase-binding" && payload.confirm_package_match !== "1") nextErrors.push("请确认包名、平台和公司App档案匹配");
     return nextErrors;
@@ -182,6 +226,22 @@ export function ActionDialog({ dialog, project, onClose, onSubmit }: { dialog: D
     const form = event.currentTarget;
     if (!form.reportValidity()) return;
     const payload = normalizeForm(form);
+    if (dialog === "config-version") {
+      payload.event_ids = selectedConfigEventIds;
+      payload.selected_event_count = String(selectedConfigEventIds.length);
+      payload.p0_event_count = String(selectedPriorityCounts.P0);
+      payload.p1_event_count = String(selectedPriorityCounts.P1);
+      payload.p2_event_count = String(selectedPriorityCounts.P2);
+      payload.snapshot_mode = "immutable_on_publish";
+    }
+    if (dialog === "tracking-run" && selectedRunConfig) {
+      payload.tracking_config_id = selectedRunConfig.id;
+      payload.tracking_config_version = selectedRunConfig.version;
+      payload.config_snapshot_id = selectedRunConfig.snapshotId ?? "";
+      payload.expected_event_count = String(selectedRunConfig.selectedCount);
+      payload.p0_event_count = String(selectedRunConfig.p0Count);
+      payload.expected_scene_count = String(selectedRunConfig.sceneCount);
+    }
     const nextErrors = validate(payload);
     if (nextErrors.length) {
       setErrors(nextErrors);
@@ -202,6 +262,29 @@ export function ActionDialog({ dialog, project, onClose, onSubmit }: { dialog: D
       setPhase("success");
       onSubmit(created);
     }, 520);
+  }
+
+  function nextConfigStep() {
+    if (configStep === 1) {
+      const form = document.querySelector<HTMLFormElement>(".modal-panel form");
+      const requiredInputs = Array.from(form?.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(".config-step-panel:not(.config-step-hidden) [required]") ?? []);
+      const invalid = requiredInputs.find((input) => !input.checkValidity());
+      if (invalid) {
+        invalid.reportValidity();
+        return;
+      }
+      const checkedProjects = form?.querySelectorAll<HTMLInputElement>('input[name="project_codes"]:checked').length ?? 0;
+      if (!checkedProjects) {
+        setErrors(["请至少关联一个项目"]);
+        return;
+      }
+    }
+    if (configStep === 2 && selectedConfigEventIds.length === 0) {
+      setErrors(["请至少选择一个应测事件"]);
+      return;
+    }
+    setErrors([]);
+    setConfigStep((step) => Math.min(4, step + 1));
   }
 
   function switchConnection(next: keyof typeof firebaseInventory) {
@@ -233,10 +316,26 @@ export function ActionDialog({ dialog, project, onClose, onSubmit }: { dialog: D
     if (firstApp) setInternalAppId(firstApp.id);
   }
 
+  function switchRunProject(next: string) {
+    setRunProject(next);
+    const nextConfig = configs.find((config) => config.status === "PUBLISHED" && config.projects.includes(next));
+    setRunConfigId(nextConfig?.id ?? "");
+  }
+
+  function toggleConfigEvent(eventId: string) {
+    setSelectedConfigEventIds((current) => current.includes(eventId) ? current.filter((id) => id !== eventId) : [...current, eventId]);
+  }
+
+  function toggleVisibleConfigEvents() {
+    setSelectedConfigEventIds((current) => allVisibleSelected
+      ? current.filter((id) => !visibleIds.includes(id))
+      : Array.from(new Set([...current, ...visibleIds])));
+  }
+
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <section className="modal-panel modal-panel-v5" role="dialog" aria-modal="true" aria-labelledby="action-dialog-title">
-        <header><div><div className="dialog-version">V8 · 可实施表单</div><h2 id="action-dialog-title">{phase === "success" ? `${meta.title}成功` : meta.title}</h2><p>{phase === "success" ? "系统已返回业务ID，后续状态可在对应任务或配置页面追踪。" : meta.description}</p></div><button type="button" aria-label="关闭弹窗" onClick={onClose}>×</button></header>
+      <section className={`modal-panel modal-panel-v5 ${dialog === "config-version" ? "modal-panel-config-wizard" : ""}`} role="dialog" aria-modal="true" aria-labelledby="action-dialog-title">
+        <header><div><div className="dialog-version">V9 · 配置快照工作流</div><h2 id="action-dialog-title">{phase === "success" ? `${meta.title}成功` : meta.title}</h2><p>{phase === "success" ? "系统已返回业务ID，后续状态可在对应任务或配置页面追踪。" : meta.description}</p></div><button type="button" aria-label="关闭弹窗" onClick={onClose}>×</button></header>
 
         {phase === "success" && result ? (
           <div className="dialog-result">
@@ -252,6 +351,10 @@ export function ActionDialog({ dialog, project, onClose, onSubmit }: { dialog: D
           <form onSubmit={submit} noValidate={false}>
             <div className="modal-body">
               {errors.length > 0 && <div className="form-errors" role="alert"><strong>请完成以下内容</strong>{errors.map((error) => <p key={error}>• {error}</p>)}</div>}
+
+              {dialog === "config-version" && <div className="config-wizard-steps" aria-label="打点配置创建步骤">{[
+                [1, "基本信息"], [2, "选择打点"], [3, "规则确认"], [4, "校验发布"],
+              ].map(([step, label]) => <button type="button" key={step} className={configStep === step ? "active" : configStep > Number(step) ? "done" : ""} onClick={() => setConfigStep(Number(step))}><span>{configStep > Number(step) ? "✓" : step}</span><strong>{label}</strong></button>)}</div>}
 
               {dialog === "diagnosis" && <div className="modal-form-grid">
                 <Field label="项目" required help="提交后不可更换项目"><select name="project_code" defaultValue={project} required><option>{project}</option><option>CLEAN-MAX-03</option><option>AIVORA-LAUNCHER</option></select></Field>
@@ -311,35 +414,52 @@ export function ActionDialog({ dialog, project, onClose, onSubmit }: { dialog: D
               {(dialog === "tracking-run" || dialog === "retest-run") && <div className="modal-form-grid">
                 <Field label="Run名称" required span><input name="run_name" defaultValue={dialog === "retest-run" ? "IRAN-VPN-01 失败项重测" : "IRAN-VPN-01 V1.8.1 打点验收"} required /></Field>
                 {dialog === "retest-run" && <Field label="原Run ID" required span><input name="parent_run_id" value="RUN-20260811-IRAN-001" readOnly required /></Field>}
-                <Field label="项目" required><select name="project_code" defaultValue={project} required><option>{project}</option><option>CLEAN-MAX-03</option><option>AIVORA-LAUNCHER</option></select></Field>
-                <Field label="项目品类" required help="由项目配置自动带出"><select name="category_id" required><option value="vpn_v17">套利 VPN v1.7</option><option value="clean_v15">清理 v1.5</option><option value="launcher_v13">Launcher v1.3</option></select></Field>
-                <Field label="平台" required><select name="platform" required><option>Android</option><option>iOS</option></select></Field>
-                <Field label="包名/Bundle ID" required><input name="app_identifier" defaultValue="com.jkcl.iran.vpn" required /></Field>
-                <Field label="App版本" required><input name="app_version" defaultValue="1.8.1" required /></Field>
-                <Field label="构建号" required><input name="build_number" defaultValue="109" inputMode="numeric" required /></Field>
+                <Field label="项目" required><select name="project_code" value={runProject} onChange={(event) => switchRunProject(event.target.value)} required><option>IRAN-VPN-01</option><option>FAST-VPN-02</option><option>CLEAN-MAX-03</option><option>AIVORA-LAUNCHER</option></select></Field>
+                <Field label="项目品类" required help="由项目档案自动带出，只用于筛选兼容配置"><input name="category_name" value={selectedRunApp.category} readOnly required /></Field>
+                {dialog === "tracking-run" && <Field label="打点配置" required span help="只显示与当前项目兼容且已发布的配置；验收分母来自配置快照，不再使用品类总数"><select name="tracking_config_id" value={selectedRunConfig?.id ?? ""} onChange={(event) => setRunConfigId(event.target.value)} required disabled={compatibleRunConfigs.length === 0}>{compatibleRunConfigs.length ? compatibleRunConfigs.map((config) => <option key={config.id} value={config.id}>{config.name} {config.version} · {config.selectedCount}/{config.totalCount}个事件</option>) : <option value="">没有已发布配置</option>}</select></Field>}
+                <Field label="平台" required><input name="platform" value={selectedRunApp.platform} readOnly required /></Field>
+                <Field label="包名/Bundle ID" required><input name="app_identifier" value={selectedRunApp.appIdentifier} readOnly required /></Field>
+                <Field label="App版本" required><input name="app_version" defaultValue={selectedRunApp.appVersion} key={`${runProject}-version`} required /></Field>
+                <Field label="构建号" required><input name="build_number" defaultValue={selectedRunApp.buildNumber} key={`${runProject}-build`} inputMode="numeric" required /></Field>
                 <Field label="测试设备" required><select name="device_id" required><option value="device_pixel8">Pixel 8 · Android 15</option><option value="device_s23">Samsung S23 · Android 14</option></select></Field>
                 <Field label="测试负责人" required><select name="tester_user_id" required><option value="u_oliver">Oliver</option><option value="team_qa">QA值班人</option></select></Field>
                 <Field label="环境" required><select name="environment" required><option value="production_test">Production Test</option><option value="staging">Staging</option></select></Field>
                 <Field label="采集截止时间" required><input name="collect_until" type="datetime-local" defaultValue="2026-08-12T18:00" required /></Field>
-                <Field label="测试范围" required span><select name="snapshot_scope" required><option value={dialog === "retest-run" ? "failed_items" : "full_vpn_ads_subscription"}>{dialog === "retest-run" ? "继承原Run的3个失败项与关联链" : "公共基础包＋VPN＋广告＋订阅（46事件）"}</option></select></Field>
+                <Field label="测试范围" required span><select name="snapshot_scope" required><option value={dialog === "retest-run" ? "failed_items" : "published_config_snapshot"}>{dialog === "retest-run" ? "继承原Run的3个失败项与关联链" : `所选配置快照中的全部 ${selectedRunConfig?.selectedCount ?? 0} 个事件`}</option></select></Field>
                 {dialog === "retest-run" && <Field label="失败项" required span><Checks name="failed_items" items={[{value:"jk_ad_impression.opportunity_id",label:"impression缺opportunity_id",checked:true},{value:"jk_ad_dismiss",label:"dismiss未收到",checked:true},{value:"background_reason",label:"background_reason缺失",checked:true}]} /></Field>}
-                <div className="snapshot-preview span-2"><span>即将冻结快照</span><strong>规范 V1.7 · P0事件31个 · P0参数100%门禁 · 保存设备与构建信息</strong></div>
+                <div className="snapshot-preview span-2"><span>{dialog === "retest-run" ? "继承原验收快照" : "即将冻结为 Run 应收快照"}</span><strong>{dialog === "retest-run" ? "SNP-VPN-180-001 · 只重测原失败项" : `${selectedRunConfig?.name ?? "—"} ${selectedRunConfig?.version ?? ""} · snapshot_id ${selectedRunConfig?.snapshotId ?? "—"}`}</strong>{dialog === "tracking-run" && selectedRunConfig && <div className="snapshot-detail-row"><b>{selectedRunConfig.selectedCount} 应收事件</b><b>{selectedRunConfig.p0Count} P0</b><b>{selectedRunConfig.sceneCount} 必测场景</b><b>P0 100%门禁</b></div>}</div>
               </div>}
 
-              {dialog === "config-version" && <div className="modal-form-grid">
-                <Field label="基础版本" required><select name="base_spec_version" required><option value="V1.7">V1.7（当前执行权威）</option><option value="V1.6">V1.6</option></select></Field>
-                <Field label="新规范版本 spec_version" required help="格式：V主版本.次版本"><input name="spec_version" defaultValue="V1.8" pattern="^V[0-9]+\.[0-9]+$" required /></Field>
-                <Field label="数据结构版本 schema_version" required><input name="schema_version" defaultValue="1.8.0" pattern="^[0-9]+\.[0-9]+\.[0-9]+$" required /></Field>
-                <Field label="变更类型" required><select name="change_type" required><option value="minor">兼容性增强</option><option value="major">破坏性调整</option><option value="patch">规则修正</option></select></Field>
-                <Field label="版本名称" required span><input name="version_name" defaultValue="跨团队埋点规范 V1.8" maxLength={80} required /></Field>
-                <Field label="负责人" required><select name="owner_user_id" required><option value="u_oliver">数据产品 / Oliver</option><option value="team_client_arch">客户端架构组</option></select></Field>
-                <Field label="技术评审人" required><select name="reviewer_user_id" required><option value="team_client_arch">客户端架构组</option><option value="team_data">数据平台负责人</option></select></Field>
-                <Field label="计划发布时间" required><input name="planned_release_date" type="date" defaultValue="2026-08-18" required /></Field>
-                <Field label="影响范围" required><select name="impact_scope" required><option value="all_apps">全部App</option><option value="vpn">仅VPN品类</option><option value="selected">指定项目</option></select></Field>
-                <Field label="继承内容" required span><Checks name="inherit_sections" items={[{value:"events",label:"事件与参数",checked:true},{value:"providers",label:"Provider与枚举",checked:true},{value:"funnels",label:"漏斗定义",checked:true},{value:"acceptance",label:"验收门禁",checked:true}]} /></Field>
-                <Field label="变更目标" required span><textarea name="change_goal" placeholder="说明本版本准备解决的问题、兼容性与迁移要求" required /></Field>
-                <div className="modal-warning span-2"><strong>版本规则</strong><p>草稿不会影响当前 V1.7；spec_version 与 schema_version 分开管理，发布前必须完成产品与技术评审。</p></div>
-              </div>}
+              {dialog === "config-version" && <>
+                <div className={`modal-form-grid config-step-panel ${configStep === 1 ? "" : "config-step-hidden"}`}>
+                  <Field label="配置名称" required span><input name="config_name" defaultValue="VPN 正式版打点配置" maxLength={80} required /></Field>
+                  <Field label="配置版本" required help="同一品类内唯一"><input name="config_version" defaultValue="V1.8" pattern="^V[0-9]+\.[0-9]+$" required /></Field>
+                  <Field label="适用品类" required><select name="category_code" required><option value="vpn">套利 VPN</option><option value="clean">清理</option><option value="launcher">Launcher</option></select></Field>
+                  <Field label="关联项目" required span help="发布后，只有这些项目可以在验收Run中选择该配置"><Checks name="project_codes" items={[{value:"IRAN-VPN-01",label:"IRAN-VPN-01",checked:true},{value:"FAST-VPN-02",label:"FAST-VPN-02",checked:true},{value:"CLEAN-MAX-03",label:"CLEAN-MAX-03"},{value:"AIVORA-LAUNCHER",label:"AIVORA-LAUNCHER"}]} /></Field>
+                  <Field label="适用平台" required><select name="platform_scope" required><option value="android_ios">Android＋iOS</option><option value="android">仅Android</option><option value="ios">仅iOS</option></select></Field>
+                  <Field label="基础配置"><select name="base_config_id"><option value="CFG-VPN-1.7-PROD">VPN 正式版 V1.7（复制80项）</option><option value="blank">空白配置</option></select></Field>
+                  <Field label="负责人" required><select name="owner_user_id" required><option value="u_oliver">数据产品 / Oliver</option><option value="team_client_arch">客户端架构组</option></select></Field>
+                  <Field label="计划发布时间" required><input name="planned_release_date" type="date" defaultValue="2026-08-18" required /></Field>
+                  <Field label="配置说明" required span><textarea name="description" defaultValue="从全量100个事件中选择本版本必须实现并验收的80个事件。" required /></Field>
+                </div>
+                <div className={`config-event-picker config-step-panel ${configStep === 2 ? "" : "config-step-hidden"}`}>
+                  <div className="picker-summary"><div><span>全量事件库</span><strong>100</strong></div><div className="selected"><span>本配置已选</span><strong>{selectedConfigEventIds.length}</strong></div><div><span>P0</span><strong>{selectedPriorityCounts.P0}</strong></div><div><span>P1</span><strong>{selectedPriorityCounts.P1}</strong></div><div><span>P2</span><strong>{selectedPriorityCounts.P2}</strong></div></div>
+                  <div className="picker-tools"><input value={configKeyword} onChange={(event) => setConfigKeyword(event.target.value)} placeholder="搜索事件名、阶段或Provider" /><select value={configCapability} onChange={(event) => setConfigCapability(event.target.value)}><option value="all">全部能力包</option>{Array.from(new Set(trackingEventCatalog.map((event) => event.capability))).map((capability) => <option key={capability}>{capability}</option>)}</select><div className="dimension-tabs"><button type="button" className={configSelectionView === "all" ? "active" : ""} onClick={() => setConfigSelectionView("all")}>全部</button><button type="button" className={configSelectionView === "selected" ? "active" : ""} onClick={() => setConfigSelectionView("selected")}>只看已选</button><button type="button" className={configSelectionView === "warning" ? "active" : ""} onClick={() => setConfigSelectionView("warning")}>只看冲突</button></div></div>
+                  <div className="picker-bulk"><label><input type="checkbox" checked={allVisibleSelected} onChange={toggleVisibleConfigEvents} /> 全选当前筛选结果（{visibleConfigEvents.length}）</label><span>当前显示第 1–{Math.min(20, visibleConfigEvents.length)} 条，共 {visibleConfigEvents.length} 条</span></div>
+                  <div className="table-wrap picker-table"><table><thead><tr><th>选择</th><th>事件名</th><th>阶段 / 能力包</th><th>级别</th><th>参数</th><th>场景</th><th>Provider</th><th>状态</th></tr></thead><tbody>{visibleConfigEventPage.map((event) => <tr key={event.id} className={selectedConfigEventIds.includes(event.id) ? "row-selected" : ""}><td><input type="checkbox" checked={selectedConfigEventIds.includes(event.id)} onChange={() => toggleConfigEvent(event.id)} aria-label={`选择${event.name}`} /></td><td><strong>{event.name}</strong><small>{event.id}</small></td><td><strong>{event.stage}</strong><small>{event.capability}</small></td><td><span className={`badge badge-${event.priority === "P0" ? "bad" : event.priority === "P1" ? "warn" : "neutral"}`}>{event.priority}</span></td><td>{event.parameterCount}</td><td>{event.scene}</td><td>{event.provider}</td><td><span className={`badge badge-${event.state === "READY" ? "good" : "warn"}`}>{event.state === "READY" ? "可用" : "待补配置"}</span></td></tr>)}</tbody></table></div>
+                </div>
+                <div className={`config-rule-review config-step-panel ${configStep === 3 ? "" : "config-step-hidden"}`}>
+                  <div className="rule-review-grid"><div><span>本配置事件</span><strong>{selectedConfigEventIds.length}/100</strong><small>只验收已选事件</small></div><div><span>P0 / P1 / P2</span><strong>{selectedPriorityCounts.P0} / {selectedPriorityCounts.P1} / {selectedPriorityCounts.P2}</strong><small>可逐事件覆盖默认级别</small></div><div><span>业务场景</span><strong>12</strong><small>场景必须先标记执行</small></div><div><span>关联链</span><strong>8 条</strong><small>广告、VPN、订阅主链</small></div></div>
+                  <div className="table-wrap"><table><thead><tr><th>规则层</th><th>本配置规则</th><th>验收方式</th><th>失败结论</th></tr></thead><tbody>{[["事件","选中的事件均纳入应收快照","按event_name匹配","NOT_RECEIVED"],["场景","未执行场景不判定未收到","测试员先确认场景执行","SCENE_NOT_EXECUTED"],["参数","P0必填；P1告警；P2可省略","按事件参数规则校验","PARAM_INVALID"],["关联链","同一Context ID按顺序完整","request/opportunity/instance关联","CHAIN_INVALID"]].map((row) => <tr key={row[0]}>{row.map((cell) => <td key={cell}>{cell}</td>)}</tr>)}</tbody></table></div>
+                  <div className="modal-warning"><strong>必须确认的关键口径</strong><p>验收分母是本配置所选 {selectedConfigEventIds.length} 个事件，不是事件主库100个，也不是品类默认数量。配置发布后生成不可变快照；后续修改必须新建版本。</p></div>
+                </div>
+                <div className={`config-validation config-step-panel ${configStep === 4 ? "" : "config-step-hidden"}`}>
+                  <div className="validation-head"><div><span>配置校验结果</span><strong>可以发布</strong><small>已选事件、参数规则、场景和关联链均可生成快照</small></div><span className="badge badge-good">PASSED</span></div>
+                  <div className="validation-list"><div><span>✓</span><p><strong>已选择 {selectedConfigEventIds.length}/100 个事件</strong><small>未选事件不会进入本配置的验收分母</small></p></div><div><span>✓</span><p><strong>{selectedPriorityCounts.P0} 个 P0 事件均有必填参数规则</strong><small>P0事件、P0参数、P0关联链必须100%</small></p></div><div><span>✓</span><p><strong>12 个场景已绑定事件</strong><small>场景未执行与事件未收到分开统计</small></p></div><div><span>✓</span><p><strong>发布后生成不可变 snapshot_id</strong><small>历史Run不受后续配置修改影响</small></p></div></div>
+                  <Field label="发布备注" required span><textarea name="release_note" defaultValue="完成80个必测事件选择与规则校验，发布后供V1.8客户端验收使用。" required /></Field>
+                  <label className="publish-confirm"><input type="checkbox" name="confirm_immutable_snapshot" value="1" required /> 我确认发布后事件范围不可直接修改，变更时必须创建新配置版本</label>
+                </div>
+              </>}
 
               {dialog === "project-category" && <div className="modal-form-grid">
                 <Field label="品类名称" required span><input name="category_name" placeholder="例如：文件管理" maxLength={40} required /></Field>
@@ -414,7 +534,11 @@ export function ActionDialog({ dialog, project, onClose, onSubmit }: { dialog: D
                 <div className={`binding-check span-2 ${packageMatches ? "" : "mismatch"}`}><div><span>{packageMatches ? "✓" : "!"}</span><p><strong>{packageMatches ? "包名与平台匹配" : "包名或平台不匹配"}</strong><small>{selectedApp.packageName} ↔ {selectedInternalApp?.appIdentifier}</small></p></div><div><span>✓</span><p><strong>最近24小时有数据</strong><small>最新事件 8分钟前 · 2.14M events</small></p></div><label className="risk-check"><input type="checkbox" name="confirm_package_match" value="1" disabled={!packageMatches} /> 我已确认公司App档案与Firebase App的包名、平台和环境一致</label></div>
               </div>}
             </div>
-            <footer><button type="button" className="secondary-button" onClick={onClose}>取消</button><button type="submit" className="primary-button" disabled={phase === "submitting"}>{phase === "submitting" ? "正在提交…" : meta.submit}</button></footer>
+            <footer>
+              <button type="button" className="secondary-button" onClick={onClose}>取消</button>
+              {dialog === "config-version" && configStep > 1 && <button type="button" className="secondary-button" onClick={() => setConfigStep((step) => Math.max(1, step - 1))}>上一步</button>}
+              {dialog === "config-version" && configStep < 4 ? <button type="button" className="primary-button" onClick={nextConfigStep}>{configStep === 1 ? "下一步：选择打点" : configStep === 2 ? `下一步：确认 ${selectedConfigEventIds.length} 个事件` : "下一步：校验发布"}</button> : <button type="submit" className="primary-button" disabled={phase === "submitting"}>{phase === "submitting" ? "正在提交…" : meta.submit}</button>}
+            </footer>
           </form>
         )}
       </section>
