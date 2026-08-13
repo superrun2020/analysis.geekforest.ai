@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { defaultSelectedEventIds, trackingEventCatalog, type TrackingConfigRecord, type TrackingPriority } from "./tracking-config-data";
-import { v17EventSource } from "./v17-event-catalog";
+import { trackingDatabaseSource } from "./tracking-config-repository";
 
 export type TrackingConfigSubmission = {
   name: string;
@@ -127,14 +127,14 @@ export function TrackingConfigWorkspace({ editingConfig, onCancel, onSave }: {
       <section className="config-workspace-head">
         <div>
           <button className="back-link" onClick={onCancel}>← 返回配置列表</button>
-          <div className="eyebrow">V12 · 独立配置页面</div>
+          <div className="eyebrow">V1.7 · 数据库字段配置页面</div>
           <h1>{editingConfig?.status === "DRAFT" ? "编辑打点配置草稿" : copyingPublished ? "复制为新配置版本" : "新建打点配置"}</h1>
-          <p>以 V1.7 的 <strong>01_事件字段总表</strong> 为唯一事件来源；页面展示全部标准事件及其字段明细。</p>
+          <p>事件、字段和统计均按统一数据库字段模型读取；当前使用 V1.7 本地镜像预览，接入数据库后页面结构保持不变。</p>
         </div>
         <div className="config-source-proof">
-          <span>数据源已核对</span>
-          <strong>{v17EventSource.extractedEventCount} 个标准事件</strong>
-          <small>{v17EventSource.parameterRowCount} 条事件字段明细 · {v17EventSource.workbook}</small>
+          <span>{trackingDatabaseSource.sourceType === "database" ? "数据库已连接" : "预览数据源"}</span>
+          <strong>{trackingDatabaseSource.eventCount} 个标准事件</strong>
+          <small>{trackingDatabaseSource.fieldCount} 条字段 · {trackingDatabaseSource.schemaVersion} · {trackingDatabaseSource.sourceLabel}</small>
         </div>
       </section>
 
@@ -154,7 +154,7 @@ export function TrackingConfigWorkspace({ editingConfig, onCancel, onSave }: {
 
       <section className="event-master surface">
         <div className="event-master-head">
-          <div><div className="eyebrow">V1.7 · 01_事件字段总表</div><h2>标准事件选择</h2><p>选择粒度是“标准事件”；切换到字段明细视图可核对该事件的每个属性、类型、触发时机和打点位置。</p></div>
+          <div><div className="eyebrow">{trackingDatabaseSource.schemaVersion} · {trackingDatabaseSource.eventTable} + {trackingDatabaseSource.fieldTable}</div><h2>标准事件选择</h2><p>选择粒度是“标准事件”；字段明细直接按事件主键关联字段表，核对属性、类型、触发时机和打点位置。</p></div>
           <div className="config-selection-summary"><div><span>已选事件</span><strong>{selectedIds.length}/{trackingEventCatalog.length}</strong></div><div><span>P0 / P1 / P2</span><strong>{priorityCounts.P0} / {priorityCounts.P1} / {priorityCounts.P2}</strong></div><div><span>已选字段</span><strong>{selectedEvents.reduce((sum, event) => sum + event.parameterCount, 0)}</strong></div></div>
         </div>
 

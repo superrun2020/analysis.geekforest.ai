@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { ActionDialog, type DialogKey, type DialogResult } from "./action-dialog";
 import { FirebaseConfiguration } from "./firebase-configuration";
-import { trackingConfigs, trackingEventCatalog, type TrackingConfigRecord } from "./tracking-config-data";
+import { trackingConfigs, trackingEventCatalog, trackingConfigDataSource, type TrackingConfigRecord } from "./tracking-config-data";
+import { trackingDatabaseFieldRows } from "./tracking-config-repository";
 import { TrackingConfigWorkspace, type TrackingConfigSubmission } from "./tracking-config-workspace";
 
 type PageKey =
@@ -25,8 +26,8 @@ type TaskFilter = "all" | "failed" | "running";
 type TrackingResultFilter = "all" | "passed" | "failed" | "pending";
 type FunnelStage = { label: string; event: string; value: string; rate: string; delta: string };
 type TransitionSelection = { from: string; to: string; rate: string; scope: "users" | "events" };
-type ModuleKey = "global" | "project" | "funnel" | "admob" | "firebase" | "reconcile" | "tracking" | "config" | "tasks";
-const moduleKeys = new Set<ModuleKey>(["global", "project", "funnel", "admob", "firebase", "reconcile", "tracking", "config", "tasks"]);
+type ModuleKey = "global" | "project" | "funnel" | "admob" | "firebase" | "reconcile" | "tracking" | "config" | "firebaseSetup" | "tasks";
+const moduleKeys = new Set<ModuleKey>(["global", "project", "funnel", "admob", "firebase", "reconcile", "tracking", "config", "firebaseSetup", "tasks"]);
 const pageKeys = new Set<PageKey>(["overview", "workbench", "diagnosis", "cohort", "path", "evidence", "issues", "snapshot"]);
 
 function readInitialAnalysisView(): { module: ModuleKey; page: PageKey; embedded: boolean } {
@@ -53,7 +54,8 @@ const moduleMenus: Array<{ key: ModuleKey; index: string; label: string; group: 
   { key: "reconcile", index: "06", label: "数据对账", group: "经营分析" },
   { key: "tracking", index: "07", label: "打点验收中心", group: "质量治理" },
   { key: "config", index: "08", label: "规范与项目配置", group: "质量治理" },
-  { key: "tasks", index: "09", label: "数据任务与告警", group: "质量治理" },
+  { key: "firebaseSetup", index: "09", label: "Firebase 对接", group: "质量治理" },
+  { key: "tasks", index: "10", label: "数据任务与告警", group: "质量治理" },
 ];
 
 const moduleCopy: Record<ModuleKey, { title: string; description: string; action: string }> = {
@@ -65,6 +67,7 @@ const moduleCopy: Record<ModuleKey, { title: string; description: string; action
   reconcile: { title: "数据对账", description: "对比 Firebase、AdMob、中台与 ADB 的用户、展示和收入口径", action: "发起重新对账" },
   tracking: { title: "打点验收中心", description: "按项目品类和测试快照验证应收事件、必填参数与完整关联链", action: "新建验收 Run" },
   config: { title: "规范与项目配置", description: "从事件主库组装项目打点配置，发布不可变快照并供验收Run引用", action: "新建打点配置" },
+  firebaseSetup: { title: "Firebase 对接中心", description: "独立管理多Firebase连接、Project、App、内部项目绑定、同步水位与接口健康", action: "新建 Firebase 连接" },
   tasks: { title: "数据任务与告警", description: "监控采集、同步、聚合与对账任务，并闭环处理数据异常", action: "新建告警规则" },
 };
 
@@ -77,6 +80,7 @@ const moduleDialog: Record<ModuleKey, DialogKey> = {
   reconcile: "reconcile-run",
   tracking: "tracking-run",
   config: "config-version",
+  firebaseSetup: "firebase-connection",
   tasks: "alert-rule",
 };
 
@@ -329,10 +333,25 @@ function ModulePage({ module, project, configs, onProjectChange, openModule, ope
     country: [["伊朗","122,804","100%","68.1%","81,620","17,904","4.56","$32.84","$2,680","预警"],["埃及","31,442","99.9%","73.8%","22,942","6,802","3.37","$38.21","$877","正常"],["土耳其","24,606","100%","75.4%","18,406","4,106","4.48","$42.19","$776","正常"],["其他","23,092","99.8%","72.3%","14,660","4,018","3.65","$33.29","$488","正常"]],
   };
   const configTables: Record<ConfigPackageTab, { headers: string[]; rows: string[][] }> = {
-    events: { headers: ["事件","业务阶段","优先级","适用条件","参数数","移动端可得性","降级口径","状态"], rows: [["jk_ad_request","广告请求","P0","真实Load前","13","稳定可得","缺失阻断","已发布"],["jk_ad_impression","广告展示","P0","SDK回调","11","依赖广告SDK","缺失阻断","已发布"],["connect_success","VPN连接","P0","成功回调","10","依赖业务模块","缺失阻断","已发布"],["app_background","生命周期","P2","后台时","4","推断可得","unknown/省略","已发布"]] },
-    fields: { headers: ["字段","类型","级别","Provider","适用事件","空值规则","Firebase承载","状态"], rows: [["event_id","String","P0","公共Provider","全部","缺失阻断","event_param","已发布"],["opportunity_id","String","条件P0","广告Context","机会后事件","不适用时省略","event_param","已发布"],["ip_after_connect","String(脱敏)","P1","VPN Provider","广告拉取事件","unknown/省略","BigQuery only","已发布"],["background_reason","String","P2","生命周期Provider","app_background","unknown","event_param","已发布"]] },
-    enums: { headers: ["枚举组","枚举值","含义","适用字段","未知值","废弃策略","版本","状态"], rows: [["request_type","preload / realtime","预加载或实时请求","request_type","unknown","禁止静默新增","V1.7","已发布"],["cache_status","stored / hit / expired / evicted","缓存生命周期","cache_status","unknown","向后兼容","V1.7","已发布"],["background_reason","home / lock / system / unknown","进入后台原因","background_reason","unknown","允许扩展","V1.6","已发布"]] },
-    providers: { headers: ["Provider","负责模块","输出字段","可用平台","不可用原因上报","负责人","健康度","状态"], rows: [["CommonProvider","基础信息","项目/版本/设备","Android/iOS","provider_unavailable","客户端架构组","100%","正常"],["AdContextProvider","广告Context","request/opportunity/instance","Android/iOS","context_missing","广告变现组","97.8%","预警"],["VpnContextProvider","VPN连接","IP/协议/服务器","Android/iOS","vpn_context_missing","VPN组","99.2%","正常"],["AttributionProvider","归因","channel/campaign/media","Android/iOS","sdk_unavailable","增长组","94.6%","预警"]] },
+    events: {
+      headers: ["事件","业务阶段","优先级","触发时机","参数数","适用端","来源别名","状态"],
+      rows: trackingEventCatalog.map((event) => [event.name, event.stage, event.priority, event.triggerTiming, String(event.parameterCount), event.platform, event.sourceAlias, "已加载"]),
+    },
+    fields: {
+      headers: ["字段","类型","入库方式","适用事件","字段说明","字段顺序","来源版本","状态"],
+      rows: trackingDatabaseFieldRows.map((field) => {
+        const event = trackingEventCatalog.find((item) => item.id === field.eventId);
+        return [field.fieldName, field.dataType, field.reportingMode, event?.name ?? field.eventId, field.description, String(field.fieldOrder), trackingConfigDataSource.schemaVersion, "已加载"];
+      }),
+    },
+    enums: {
+      headers: ["枚举组","枚举值/说明","适用字段","来源版本","状态"],
+      rows: [["字段描述中的枚举", "当前按数据库字段说明展示；数据库枚举表待接入", "tracking_event_fields.description", trackingConfigDataSource.schemaVersion, "待接数据库枚举表"]],
+    },
+    providers: {
+      headers: ["Provider","负责模块","输出字段","适用端","来源版本","状态"],
+      rows: Array.from(new Map(trackingEventCatalog.map((event) => [event.provider, event])).values()).map((event) => [event.provider, event.stage, `${event.name} 等事件`, event.platform, trackingConfigDataSource.schemaVersion, "按事件表读取"]),
+    },
   };
   const taskRows = [
     { name:"Firebase增量拉取", project:"全部项目", batch:"15:30", start:"15:31", duration:"2m18s", volume:"8.42M", sla:"≤10m", status:"成功" },
@@ -380,6 +399,8 @@ function ModulePage({ module, project, configs, onProjectChange, openModule, ope
     </div>
   );
 
+  if (module === "firebaseSetup") return <FirebaseConfiguration openDialog={openDialog} notify={notify} />;
+
   if (module === "reconcile") return (
     <div className="page-stack">
       <section className="metric-grid five"><Metric label="对账项目" value="24" note="今日完成 22" /><Metric label="正常项目" value="19" note="差异&lt;3%" tone="good" /><Metric label="预警项目" value="3" note="差异3%–5%" /><Metric label="异常项目" value="2" note="差异&gt;5%" tone="bad" /><Metric label="待结算日期" value="3 天" note="AdMob T+3" /></section>
@@ -414,12 +435,12 @@ function ModulePage({ module, project, configs, onProjectChange, openModule, ope
 
   if (module === "config") return (
     <div className="page-stack">
-      <section className="config-head surface"><div><div className="eyebrow">事件主库 → 分类勾选/单点剔除 → 配置 → 发布快照 → 验收Run</div><h2>打点配置管理</h2><p>按 V1.7 事件总表的全部标准事件组装配置；可整模块选择，也可取消任一单事件。</p></div><div><Badge tone="blue">44 个事件 · 209 条字段</Badge><button className="primary-button" onClick={() => openConfigEditor(null)}>＋ 新建打点配置</button></div></section>
+      <section className="config-head surface"><div><div className="eyebrow">事件主库 → 分类勾选/单点剔除 → 配置 → 发布快照 → 验收Run</div><h2>打点配置管理</h2><p>按当前数据源的事件主表和字段表组装配置；可整模块选择，也可取消任一单事件。</p></div><div><Badge tone="blue">{trackingConfigDataSource.eventCount} 个事件 · {trackingConfigDataSource.fieldCount} 条字段</Badge><button className="primary-button" onClick={() => openConfigEditor(null)}>＋ 新建打点配置</button></div></section>
+      <section className="config-data-source surface"><div className="surface-title"><div><h2>数据源状态</h2><p>页面字段统一从 repository 数据模型读取；提供数据库后只替换数据加载层，配置页面结构不变。</p></div><Badge tone={trackingConfigDataSource.sourceType === "database" ? "good" : "warn"}>{trackingConfigDataSource.sourceType === "database" ? "数据库已连接" : "本地镜像预览"}</Badge></div><div className="config-source-grid"><div><span>当前数据源</span><strong>{trackingConfigDataSource.sourceLabel}</strong><small>{trackingConfigDataSource.sourceType === "database" ? "线上数据库读取" : "暂未连接数据库"}</small></div><div><span>Schema 版本</span><strong>{trackingConfigDataSource.schemaVersion}</strong><small>事件 {trackingConfigDataSource.eventCount} 条 · 字段 {trackingConfigDataSource.fieldCount} 条</small></div><div><span>事件主表</span><strong>{trackingConfigDataSource.eventTable}</strong><small>事件主键用于关联字段明细</small></div><div><span>字段明细表</span><strong>{trackingConfigDataSource.fieldTable}</strong><small>按 field_order 保持展示顺序</small></div><div><span>最近读取</span><strong>{trackingConfigDataSource.fetchedAt}</strong><small>接库后改为数据库读取时间</small></div><div><span>接入位置</span><strong>tracking-config-repository.ts</strong><small>数据库信息待提供后替换 provider</small></div></div><div className={`config-source-note ${trackingConfigDataSource.sourceType === "database" ? "connected" : "pending"}`}><strong>{trackingConfigDataSource.sourceType === "database" ? "当前页面已使用数据库字段" : "当前仅用于页面预览"}</strong><span>{trackingConfigDataSource.sourceType === "database" ? "事件、字段、Provider 和配置统计均来自数据库快照。" : "V1.7 本地镜像只用于确认页面结构和交互，不代表已经连接线上数据库，也不会写入线上数据。"}</span></div></section>
       <section className="surface"><div className="surface-title"><div><h2>配置版本</h2><p>草稿可原地编辑；发布后生成不可变 snapshot_id，修改已发布配置时会复制为新版本。</p></div><Badge tone="neutral">共 {configs.length} 个版本</Badge></div><div className="table-wrap"><table><thead><tr><th>配置名称 / ID</th><th>版本</th><th>品类</th><th>关联项目</th><th>已选 / 全量</th><th>P0 / P1 / P2</th><th>场景</th><th>状态</th><th>快照</th><th>操作</th></tr></thead><tbody>{configs.map((config) => <tr key={config.id} className={`clickable-row ${selectedConfigRecord.id === config.id ? "row-selected" : ""}`} onClick={() => setSelectedConfigId(config.id)}><td><strong>{config.name}</strong><small>{config.id}</small></td><td>{config.version}</td><td>{config.category}</td><td>{config.projects.join("、")}</td><td><strong>{config.selectedCount} / {config.totalCount}</strong><small>配置覆盖 {((config.selectedCount / Math.max(config.totalCount, 1)) * 100).toFixed(1)}%</small></td><td>{config.p0Count} / {config.p1Count} / {config.p2Count}</td><td>{config.sceneCount}</td><td><Badge tone={config.status === "PUBLISHED" ? "good" : config.status === "REVIEWING" ? "blue" : "warn"}>{config.status === "PUBLISHED" ? "已发布" : config.status === "REVIEWING" ? "评审中" : "草稿"}</Badge></td><td>{config.snapshotId ? <strong>{config.snapshotId}</strong> : "—"}</td><td><div className="row-actions"><button onClick={(event) => { event.stopPropagation(); openConfigEditor(config); }}>{config.status === "PUBLISHED" ? "复制为新版本" : "编辑草稿"}</button>{config.status === "DRAFT" && <button onClick={(event) => { event.stopPropagation(); openConfigEditor(config); }}>编辑并发布</button>}<button onClick={(event) => { event.stopPropagation(); notify(`${config.id} 详情已展开`); }}>详情</button></div></td></tr>)}</tbody></table></div></section>
       <section className="selected-config-summary surface"><div><span>当前查看</span><strong>{selectedConfigRecord.name} {selectedConfigRecord.version}</strong><small>{selectedConfigRecord.id}</small></div><div><span>事件范围</span><strong>{selectedConfigRecord.selectedCount}/{selectedConfigRecord.totalCount}</strong><small>仅这 {selectedConfigRecord.selectedCount} 个进入验收分母</small></div><div><span>优先级</span><strong>P0 {selectedConfigRecord.p0Count} · P1 {selectedConfigRecord.p1Count} · P2 {selectedConfigRecord.p2Count}</strong><small>P0必须100%</small></div><div><span>发布引用</span><strong>{selectedConfigRecord.snapshotId ?? "尚未生成"}</strong><small>{selectedConfigRecord.status === "PUBLISHED" ? "可用于新建验收Run" : "发布后才可用于测试"}</small></div></section>
       <section className="config-layout"><div className="surface"><div className="surface-title"><div><h2>项目主品类</h2><p>作为配置筛选模板，不直接决定验收分母</p></div><button className="text-button" onClick={() => openDialog("project-category")}>＋新增</button></div><div className="category-list">{[["套利 VPN","v1.7 · 14项目","连接、权限、服务器、协议、连接广告"],["清理","v1.5 · 8项目","扫描、清理、结果、大小、清理广告"],["Launcher","v1.3 · 6项目","引导、默认桌面、主题、桌面交互"]].map((row)=><button key={row[0]} className={selectedCategory===row[0]?"selected":""} onClick={()=>setSelectedCategory(row[0])}><strong>{row[0]}</strong><span>{row[1]}</span><small>{row[2]}</small></button>)}</div></div><div className="surface"><div className="surface-title"><div><h2>{selectedConfigRecord.name} · 范围组成</h2><p>配置最终范围来自人工选择，并保留能力包来源</p></div><Badge tone="blue">{selectedConfigRecord.selectedCount}事件</Badge></div><div className="resolution-list"><div><span>标准事件总表</span><strong>V1.7 全量可选事件</strong><em>{selectedConfigRecord.totalCount}</em></div><div><span>当前已选</span><strong>{selectedConfigRecord.category} 当前版本</strong><em>{selectedConfigRecord.selectedCount}</em></div><div><span>当前未选</span><strong>本版本不适用事件</strong><em>{selectedConfigRecord.totalCount - selectedConfigRecord.selectedCount}</em></div><div><span>事件字段</span><strong>随所选事件自动纳入</strong><em>{trackingEventCatalog.filter((event) => selectedConfigRecord.selectedEventIds?.includes(event.id)).reduce((sum, event) => sum + event.parameterCount, 0)}</em></div></div><div className="conclusion-block good"><strong>最终选择 {selectedConfigRecord.selectedCount}/{selectedConfigRecord.totalCount}</strong><p>品类只提供推荐；最终以配置中逐项勾选并发布的事件快照为准。</p></div></div><aside className="surface"><div className="surface-title"><div><h2>发布检查</h2><p>规则完整性</p></div></div><div className="publish-checks"><div><span>✓</span><p>已选择{selectedConfigRecord.selectedCount}个事件并完成优先级</p></div><div><span>✓</span><p>{selectedConfigRecord.sceneCount}个场景均绑定应测事件</p></div><div><span>✓</span><p>P0参数和关联链已配置</p></div><div><span>{selectedConfigRecord.status === "PUBLISHED" ? "✓" : "!"}</span><p>{selectedConfigRecord.status === "PUBLISHED" ? `已生成快照 ${selectedConfigRecord.snapshotId}` : "尚未发布，不能创建验收Run"}</p></div></div><button className="primary-button full" onClick={() => selectedConfigRecord.status === "PUBLISHED" ? notify(`${selectedConfigRecord.snapshotId} 为只读快照`) : openConfigEditor(selectedConfigRecord)}>{selectedConfigRecord.status === "PUBLISHED" ? "查看发布快照" : "继续编辑并发布"}</button></aside></section>
       <section className="surface"><div className="surface-title"><div><h2>事件与字段包</h2><p>切换查看事件、字段、枚举和Provider，不再使用静态页签</p></div><div className="dimension-tabs">{[["events","事件"],["fields","公共字段"],["enums","枚举"],["providers","Provider"]].map(([key,label])=><button key={key} className={configPackageTab===key?"active":""} onClick={()=>setConfigPackageTab(key as ConfigPackageTab)}>{label}</button>)}</div></div><div className="table-wrap"><table><thead><tr>{configTables[configPackageTab].headers.map(header=><th key={header}>{header}</th>)}</tr></thead><tbody>{configTables[configPackageTab].rows.map(row => <tr key={row[0]}>{row.map((cell,index)=><td key={index}>{(cell==="P0"||cell==="条件P0")?<Badge tone="bad">{cell}</Badge>:(["已发布","正常"].includes(cell))?<Badge tone="good">{cell}</Badge>:cell==="预警"?<Badge tone="warn">{cell}</Badge>:cell}</td>)}</tr>)}</tbody></table></div></section>
-      <FirebaseConfiguration openDialog={openDialog} />
     </div>
   );
 
@@ -568,7 +589,8 @@ export default function Home() {
     firebase: { title: "实时数据", detail: "BigQuery intraday · 延迟约8分钟", note: "本页展示Firebase实时预估、事件质量与同步水位；中台数字仅用于差异诊断。" },
     reconcile: { title: "分源对账", detail: "今日双源 · T+3全量", note: "当天只比较Firebase与中台；含AdMob的最终对账仅在结算日期执行，避免跨时效误报。" },
     tracking: { title: "实时采集", detail: "当前Run · 按已发布配置快照验收", note: "仅按Run引用的已发布配置快照判定；未执行场景不计为未收到，P0事件、参数与关联链必须达到100%。" },
-    config: { title: "配置数据", detail: `${trackingEventCatalog.length}个标准事件 · 209条字段明细`, note: "品类与能力包只负责推荐候选事件；最终验收范围以配置逐项选择并发布的不可变快照为准。" },
+    config: { title: "配置数据", detail: `${trackingConfigDataSource.eventCount}个标准事件 · ${trackingConfigDataSource.fieldCount}条字段明细`, note: "品类与能力包只负责推荐候选事件；最终验收范围以配置逐项选择并发布的不可变快照为准。" },
+    firebaseSetup: { title: "对接控制面", detail: "2个连接 · 3个Project · 4个App", note: "本页管理连接、project_projects绑定、同步水位和接口健康；项目打点配置不保存Firebase凭证、Project、App或Dataset。" },
     tasks: { title: "任务实时态", detail: "最近水位15:35 · SLA监控", note: "本页按任务状态和项目过滤，数据日期表示任务处理批次，不等同于经营报表日期。" },
   };
 
@@ -647,12 +669,12 @@ export default function Home() {
   return (
     <div className={`app-shell ${embedded ? "embedded" : ""}`}>
       <aside className="sidebar">
-        <div className="brand"><span className="brand-mark">JK</span><span><strong>变现与埋点</strong><small>质量分析中心 · V12</small></span></div>
+        <div className="brand"><span className="brand-mark">JK</span><span><strong>变现与埋点</strong><small>质量分析中心 · V13</small></span></div>
         <div className="nav-group-label">经营分析</div>
         {moduleMenus.filter((item) => item.group === "经营分析").map((item) => <button key={item.key} className={`main-nav-item ${module === item.key ? "active" : ""}`} onClick={() => openModule(item.key)}><span>{item.index}</span>{item.label}</button>)}
         <div className="nav-group-label">质量治理</div>
         {moduleMenus.filter((item) => item.group === "质量治理").map((item) => <button key={item.key} className={`main-nav-item ${module === item.key ? "active" : ""}`} onClick={() => openModule(item.key)}><span>{item.index}</span>{item.label}</button>)}
-        <div className="sidebar-foot"><span className="status-dot" />Firebase 实时数据正常<small>AdMob 已结算至 8月8日</small></div>
+        <div className="sidebar-foot"><span className="status-dot warn" />Firebase 待正式接入<small>当前页面使用演示数据</small></div>
       </aside>
 
       <div className="workspace">
@@ -665,7 +687,7 @@ export default function Home() {
           {configWorkspaceOpen ? <TrackingConfigWorkspace editingConfig={editingConfig} onCancel={() => { setConfigWorkspaceOpen(false); setEditingConfig(null); }} onSave={saveTrackingConfig} /> : <>
           <section className="page-heading">
             <div><h1>{currentModule.title}</h1><p>{currentModule.description}</p></div>
-            <div className="heading-actions"><button className="secondary-button" onClick={() => module === "funnel" ? go("snapshot") : notify("数据已刷新至最新水位")}>{module === "funnel" ? "查看口径 V1.7" : "刷新数据"}</button><button className="primary-button" onClick={() => module === "config" ? openConfigEditor(null) : setDialog(moduleDialog[module])}>{["project", "funnel", "tracking", "config", "tasks"].includes(module) ? "＋ " : ""}{currentModule.action}</button></div>
+            <div className="heading-actions"><button className="secondary-button" onClick={() => module === "funnel" ? go("snapshot") : notify("数据已刷新至最新水位")}>{module === "funnel" ? "查看口径 V1.7" : "刷新数据"}</button><button className="primary-button" onClick={() => module === "config" ? openConfigEditor(null) : setDialog(moduleDialog[module])}>{["project", "funnel", "tracking", "config", "firebaseSetup", "tasks"].includes(module) ? "＋ " : ""}{currentModule.action}</button></div>
           </section>
 
           {module === "funnel" && <section className="workflow-strip" aria-label="漏斗诊断流程">
@@ -682,7 +704,7 @@ export default function Home() {
             {pages.map((item) => <button key={item.key} className={page === item.key ? "active" : ""} onClick={() => go(item.key)}><span>{item.label}</span><small>{item.hint}</small></button>)}
           </nav>}
 
-          <section className="filter-bar">
+          {module !== "firebaseSetup" && <section className="filter-bar">
             <label>项目<select value={project} onChange={(event) => setProject(event.target.value)}>{projects.map((item) => <option key={item.code}>{item.code}</option>)}</select></label>
             <label>日期<select value={range} onChange={(event) => setRange(event.target.value)}><option>今天</option><option>昨天</option><option>近7天</option><option>近30天</option></select></label>
             <label>平台<select value={platform} onChange={(event)=>setPlatform(event.target.value)}><option>Android</option><option>iOS</option><option>全部</option></select></label>
@@ -690,12 +712,12 @@ export default function Home() {
             <label>App版本<select value={appVersion} onChange={(event)=>setAppVersion(event.target.value)}><option>1.8.0 (108)</option><option>1.7.4 (104)</option><option>全部版本</option></select></label>
             <div className="filter-actions"><button onClick={resetFilters}>重置</button><button onClick={() => { setFiltersApplied((value) => value + 1); notify(`${project} · ${range} 筛选已应用`); }}>应用筛选</button></div>
             <div className="data-state"><span className="status-dot" /><strong>{sourceStatus[module].title}</strong><small>{sourceStatus[module].detail} · 刷新#{filtersApplied}</small></div>
-          </section>
+          </section>}
 
-          <section className="context-toolbar">
+          {module !== "firebaseSetup" && <section className="context-toolbar">
             <div className="context-summary"><Badge tone="blue">{module === "funnel" ? currentPage.hint : currentModule.title}</Badge><span>{project}</span><i /> <span>{range}</span><i /> <span>{platform} · {appVersion}</span><i /> <span>{country}</span><i /> <span>口径 V1.7</span></div>
             <div className="context-actions"><button onClick={() => notify("当前分析视图已保存")}>保存视图</button><button onClick={() => setDialog(module === "admob" ? "admob-report" : "project-report")}>导出报表</button></div>
-          </section>
+          </section>}
           <section className="freshness-note"><div><strong>数据使用提示：</strong>{sourceStatus[module].note}</div><button onClick={() => module === "funnel" ? go("snapshot") : notify(`${currentModule.title}数据口径说明已展开`)}>查看数据口径</button></section>
 
           {module !== "funnel" && <ModulePage module={module as Exclude<ModuleKey, "funnel">} project={project} configs={configRecords} onProjectChange={setProject} openModule={openModule} openDialog={setDialog} openConfigEditor={openConfigEditor} notify={notify} />}

@@ -1,4 +1,5 @@
-import { v17StandardEvents, type V17EventParameter } from "./v17-event-catalog";
+import type { V17EventParameter } from "./v17-event-catalog";
+import { trackingConfigDataSource, trackingDatabaseEventRows, trackingDatabaseFieldRowsForEvent } from "./tracking-config-repository";
 
 export type TrackingPriority = "P0" | "P1" | "P2";
 export type TrackingConfigStatus = "DRAFT" | "REVIEWING" | "PUBLISHED" | "ARCHIVED";
@@ -7,6 +8,7 @@ export type TrackingCatalogEvent = {
   id: string;
   name: string;
   displayName: string;
+  sourceAlias: string;
   stage: string;
   capability: string;
   priority: TrackingPriority;
@@ -79,24 +81,6 @@ const capabilityByModule: Record<string, string> = {
   "上报健康": "上报健康",
 };
 
-const providerByModule: Record<string, string> = {
-  "App生命周期": "LifecycleProvider",
-  "页面行为": "ScreenContextProvider",
-  "核心行为": "BusinessContextProvider",
-  "VPN业务": "VpnContextProvider",
-  "付费业务": "SubscriptionProvider",
-  "隐私与SDK": "ConsentAdSdkProvider",
-  "广告机会": "AdOpportunityProvider",
-  "广告请求": "AdRequestProvider",
-  "广告加载": "AdSdkProvider",
-  "广告缓存": "AdCacheProvider",
-  "广告展示": "AdPresentationProvider",
-  "广告收入": "AdRevenueProvider",
-  "Banner专项": "BannerVisibilityProvider",
-  "接口质量": "NetworkQualityProvider",
-  "上报健康": "TelemetryHealthProvider",
-};
-
 const pageByModule: Record<string, string> = {
   "App生命周期": "App 启动与前后台",
   "页面行为": "对应业务页面",
@@ -115,28 +99,39 @@ const pageByModule: Record<string, string> = {
   "上报健康": "Telemetry SDK 上报队列",
 };
 
-export const trackingEventCatalog: TrackingCatalogEvent[] = v17StandardEvents.map((event) => ({
-  id: event.id,
-  name: event.standardEventName,
-  displayName: event.displayName,
-  stage: event.module,
-  capability: capabilityByModule[event.module] ?? event.module,
-  priority: p0Events.has(event.standardEventName) ? "P0" : p1Events.has(event.standardEventName) ? "P1" : "P2",
-  parameterCount: event.parameters.length,
-  parameters: event.parameters,
-  scene: event.module,
-  provider: providerByModule[event.module] ?? "BusinessProvider",
-  platform: event.platforms.includes("Android/iOS") ? "Android+iOS" : "Android",
-  state: "READY",
-  analysisGoal: event.analysisGoal,
-  trackingLocation: event.trackingLocation,
-  triggerTiming: event.triggerTiming,
-  metricPurpose: event.metricPurpose,
-  page: pageByModule[event.module] ?? event.module,
-  operation: event.triggerTiming,
-  clickTarget: event.trackingLocation,
-  expectedResult: `${event.standardEventName} 被收到；用于${event.metricPurpose}`,
-}));
+export const trackingEventCatalog: TrackingCatalogEvent[] = trackingDatabaseEventRows.map((row) => {
+  const fields = trackingDatabaseFieldRowsForEvent(row.eventId);
+  const parameters = fields.map((field) => ({
+    name: field.fieldName,
+    displayName: field.displayName,
+    dataType: field.dataType,
+    reportingMode: field.reportingMode,
+    description: field.description,
+  }));
+  return {
+    id: row.eventId,
+    name: row.standardEventName,
+    displayName: row.displayName,
+    sourceAlias: row.sourceAlias,
+    stage: row.module,
+    capability: capabilityByModule[row.module] ?? row.module,
+    priority: p0Events.has(row.standardEventName) ? "P0" : p1Events.has(row.standardEventName) ? "P1" : "P2",
+    parameterCount: parameters.length,
+    parameters,
+    scene: row.module,
+    provider: row.provider,
+    platform: row.platforms.includes("Android/iOS") ? "Android+iOS" : "Android",
+    state: "READY",
+    analysisGoal: row.analysisGoal,
+    trackingLocation: row.trackingLocation,
+    triggerTiming: row.triggerTiming,
+    metricPurpose: row.metricPurpose,
+    page: pageByModule[row.module] ?? row.module,
+    operation: row.triggerTiming,
+    clickTarget: row.trackingLocation,
+    expectedResult: `${row.standardEventName} 被收到；用于${row.metricPurpose}`,
+  };
+});
 
 const allEventIds = trackingEventCatalog.map((event) => event.id);
 const excludeNames = (names: string[]) => trackingEventCatalog.filter((event) => !names.includes(event.name)).map((event) => event.id);
@@ -173,3 +168,5 @@ export function configsForProject(projectCode: string) {
 }
 
 export const trackingCatalogTotal = allEventIds.length;
+
+export { trackingConfigDataSource };

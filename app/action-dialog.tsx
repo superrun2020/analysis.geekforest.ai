@@ -17,7 +17,8 @@ export type DialogKey =
   | "publish-approval"
   | "alert-rule"
   | "firebase-connection"
-  | "firebase-binding";
+  | "firebase-binding"
+  | "firebase-sync";
 
 export type DialogResult = {
   id: string;
@@ -52,6 +53,7 @@ const dialogMeta: Record<DialogKey, DialogMeta> = {
   "alert-rule": { title: "新建告警规则", description: "配置计算窗口、触发/恢复阈值、降噪与通知范围", submit: "创建告警规则", endpoint: "POST /api/v1/alert-rules", idLabel: "alert_rule_id", prefix: "ALT" },
   "firebase-connection": { title: "新建 Firebase 连接", description: "保存凭证引用并自动发现可访问的 Project 与 App", submit: "验证并创建连接", endpoint: "POST /api/v1/firebase/connections", idLabel: "connection_id", prefix: "FBC" },
   "firebase-binding": { title: "关联 Firebase App", description: "将 Firebase App 绑定到公司App档案并验证数据可用性", submit: "验证并创建关联", endpoint: "POST /api/v1/firebase/app-bindings", idLabel: "binding_id", prefix: "FBB" },
+  "firebase-sync": { title: "立即同步 Firebase 数据", description: "按一个或多个已绑定项目触发Intraday、Daily或历史回补", submit: "创建同步任务", endpoint: "POST /api/v1/firebase/sync-runs", idLabel: "run_id", prefix: "FBR" },
 };
 
 const firebaseInventory = {
@@ -147,7 +149,8 @@ export function ActionDialog({ dialog, project, configs = trackingConfigs, editi
   const [errors, setErrors] = useState<string[]>([]);
   const [result, setResult] = useState<DialogResult | null>(null);
   const [dateRange, setDateRange] = useState("last_7_days");
-  const [authType, setAuthType] = useState("service_account");
+  const [authType, setAuthType] = useState("SERVICE_ACCOUNT");
+  const [discoveryMode, setDiscoveryMode] = useState("ACCESSIBLE");
   const [dictionaryKeyword, setDictionaryKeyword] = useState("");
   const [dictionaryPriority, setDictionaryPriority] = useState("all");
   const [configStep, setConfigStep] = useState(1);
@@ -236,6 +239,8 @@ export function ActionDialog({ dialog, project, configs = trackingConfigs, editi
     }
     if (dialog === "firebase-binding" && !packageMatches) nextErrors.push("Firebase App与公司App档案的包名或平台不一致");
     if (dialog === "firebase-binding" && payload.confirm_package_match !== "1") nextErrors.push("请确认包名、平台和公司App档案匹配");
+    if (dialog === "firebase-connection" && discoveryMode === "SPECIFIED" && !payload.specified_project_ids) nextErrors.push("指定项目模式下，请至少填写一个Firebase Project ID");
+    if (dialog === "firebase-sync") requireOne("binding_ids", "请至少选择一个已绑定的项目/App");
     return nextErrors;
   }
 
@@ -282,6 +287,13 @@ export function ActionDialog({ dialog, project, configs = trackingConfigs, editi
     const form = event.currentTarget;
     if (!form.reportValidity()) return;
     let payload = normalizeForm(form);
+    if (dialog === "firebase-connection") {
+      payload.auth_type = authType;
+      payload.discovery_mode = discoveryMode;
+      if (typeof payload.specified_project_ids === "string") {
+        payload.specified_project_ids = payload.specified_project_ids.split(",").map((item) => item.trim()).filter(Boolean);
+      }
+    }
     if (dialog === "config-version") {
       payload = buildConfigPayload(payload, "publish");
     }
@@ -388,7 +400,7 @@ export function ActionDialog({ dialog, project, configs = trackingConfigs, editi
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
       <section className={`modal-panel modal-panel-v5 ${dialog === "config-version" ? "modal-panel-config-wizard" : ""}`} role="dialog" aria-modal="true" aria-labelledby="action-dialog-title">
-        <header><div><div className="dialog-version">V10 · 分类配置与操作验收</div><h2 id="action-dialog-title">{phase === "success" ? `${result?.title ?? meta.title}成功` : dialog === "config-version" ? isEditingDraft ? "编辑打点配置草稿" : isCopyingPublished ? "复制为新配置版本" : meta.title : meta.title}</h2><p>{phase === "success" ? "系统已返回业务ID，后续状态可在对应任务或配置页面追踪。" : meta.description}</p></div><button type="button" aria-label="关闭弹窗" onClick={onClose}>×</button></header>
+        <header><div><div className="dialog-version">V13 · 多项目数据接入与验收</div><h2 id="action-dialog-title">{phase === "success" ? `${result?.title ?? meta.title}成功` : dialog === "config-version" ? isEditingDraft ? "编辑打点配置草稿" : isCopyingPublished ? "复制为新配置版本" : meta.title : meta.title}</h2><p>{phase === "success" ? "系统已返回业务ID，后续状态可在对应任务或配置页面追踪。" : meta.description}</p></div><button type="button" aria-label="关闭弹窗" onClick={onClose}>×</button></header>
 
         {phase === "success" && result ? (
           <div className="dialog-result">
@@ -558,14 +570,16 @@ export function ActionDialog({ dialog, project, configs = trackingConfigs, editi
 
               {dialog === "firebase-connection" && <div className="modal-form-grid">
                 <Field label="连接名称" required span><input name="connection_name" placeholder="例如：增长业务 Firebase" maxLength={60} required /></Field>
-                <Field label="认证方式" required><select name="auth_type" value={authType} onChange={(event) => setAuthType(event.target.value)} required><option value="service_account">服务账号</option><option value="oauth">Google OAuth</option></select></Field>
+                <Field label="认证方式" required><select name="auth_type" value={authType} onChange={(event) => setAuthType(event.target.value)} required><option value="SERVICE_ACCOUNT">服务账号</option><option value="WORKLOAD_IDENTITY">Workload Identity</option><option value="OAUTH">Google OAuth</option></select></Field>
                 <Field label="负责人" required><select name="owner_user_id" required><option value="u_oliver">Oliver</option><option value="team_data">数据平台</option></select></Field>
-                {authType === "service_account" ? <Field label="凭证密钥引用" required span help="只保存密钥管理系统引用，禁止在系统数据库保存JSON明文"><input name="credential_secret_ref" placeholder="secret://firebase/jkcl-growth-prod" pattern="^secret://.+" required /></Field> : <div className="oauth-placeholder span-2"><strong>Google OAuth授权</strong><p>创建后跳转到Google授权页；系统仅保存可撤销的授权引用。</p><input type="hidden" name="oauth_requested" value="1" /></div>}
-                <Field label="默认BigQuery计费项目" required span><input name="billing_project_id" placeholder="jkcl-data-platform" pattern="^[a-z][a-z0-9-]{4,28}[a-z0-9]$" required /></Field>
-                <Field label="可发现范围" required><select name="discovery_scope" required><option value="accessible_projects">全部可访问Project</option><option value="specified_projects">仅指定Project</option></select></Field>
+                {authType !== "OAUTH" ? <Field label={authType === "WORKLOAD_IDENTITY" ? "身份配置引用" : "凭证密钥引用"} required span help="只保存密钥管理系统引用，禁止在系统数据库保存JSON明文"><input name="credential_secret_ref" placeholder={authType === "WORKLOAD_IDENTITY" ? "secret://firebase/workload-identity/growth" : "secret://firebase/jkcl-growth-prod"} pattern="^secret://.+" required /></Field> : <div className="oauth-placeholder span-2"><strong>Google OAuth授权</strong><p>创建后跳转到Google授权页；系统只保存可撤销的授权引用，不保存Refresh Token明文。</p><input type="hidden" name="oauth_requested" value="1" /></div>}
+                {authType !== "OAUTH" && <Field label="服务账号邮箱" required span help="只用于权限核对与审计，不是密钥"><input type="email" name="service_account_email" placeholder="firebase-reader@example.iam.gserviceaccount.com" required /></Field>}
+                <Field label="BigQuery计费项目" required span><input name="billing_gcp_project_id" placeholder="jkcl-data-platform" pattern="^[a-z][a-z0-9-]{4,28}[a-z0-9]$" required /></Field>
+                <Field label="可发现范围" required><select name="discovery_mode" value={discoveryMode} onChange={(event) => setDiscoveryMode(event.target.value)} required><option value="ACCESSIBLE">全部可访问Project</option><option value="SPECIFIED">仅指定Project</option></select></Field>
                 <Field label="凭证有效期"><input name="credential_expires_at" type="date" /></Field>
+                {discoveryMode === "SPECIFIED" && <Field label="指定Firebase Project ID" required span help="多个用英文逗号分隔；系统仍会逐个验证访问权限"><input name="specified_project_ids" placeholder="jkcl-growth-prod, clean-suite-prod" required /></Field>}
                 <Field label="连接说明" span><textarea name="description" placeholder="说明账号归属、使用范围和变更联系人" /></Field>
-                <div className="modal-warning span-2"><strong>创建时自动检查</strong><p>Firebase项目只读、BigQuery Data Viewer、BigQuery Job User、GA4 Viewer以及项目枚举权限。</p></div>
+                <div className="modal-warning span-2"><strong>创建时自动检查</strong><p>验证凭证 → 发现1个或多个Firebase Project → 发现Android/iOS/Web App → 检查GA4与BigQuery Dataset。OSS/ADB目标在“关联项目”的同步策略中配置；数据库只保存secret_ref。</p></div>
               </div>}
 
               {dialog === "firebase-binding" && <div className="modal-form-grid">
@@ -583,9 +597,30 @@ export function ActionDialog({ dialog, project, configs = trackingConfigs, editi
                 <Field label="数据时区" required><select name="timezone" required><option>UTC</option><option>Asia/Shanghai</option><option>Asia/Tehran</option></select></Field>
                 <Field label="历史回补开始日期"><input name="backfill_from" type="date" defaultValue="2026-08-01" /></Field>
                 <Field label="生效时间" required><input name="effective_from" type="datetime-local" defaultValue="2026-08-11T16:00" required /></Field>
+                <Field label="当天同步间隔" required><select name="intraday_interval_minutes" required><option value="15">15分钟</option><option value="30">30分钟</option><option value="60">60分钟</option></select></Field>
+                <Field label="日表回刷天数" required><select name="lookback_days" required><option value="3">最近3天</option><option value="5">最近5天</option><option value="7">最近7天</option></select></Field>
+                <Field label="事件范围" required><select name="event_name_policy" required><option value="ALLOWLIST">V1.7标准事件Allowlist</option><option value="JK_PREFIX">全部jk_事件</option><option value="ALL">全部Firebase事件</option></select></Field>
                 <Field label="规范版本" required><select name="spec_version" required><option>V1.7</option><option>V1.6</option></select></Field>
                 <Field label="负责人" required><select name="owner_user_id" required><option value="u_oliver">Oliver</option><option value="team_data">数据平台</option></select></Field>
+                <Field label="OSS Raw路径" required span help="每个绑定的原始事件先不可变归档，再进入标准化层"><input name="raw_oss_uri_prefix" defaultValue="oss://jkcl-data-lake/firebase/raw" pattern="^oss://.+" required /></Field>
+                <Field label="ADB数据库" required><input name="target_adb_database" defaultValue="jkcl_analytics" required /></Field>
+                <Field label="ADB事件表" required><input name="target_adb_table" defaultValue="firebase_event_fact" required /></Field>
+                <Field label="当天增量" required><select name="intraday_enabled" required><option value="1">开启 events_intraday_*</option><option value="0">关闭，仅使用日表</option></select></Field>
+                <Field label="历史日表" required><select name="daily_enabled" required><option value="1">开启 events_*</option><option value="0">关闭</option></select></Field>
                 <div className={`binding-check span-2 ${packageMatches ? "" : "mismatch"}`}><div><span>{packageMatches ? "✓" : "!"}</span><p><strong>{packageMatches ? "包名与平台匹配" : "包名或平台不匹配"}</strong><small>{selectedApp.packageName} ↔ {selectedInternalApp?.appIdentifier}</small></p></div><div><span>✓</span><p><strong>最近24小时有数据</strong><small>最新事件 8分钟前 · 2.14M events</small></p></div><label className="risk-check"><input type="checkbox" name="confirm_package_match" value="1" disabled={!packageMatches} /> 我已确认公司App档案与Firebase App的包名、平台和环境一致</label></div>
+              </div>}
+
+              {dialog === "firebase-sync" && <div className="modal-form-grid">
+                <Field label="已绑定项目 / Firebase App" required span><Checks name="binding_ids" items={[{value:"FBB-IRAN-ANDROID",label:"IRAN-VPN-01 · Android · com.jkcl.iran.vpn",checked:true},{value:"FBB-IRAN-IOS",label:"IRAN-VPN-01 · iOS · ai.geekforest.iranvpn"},{value:"FBB-CLEAN-ANDROID",label:"CLEAN-MAX-03 · Android · com.jkcl.clean.max"}]} /></Field>
+                <Field label="同步类型" required><select name="run_type" required><option value="INTRADAY">当天增量 Intraday</option><option value="DAILY">历史日表 Daily</option><option value="BACKFILL">历史回补 Backfill</option><option value="REALTIME_CHECK">只做实时健康检查</option></select></Field>
+                <Field label="触发原因" required><select name="trigger_reason" required><option value="MANUAL_CHECK">人工检查</option><option value="FIRST_IMPORT">首次导入</option><option value="DATA_DELAY">数据延迟</option><option value="REPAIR">故障修复</option></select></Field>
+                <Field label="开始日期" required><input type="date" name="date_from" defaultValue="2026-08-13" required /></Field>
+                <Field label="结束日期" required><input type="date" name="date_to" defaultValue="2026-08-13" required /></Field>
+                <Field label="写入策略" required><select name="write_mode" required><option value="UPSERT">幂等增量UPSERT</option><option value="REBUILD_DATE">重建日期分区</option><option value="DRY_RUN">Dry Run，仅验证不入库</option></select></Field>
+                <Field label="事件范围" required><select name="event_name_policy" required><option value="ALLOWLIST">V1.7标准事件Allowlist</option><option value="JK_PREFIX">全部jk_事件</option><option value="ALL">全部Firebase事件</option></select></Field>
+                <Field label="执行人" required><select name="triggered_by" required><option value="u_oliver">Oliver</option><option value="team_data">数据平台</option></select></Field>
+                <Field label="任务说明" span><textarea name="note" placeholder="说明为什么需要人工同步或回补" maxLength={500} /></Field>
+                <div className="modal-warning span-2"><strong>数据落地顺序</strong><p>BigQuery读取成功后先写OSS Raw，再标准化写ADB；接口成功但ADB未写完时，任务状态为PARTIAL，页面不会显示为全链路成功。</p></div>
               </div>}
             </div>
             <footer>
