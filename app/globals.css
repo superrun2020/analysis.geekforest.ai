@@ -140,6 +140,15 @@ td small { margin-top: 3px; color: var(--soft-muted); font-size: 7px; }
 .row-bad { background: #fff8f8; }
 .table-link { border: 0; background: transparent; color: var(--blue); cursor: pointer; font-size: 8px; }
 
+.firebase-task-console { border-color: #cddcff; background: linear-gradient(180deg, #ffffff, #f8fbff); }
+.firebase-task-toolbar { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+.firebase-task-toolbar input { flex: 1; min-width: 220px; height: 32px; border: 1px solid #d8e1ec; border-radius: 7px; padding: 0 11px; background: white; color: var(--ink); font-size: 9px; }
+.firebase-task-toolbar input::placeholder { color: #9aa6b8; }
+.firebase-log-state { margin-top: 10px; padding: 10px 12px; border-radius: 8px; font-size: 8px; line-height: 1.55; }
+.firebase-log-state strong { display: block; font-size: 9px; }
+.firebase-log-state p { margin: 3px 0 0; }
+.firebase-log-state.warn { border: 1px solid #f2d298; background: var(--amber-soft); color: var(--amber); }
+
 .issue-list { display: grid; }
 .issue-list button { display: grid; grid-template-columns: 26px 1fr; gap: 9px; padding: 10px 0; border: 0; border-bottom: 1px solid var(--line-soft); background: transparent; text-align: left; cursor: pointer; }
 .issue-list button:hover p { color: var(--blue); }
@@ -666,6 +675,12 @@ td small { margin-top: 3px; color: var(--soft-muted); font-size: 7px; }
 .config-workspace-actions { position: fixed; right: 0; bottom: 0; left: 226px; z-index: 20; display: flex; justify-content: flex-end; gap: 8px; padding: 11px max(24px, calc((100vw - 226px - 1720px) / 2 + 24px)); border-top: 1px solid #d7e0eb; background: rgba(255,255,255,.96); box-shadow: 0 -4px 16px rgba(27,42,70,.08); backdrop-filter: blur(10px); }
 .app-shell.embedded .config-workspace-actions { left: 0; }
 .tracking-product-selector { display: grid; grid-template-columns: minmax(260px, 1.25fr) minmax(180px, .65fr) minmax(210px, .8fr) auto; gap: 12px; align-items: end; padding: 15px 16px; }
+.acceptance-run-bar { display:grid; grid-template-columns:minmax(280px,1.2fr) 1fr auto; gap:16px; align-items:end; padding:14px 16px; }
+.acceptance-run-bar label,.acceptance-run-bar>div { display:grid; gap:5px; }
+.acceptance-run-bar span { color:var(--muted); font-size:8px; font-weight:800; }
+.acceptance-run-bar select { min-height:34px; border:1px solid #ccd5e2; border-radius:6px; padding:7px 9px; background:white; }
+.acceptance-api-error { display:flex; align-items:center; gap:12px; border-color:#f0a8a8; background:#fff7f7; color:#8f2828; }
+.acceptance-api-error span { flex:1; }
 .tracking-product-selector h2 { margin: 4px 0; font-size: 15px; }
 .tracking-product-selector p { margin: 0; color: var(--muted); font-size: 8px; line-height: 1.5; }
 .tracking-product-selector label { display: grid; gap: 5px; color: var(--muted); font-size: 7px; font-weight: 800; }
@@ -1023,6 +1038,8 @@ td small { margin-top: 3px; color: var(--soft-muted); font-size: 7px; }
   .three-column > :last-child { grid-column: 1 / -1; }
   .page-nav button { min-width: 118px; }
   .filter-bar { flex-wrap: wrap; }
+  .firebase-task-toolbar { align-items: stretch; flex-direction: column; }
+  .firebase-task-toolbar input { width: 100%; min-width: 0; }
   .data-state { margin-left: 0; }
   .signal-strip { grid-template-columns: repeat(2, 1fr); }
   .signal-strip > button { min-height: 50px; }

@@ -6,6 +6,8 @@ import { FirebaseConfiguration } from "./firebase-configuration";
 import { trackingConfigs, trackingEventCatalog, trackingConfigDataSource, type TrackingConfigRecord } from "./tracking-config-data";
 import { trackingDatabaseFieldRows } from "./tracking-config-repository";
 import { TrackingConfigWorkspace, type TrackingConfigSubmission } from "./tracking-config-workspace";
+import { TrackingAcceptanceCenter } from "./tracking-acceptance-center";
+import { firebaseTaskLogsApi, type FirebaseCheckLog, type FirebaseSyncRunLog } from "./firebase-task-logs-api";
 
 type PageKey =
   | "overview"
@@ -267,6 +269,26 @@ function Metric({ label, value, note, tone }: { label: string; value: string; no
   );
 }
 
+const formatLogTime = (value?: string | null) => value ? value.replace("T", " ").slice(0, 19) : "—";
+const formatLogRows = (value?: number) => typeof value === "number" ? value.toLocaleString("zh-CN") : "—";
+const formatLogDuration = (value?: number | null) => {
+  if (!value) return "—";
+  if (value < 1000) return `${value}ms`;
+  if (value < 60000) return `${(value / 1000).toFixed(1)}s`;
+  return `${Math.floor(value / 60000)}m${Math.round((value % 60000) / 1000)}s`;
+};
+const statusTone = (status?: string): "neutral" | "good" | "warn" | "bad" | "blue" => {
+  const value = (status ?? "").toUpperCase();
+  if (["SUCCESS", "SUCCEEDED", "FINISHED", "PASS", "ACTIVE"].includes(value)) return "good";
+  if (["RUNNING", "PROCESSING", "VERIFYING", "QUEUED"].includes(value)) return "blue";
+  if (["NO_DATA", "SKIPPED", "DEGRADED"].includes(value)) return "warn";
+  if (["FAILED", "FAIL", "ERROR", "MISMATCH"].includes(value)) return "bad";
+  return "neutral";
+};
+const isFailedStatus = (status?: string) => ["FAILED", "FAIL", "ERROR", "MISMATCH"].includes((status ?? "").toUpperCase());
+const isRunningStatus = (status?: string) => ["RUNNING", "PROCESSING", "VERIFYING", "QUEUED"].includes((status ?? "").toUpperCase());
+const logProjectLabel = (item: FirebaseSyncRunLog | FirebaseCheckLog) => item.projectCode || item.projectName || "连接级日志";
+
 function Segmented({ items, active, onChange, label }: { items: Array<{ key: string; label: string }>; active: string; onChange: (key: string) => void; label: string }) {
   return (
     <div className="segmented" aria-label={label}>
@@ -286,6 +308,11 @@ function ModulePage({ module, project, configs, onProjectChange, openModule, ope
   const [selectedCategory, setSelectedCategory] = useState("套利 VPN");
   const [selectedConfigId, setSelectedConfigId] = useState("CFG-VPN-1.8-PROD");
   const [taskFilter, setTaskFilter] = useState<TaskFilter>("all");
+  const [taskKeyword, setTaskKeyword] = useState("");
+  const [syncRuns, setSyncRuns] = useState<FirebaseSyncRunLog[]>([]);
+  const [checkLogs, setCheckLogs] = useState<FirebaseCheckLog[]>([]);
+  const [taskLogLoading, setTaskLogLoading] = useState(false);
+  const [taskLogError, setTaskLogError] = useState("");
   const projectItem = projects.find((item) => item.code === project) ?? projects[0];
   const displayProfile = projectDisplayProfiles[project] ?? projectDisplayProfiles["IRAN-VPN-01"];
   const selectedConfigRecord = configs.find((config) => config.id === selectedConfigId) ?? configs[0];
@@ -327,6 +354,43 @@ function ModulePage({ module, project, configs, onProjectChange, openModule, ope
     setSelectedTestCapability("all");
     setTrackingResultFilter("all");
   }
+
+  const loadFirebaseTaskLogs = useMemo(() => {
+    return async () => {
+      if (module !== "tasks") return;
+      setTaskLogLoading(true);
+      setTaskLogError("");
+      try {
+        const query = {
+          keyword: taskKeyword || undefined,
+          status: taskFilter === "failed" ? "FAILED" : taskFilter === "running" ? "RUNNING" : undefined,
+          page: 1,
+          pageSize: 50,
+        };
+        const [runs, logs] = await Promise.all([
+          firebaseTaskLogsApi.syncRuns(query),
+          firebaseTaskLogsApi.checkLogs({
+            keyword: taskKeyword || undefined,
+            status: taskFilter === "failed" ? "FAIL" : undefined,
+            page: 1,
+            pageSize: 50,
+          }),
+        ]);
+        setSyncRuns(runs.items ?? []);
+        setCheckLogs(logs.items ?? []);
+      } catch (error) {
+        setSyncRuns([]);
+        setCheckLogs([]);
+        setTaskLogError(error instanceof Error ? error.message : "Firebase 绑定日志加载失败");
+      } finally {
+        setTaskLogLoading(false);
+      }
+    };
+  }, [module, taskFilter, taskKeyword]);
+
+  useEffect(() => {
+    void loadFirebaseTaskLogs();
+  }, [loadFirebaseTaskLogs]);
   const admobRows: Record<AdMobDimension, string[][]> = {
     format: [["插屏","128,420","100%","72.4%","90,216","21,904","4.12","$38.42","$3,466","正常"],["激励视频","31,842","99.8%","81.6%","25,912","12,404","2.09","$42.18","$1,093","正常"],["Banner","41,682","100%","51.4%","21,500","18,621","1.15","$12.19","$262","预警"]],
     placement: [["vpn_connect_success","86,204","100%","74.8%","62,104","18,406","3.37","$41.20","$2,558","正常"],["vpn_home_banner","41,682","100%","51.4%","21,500","18,621","1.15","$12.19","$262","预警"],["server_select","38,214","99.7%","67.2%","24,908","9,682","2.57","$36.44","$908","正常"],["vpn_disconnect","35,844","100%","76.5%","29,116","8,204","3.55","$37.54","$1,093","正常"]],
@@ -353,13 +417,12 @@ function ModulePage({ module, project, configs, onProjectChange, openModule, ope
       rows: Array.from(new Map(trackingEventCatalog.map((event) => [event.provider, event])).values()).map((event) => [event.provider, event.stage, `${event.name} 等事件`, event.platform, trackingConfigDataSource.schemaVersion, "按事件表读取"]),
     },
   };
-  const taskRows = [
-    { name:"Firebase增量拉取", project:"全部项目", batch:"15:30", start:"15:31", duration:"2m18s", volume:"8.42M", sla:"≤10m", status:"成功" },
-    { name:"OSS Raw归档", project:"全部项目", batch:"fb_1530", start:"15:34", duration:"1m06s", volume:"4.8GB", sla:"≤15m", status:"成功" },
-    { name:"ADB事件标准化", project:"IRAN-VPN-01", batch:"batch_8241", start:"15:35", duration:"运行8m", volume:"2.14M", sla:"≤15m", status:"运行中" },
-    { name:"中台DAU聚合", project:"CLEAN-MAX-03", batch:"2026-08-11", start:"15:20", duration:"失败", volume:"76,210", sla:"≤20m", status:"失败" },
-    { name:"AdMob T+3同步", project:"全部项目", batch:"2026-08-08", start:"14:10", duration:"12m44s", volume:"24项目", sla:"≤60m", status:"成功" },
-  ].filter((row) => taskFilter === "all" || (taskFilter === "failed" && row.status === "失败") || (taskFilter === "running" && row.status === "运行中"));
+  const visibleSyncRuns = syncRuns.filter((row) => taskFilter === "all" || (taskFilter === "failed" && isFailedStatus(row.status)) || (taskFilter === "running" && isRunningStatus(row.status)));
+  const visibleCheckLogs = checkLogs.filter((row) => taskFilter !== "failed" || isFailedStatus(row.status));
+  const failedSyncRuns = syncRuns.filter((row) => isFailedStatus(row.status)).length;
+  const runningSyncRuns = syncRuns.filter((row) => isRunningStatus(row.status)).length;
+  const failedCheckLogs = checkLogs.filter((row) => isFailedStatus(row.status)).length;
+  const latestRunTime = syncRuns[0]?.startedAt || syncRuns[0]?.createdAt;
   if (module === "global") return (
     <div className="page-stack">
       <section className="metric-grid six"><Metric label="项目数" value="28" note="在线 24 · 灰度 4" /><Metric label="总 DAU" value="1,284,630" note="较昨日 +4.1%" tone="good" /><Metric label="总收入" value="$48,921" note="较昨日 +2.7%" tone="good" /><Metric label="投放消耗" value="$31,406" note="ROAS 155.8%" /><Metric label="预估利润" value="$17,515" note="利润率 35.8%" tone="good" /><Metric label="异常项目" value="4" note="严重 2 · 预警 2" tone="bad" /></section>
@@ -410,7 +473,9 @@ function ModulePage({ module, project, configs, onProjectChange, openModule, ope
     </div>
   );
 
-  if (module === "tracking") return (
+  if (module === "tracking") return <TrackingAcceptanceCenter project={project} projects={projects} configs={configs} onProjectChange={changeTrackingProduct} openConfig={() => openModule("config")} notify={notify} />;
+  /* legacy acceptance prototype retained below for reference */
+  if (false) return (
     <div className="page-stack">
       <section className="tracking-product-selector surface">
         <div><span className="eyebrow">第一步 · 选择需要验收的产品</span><h2>产品打点测试执行助手</h2><p>系统根据“产品 + 已发布配置快照”生成应测事件和可执行操作，不再按品类总事件数验收。</p></div>
@@ -446,9 +511,11 @@ function ModulePage({ module, project, configs, onProjectChange, openModule, ope
 
   return (
     <div className="page-stack">
-      <section className="metric-grid six"><Metric label="今日任务" value="186" note="成功 179" /><Metric label="运行中" value="4" note="最长 8分钟" /><Metric label="失败任务" value="3" note="需立即处理" tone="bad" /><Metric label="数据延迟" value="9分钟" note="SLA ≤15分钟" tone="good" /><Metric label="活动告警" value="7" note="P0 2 · P1 5" tone="bad" /><Metric label="今日恢复" value="12" note="自动恢复 9" tone="good" /></section>
-      <section className="surface"><div className="surface-title"><div><h2>数据流水线任务</h2><p>Firebase → OSS → ADB → 聚合 → 对账</p></div><div className="dimension-tabs"><button className={taskFilter==="all"?"active":""} onClick={()=>setTaskFilter("all")}>全部</button><button className={taskFilter==="failed"?"active":""} onClick={()=>setTaskFilter("failed")}>失败</button><button className={taskFilter==="running"?"active":""} onClick={()=>setTaskFilter("running")}>运行中</button></div></div><div className="table-wrap"><table><thead><tr><th>任务</th><th>项目</th><th>批次/水位</th><th>开始时间</th><th>耗时</th><th>处理量</th><th>SLA</th><th>状态</th><th>操作</th></tr></thead><tbody>{taskRows.map(row => <tr key={`${row.name}${row.project}`}><td>{row.name}</td><td>{row.project}</td><td>{row.batch}</td><td>{row.start}</td><td>{row.duration}</td><td>{row.volume}</td><td>{row.sla}</td><td><Badge tone={row.status==="成功"?"good":row.status==="运行中"?"blue":"bad"}>{row.status}</Badge></td><td><button className="table-link" onClick={()=>notify(row.status==="失败"?`${row.name} 已创建重试批次`:`${row.name} 日志已打开`)}>{row.status==="失败"?"重试":"日志"}</button></td></tr>)}</tbody></table></div></section>
-      <section className="two-column wide-left"><div className="surface"><div className="surface-title"><div><h2>活动告警</h2><p>指标告警与数据任务告警统一管理</p></div><button className="text-button" onClick={() => openDialog("alert-rule")}>告警规则</button></div><div className="alert-list">{[["P0","IRAN-VPN-01 广告浏览者比例低于25%","持续3小时 · 影响$2,807/日","产品/广告/客户端"],["P0","CLEAN-MAX-03 中台DAU差异8.7%","持续42分钟 · 接口失败率9.1%","数据平台"],["P1","ADB标准化任务延迟接近SLA","已运行8分钟 · 阈值15分钟","数据平台"],["P1","jk_ad_impression 关联链完整率97.8%","缺opportunity_id 1,824条","客户端增长组"]].map(row => <button key={row[1]} onClick={() => row[1].includes("浏览者") ? openModule("funnel") : row[1].includes("DAU") ? openModule("reconcile") : notify("告警详情已展开")}><Badge tone={row[0]==="P0"?"bad":"warn"}>{row[0]}</Badge><div><strong>{row[1]}</strong><p>{row[2]}</p><small>负责人：{row[3]}</small></div><span>→</span></button>)}</div></div><aside className="surface"><div className="surface-title"><div><h2>告警通知</h2><p>当前值班策略</p></div></div><div className="notification-rules"><div><span>P0</span><strong>立即通知</strong><p>飞书群＋负责人＋值班人</p></div><div><span>P1</span><strong>持续15分钟</strong><p>飞书群＋负责人</p></div><div><span>P2</span><strong>每日汇总</strong><p>数据质量日报</p></div></div><button className="primary-button full" onClick={() => openDialog("alert-rule")}>＋ 新建告警规则</button></aside></section>
+      <section className="metric-grid six"><Metric label="运行日志" value={String(syncRuns.length)} note={taskLogLoading ? "正在读取" : "Firebase绑定任务"} /><Metric label="运行中" value={String(runningSyncRuns)} note="QUEUED/RUNNING/VERIFYING" tone={runningSyncRuns ? "good" : undefined} /><Metric label="失败运行" value={String(failedSyncRuns)} note="需排查或重试" tone={failedSyncRuns ? "bad" : undefined} /><Metric label="错误日志" value={String(failedCheckLogs)} note="Firebase预检失败" tone={failedCheckLogs ? "bad" : "good"} /><Metric label="检查记录" value={String(checkLogs.length)} note="服务账号/Firebase/BigQuery" /><Metric label="最近运行" value={formatLogTime(latestRunTime).slice(11) || "—"} note={latestRunTime ? formatLogTime(latestRunTime).slice(0, 10) : "等待同步"} /></section>
+      <section className="surface firebase-task-console"><div className="surface-title"><div><h2>Firebase 绑定日志</h2><p>按当前任务中心版式展示 Firebase 绑定的运行日志和错误日志，数据来自 ADB 控制表。</p></div><div className="dimension-tabs"><button className={taskFilter==="all"?"active":""} onClick={()=>setTaskFilter("all")}>全部</button><button className={taskFilter==="failed"?"active":""} onClick={()=>setTaskFilter("failed")}>失败</button><button className={taskFilter==="running"?"active":""} onClick={()=>setTaskFilter("running")}>运行中</button></div></div><div className="firebase-task-toolbar"><input value={taskKeyword} onChange={(event)=>setTaskKeyword(event.target.value)} onKeyDown={(event)=>{ if (event.key === "Enter") void loadFirebaseTaskLogs(); }} placeholder="搜索项目、包名、Firebase Project/App、错误信息" /><button className="secondary-button" onClick={() => { setTaskKeyword(""); setTaskFilter("all"); }}>重置</button><button className="primary-button" onClick={() => void loadFirebaseTaskLogs()}>{taskLogLoading ? "刷新中..." : "刷新日志"}</button></div>{taskLogError && <div className="firebase-log-state warn"><strong>日志接口待接入</strong><p>{taskLogError}。请在 Sites 环境变量配置 NEXT_PUBLIC_TRACKING_API_BASE_URL 和 NEXT_PUBLIC_TRACKING_API_SECURE_PATH，并确认后端已合并日志接口。</p></div>}</section>
+      <section className="surface"><div className="surface-title"><div><h2>运行日志</h2><p>对应 ADB 表 <code>firebase_sync_runs</code>，用于查看 Firebase 绑定同步任务的水位、处理量和失败原因。</p></div><Badge tone={failedSyncRuns ? "bad" : "blue"}>{visibleSyncRuns.length} 条</Badge></div><div className="table-wrap"><table><thead><tr><th>任务 / 运行ID</th><th>项目</th><th>Firebase资源</th><th>时间范围</th><th>开始 / 结束</th><th>处理量</th><th>耗时</th><th>状态</th><th>错误</th></tr></thead><tbody>{visibleSyncRuns.length ? visibleSyncRuns.map((row) => <tr key={row.runId} className={isFailedStatus(row.status) ? "row-warn" : ""}><td><strong>{row.runType || "SYNC"}</strong><small>Run #{row.runId}{row.externalJobId ? ` · ${row.externalJobId}` : ""}</small></td><td><strong>{logProjectLabel(row)}</strong><small>{row.projectName || row.packageName || row.connectionName || "—"}</small></td><td><strong>{row.firebaseProjectId || "—"}</strong><small>{row.firebaseAppId || row.firebaseAppIdentifier || "—"}</small></td><td><strong>{formatLogTime(row.rangeStart)}</strong><small>{formatLogTime(row.rangeEnd)}</small></td><td><strong>{formatLogTime(row.startedAt)}</strong><small>{formatLogTime(row.finishedAt)}</small></td><td><strong>{formatLogRows(row.adbRows)} ADB</strong><small>{formatLogRows(row.sourceRows)} source</small></td><td>{formatLogDuration(row.durationMs)}</td><td><Badge tone={statusTone(row.status)}>{row.status || "UNKNOWN"}</Badge></td><td>{row.errorMessage || "—"}</td></tr>) : <tr><td colSpan={9}><div className="empty-table-state"><strong>{taskLogLoading ? "正在读取运行日志" : "暂无运行日志"}</strong><span>{taskLogError ? "后端接入后会显示真实 Firebase 同步运行记录。" : "当前筛选条件下没有记录。"}</span></div></td></tr>}</tbody></table></div></section>
+      <section className="surface"><div className="surface-title"><div><h2>错误日志 / 接口检查</h2><p>对应 ADB 表 <code>firebase_api_check_logs</code>，覆盖服务账号、Firebase Project/App、BigQuery Dataset 和 events 表检查。</p></div><Badge tone={failedCheckLogs ? "bad" : "good"}>{failedCheckLogs} 个失败</Badge></div><div className="table-wrap"><table><thead><tr><th>检查项 / 日志ID</th><th>项目</th><th>Firebase资源</th><th>检查时间</th><th>耗时</th><th>结果</th><th>错误码</th><th>详情</th></tr></thead><tbody>{visibleCheckLogs.length ? visibleCheckLogs.map((row) => <tr key={row.logId} className={isFailedStatus(row.status) ? "row-warn" : ""}><td><strong>{row.checkType || "CHECK"}</strong><small>Log #{row.logId}</small></td><td><strong>{logProjectLabel(row)}</strong><small>{row.projectName || row.packageName || row.connectionName || "—"}</small></td><td><strong>{row.firebaseProjectId || "—"}</strong><small>{row.firebaseAppId || row.firebaseAppIdentifier || "—"}</small></td><td>{formatLogTime(row.checkedAt || row.createdAt)}</td><td>{formatLogDuration(row.durationMs)}</td><td><Badge tone={statusTone(row.status)}>{row.status || "UNKNOWN"}</Badge></td><td>{row.errorCode || "—"}</td><td>{row.message || "—"}</td></tr>) : <tr><td colSpan={8}><div className="empty-table-state"><strong>{taskLogLoading ? "正在读取错误日志" : "暂无错误日志"}</strong><span>{taskLogError ? "后端接入后会显示 Firebase 绑定预检错误和检查详情。" : "当前筛选条件下没有失败或检查记录。"}</span></div></td></tr>}</tbody></table></div></section>
+      <section className="two-column wide-left"><div className="surface"><div className="surface-title"><div><h2>处理建议</h2><p>根据 Firebase 绑定日志快速定位负责人和下一步动作。</p></div><button className="text-button" onClick={() => openModule("firebaseSetup")}>去 Firebase 对接</button></div><div className="alert-list">{[["P0","SERVICE_ACCOUNT / OAuth 失败","检查 secret:// 引用、服务账号邮箱和 JSON 文件权限","数据平台"],["P0","BIGQUERY_DATASET 或 EVENTS_TABLES 失败","确认 Firebase BigQuery Export 已开启且 Dataset 区域一致","数据平台"],["P1","FIREBASE_APP 包名不一致","回到 Firebase 对接菜单核对 App ID 与 project_projects.package_name","产品/客户端"],["P1","同步运行失败或处理量为 0","查看 run error_message，修复后由任务系统重试","数据平台"]].map(row => <button key={row[1]} onClick={() => notify(`${row[1]}：${row[2]}`)}><Badge tone={row[0]==="P0"?"bad":"warn"}>{row[0]}</Badge><div><strong>{row[1]}</strong><p>{row[2]}</p><small>负责人：{row[3]}</small></div><span>→</span></button>)}</div></div><aside className="surface"><div className="surface-title"><div><h2>告警通知</h2><p>当前值班策略</p></div></div><div className="notification-rules"><div><span>P0</span><strong>绑定校验失败</strong><p>服务账号、Firebase App、BigQuery 不可读立即通知</p></div><div><span>P1</span><strong>同步任务失败</strong><p>连续失败或超过 SLA 通知数据平台</p></div><div><span>P2</span><strong>NO_DATA</strong><p>每日汇总未发现 events 表或水位为空的绑定</p></div></div><button className="primary-button full" onClick={() => openDialog("alert-rule")}>＋ 新建告警规则</button></aside></section>
     </div>
   );
 }

@@ -2,6 +2,13 @@
 
 JKCL Funnel Analysis 是面向产品、投放和数据团队的项目分析与数据质量工作台。它把项目经营分析、Firebase/AdMob 数据诊断、数据对账、打点验收和数据任务告警放在同一个操作界面中。
 
+## 前后端分离
+
+- 前端：当前 Sites 项目，只负责页面、筛选、操作指引和结果展示。
+- 后端：`nxpanel-tracking-config-api`，负责配置快照、验收 Run、事件接收、参数/关联链校验和审计。
+- 前端环境变量：`NEXT_PUBLIC_TRACKING_API_BASE_URL`、`NEXT_PUBLIC_TRACKING_API_SECURE_PATH`。
+- 前端管理请求携带现有 NxPanel 登录 Cookie；事件采集使用后端 `TRACKING_ACCEPTANCE_INGEST_KEY`，密钥不得放入前端。
+
 当前阶段已完成“规范与项目配置”以及独立“Firebase 对接”控制面。页面已经按 V1.7 数据结构改成从 repository 读取，Firebase 页当前展示演示数据；数据库连接信息、密钥引用和真实表结构待提供后接入，不会访问或修改线上数据库。
 
 ## 环境要求
