@@ -604,12 +604,12 @@ td small { margin-top: 3px; color: var(--soft-muted); font-size: 7px; }
 .event-master-count { display: flex; align-items: center; gap: 10px; padding: 9px 16px; border-bottom: 1px solid var(--line-soft); background: #f8fafc; }
 .event-master-count strong { font-size: 9px; }
 .event-master-count span { color: var(--muted); font-size: 8px; }
-.event-master-table { width: 100%; overflow-x: auto; }
+.event-master-table { width: 100%; overflow-x: auto; overscroll-behavior-x: contain; }
 .event-master-table table { border-collapse: separate; border-spacing: 0; }
-.event-master-table.field-view table { width: 100%; min-width: 2440px; table-layout: fixed; }
+.event-master-table.field-view table { width: 100%; min-width: 2640px; table-layout: fixed; }
 .event-master-table.event-view table { width: 100%; min-width: 1800px; table-layout: fixed; }
 .event-master-table th { position: sticky; top: 0; z-index: 2; padding: 9px 8px; border-bottom: 1px solid #cad5e3; background: #eef2f7; color: #516079; font-size: 8px; font-weight: 800; text-align: left; white-space: nowrap; }
-.event-master-table td { padding: 9px 8px; border-bottom: 1px solid var(--line-soft); color: #344158; font-size: 8px; line-height: 1.45; vertical-align: top; overflow-wrap: anywhere; }
+.event-master-table td { min-width: 0; padding: 10px 9px; border-bottom: 1px solid var(--line-soft); color: #344158; font-size: 8px; line-height: 1.6; vertical-align: top; white-space: normal; overflow: hidden; overflow-wrap: anywhere; word-break: break-word; }
 .event-master-table tr:hover td { background: #f8faff; }
 .event-master-table tr.selected-row td { background: #f4f7ff; }
 .event-master-table tr.selected-row:hover td { background: #edf3ff; }
@@ -629,9 +629,9 @@ td small { margin-top: 3px; color: var(--soft-muted); font-size: 7px; }
 .event-master-table.field-view th:nth-child(9) { width: 85px; }
 .event-master-table.field-view th:nth-child(10) { width: 235px; }
 .event-master-table.field-view th:nth-child(11) { width: 110px; }
-.event-master-table.field-view th:nth-child(12) { width: 280px; }
-.event-master-table.field-view th:nth-child(13) { width: 210px; }
-.event-master-table.field-view th:nth-child(14) { width: 250px; }
+.event-master-table.field-view th:nth-child(12) { width: 330px; }
+.event-master-table.field-view th:nth-child(13) { width: 260px; }
+.event-master-table.field-view th:nth-child(14) { width: 300px; }
 .event-master-table.event-view th:nth-child(1) { width: 54px; }
 .event-master-table.event-view th:nth-child(2) { width: 110px; }
 .event-master-table.event-view th:nth-child(3) { width: 165px; }

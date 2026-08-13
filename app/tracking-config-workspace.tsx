@@ -127,7 +127,7 @@ export function TrackingConfigWorkspace({ editingConfig, onCancel, onSave }: {
       <section className="config-workspace-head">
         <div>
           <button className="back-link" onClick={onCancel}>← 返回配置列表</button>
-          <div className="eyebrow">V11 · 独立配置页面</div>
+          <div className="eyebrow">V12 · 独立配置页面</div>
           <h1>{editingConfig?.status === "DRAFT" ? "编辑打点配置草稿" : copyingPublished ? "复制为新配置版本" : "新建打点配置"}</h1>
           <p>以 V1.7 的 <strong>01_事件字段总表</strong> 为唯一事件来源；页面展示全部标准事件及其字段明细。</p>
         </div>
