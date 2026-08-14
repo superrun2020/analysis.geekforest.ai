@@ -39,6 +39,7 @@ type TransitionSelection = { from: string; to: string; rate: string; scope: "use
 type ModuleKey = "global" | "project" | "funnel" | "admob" | "firebase" | "reconcile" | "tracking" | "config" | "firebaseSetup" | "tasks";
 const moduleKeys = new Set<ModuleKey>(["global", "project", "funnel", "admob", "firebase", "reconcile", "tracking", "config", "firebaseSetup", "tasks"]);
 const pageKeys = new Set<PageKey>(["overview", "workbench", "diagnosis", "cohort", "path", "evidence", "issues", "snapshot"]);
+const legacyWorkbenchPages = new Set<PageKey>(["diagnosis", "cohort", "path", "snapshot"]);
 
 const funnelStageDisplayNames: Record<string, string> = {
   DAU: "日活跃用户（DAU）",
@@ -88,32 +89,39 @@ function readInitialAnalysisView(): { module: ModuleKey; page: PageKey; embedded
   const params = new URLSearchParams(window.location.search);
   const requestedModule = params.get("module");
   const requestedPage = params.get("page");
+  const normalizedModule: ModuleKey = requestedModule === "global" || requestedModule === "project"
+    ? "funnel"
+    : requestedModule === "firebaseSetup"
+      ? "firebase"
+      : moduleKeys.has(requestedModule as ModuleKey) ? requestedModule as ModuleKey : "funnel";
+  const normalizedPage: PageKey = requestedModule === "project"
+    ? "workbench"
+    : pageKeys.has(requestedPage as PageKey)
+      ? legacyWorkbenchPages.has(requestedPage as PageKey) ? "workbench" : requestedPage as PageKey
+      : "overview";
   return {
-    module: moduleKeys.has(requestedModule as ModuleKey) ? requestedModule as ModuleKey : "funnel",
-    page: pageKeys.has(requestedPage as PageKey) ? requestedPage as PageKey : "overview",
+    module: normalizedModule,
+    page: normalizedPage,
     embedded: params.get("embedded") === "1",
   };
 }
 
 const moduleMenus: Array<{ key: ModuleKey; index: string; label: string; group: "经营分析" | "质量治理" }> = [
-  { key: "global", index: "01", label: "全局项目总览", group: "经营分析" },
-  { key: "project", index: "02", label: "单项目诊断", group: "经营分析" },
-  { key: "funnel", index: "03", label: "漏斗分析", group: "经营分析" },
-  { key: "admob", index: "04", label: "AdMob 分析", group: "经营分析" },
-  { key: "firebase", index: "05", label: "Firebase 分析", group: "经营分析" },
-  { key: "reconcile", index: "06", label: "数据对账", group: "经营分析" },
-  { key: "tracking", index: "07", label: "打点验收中心", group: "质量治理" },
-  { key: "config", index: "08", label: "规范与项目配置", group: "质量治理" },
-  { key: "firebaseSetup", index: "09", label: "Firebase 对接", group: "质量治理" },
-  { key: "tasks", index: "10", label: "数据任务与告警", group: "质量治理" },
+  { key: "funnel", index: "01", label: "项目与漏斗分析", group: "经营分析" },
+  { key: "admob", index: "02", label: "AdMob 分析", group: "经营分析" },
+  { key: "firebase", index: "03", label: "Firebase 数据", group: "经营分析" },
+  { key: "reconcile", index: "04", label: "数据对账", group: "经营分析" },
+  { key: "tracking", index: "05", label: "打点验收", group: "质量治理" },
+  { key: "config", index: "06", label: "规范与配置", group: "质量治理" },
+  { key: "tasks", index: "07", label: "任务与告警", group: "质量治理" },
 ];
 
 const moduleCopy: Record<ModuleKey, { title: string; description: string; action: string }> = {
   global: { title: "全局项目总览", description: "统一查看所有项目的用户、投放、收入、利润和数据健康度", action: "导出项目日报" },
   project: { title: "单项目诊断", description: "围绕单个项目串联用户增长、产品漏斗、广告变现和数据质量", action: "创建诊断任务" },
-  funnel: { title: "漏斗分析中心", description: "从多项目异常发现到事件证据、修复重测和效果验证的完整诊断闭环", action: "新建诊断任务" },
+  funnel: { title: "项目与漏斗分析", description: "一个入口完成多项目发现、单项目漏斗、页面路径、事件证据和修复验证", action: "新建诊断任务" },
   admob: { title: "AdMob 分析", description: "分析请求、匹配、展示、广告浏览用户、eCPM和收入变化", action: "导出 AdMob 报表" },
-  firebase: { title: "Firebase 分析", description: "监控活跃用户、事件覆盖、参数质量、版本分布和实时数据延迟", action: "查看事件字典" },
+  firebase: { title: "Firebase 数据", description: "统一查看活跃、事件质量、版本覆盖、数据源连接和同步健康", action: "查看事件字典" },
   reconcile: { title: "数据对账", description: "对比 Firebase、AdMob、中台与 ADB 的用户、展示和收入口径", action: "发起重新对账" },
   tracking: { title: "打点验收中心", description: "按项目品类和测试快照验证应收事件、必填参数与完整关联链", action: "新建验收 Run" },
   config: { title: "规范与项目配置", description: "从事件主库组装项目打点配置，发布不可变快照并供验收Run引用", action: "新建打点配置" },
@@ -136,13 +144,9 @@ const moduleDialog: Record<ModuleKey, DialogKey> = {
 
 const pages: Array<{ key: PageKey; label: string; hint: string }> = [
   { key: "overview", label: "多项目漏斗总览", hint: "发现异常项目" },
-  { key: "workbench", label: "单项目漏斗分析", hint: "定位异常步骤" },
-  { key: "diagnosis", label: "步骤转化诊断", hint: "拆解流失原因" },
-  { key: "cohort", label: "分群对比分析", hint: "找到问题人群" },
-  { key: "path", label: "路径与流失分析", hint: "还原用户行为" },
-  { key: "evidence", label: "事件证据明细", hint: "验证事件链" },
-  { key: "issues", label: "问题与效果验证", hint: "修复闭环" },
-  { key: "snapshot", label: "漏斗口径快照", hint: "确认计算规则" },
+  { key: "workbench", label: "单项目分析工作台", hint: "漏斗·页面·流失原因" },
+  { key: "evidence", label: "证据与事件明细", hint: "事件链与原始参数" },
+  { key: "issues", label: "问题修复闭环", hint: "任务·重测·效果" },
 ];
 
 const projects = [
@@ -161,7 +165,7 @@ const projectDisplayProfiles: Record<string, { name: string; packageName: string
   "TURBO-CLEAN-05": { name: "Turbo Cleaner", packageName: "com.jkcl.turbo.clean", category: "清理", owner: "Noah", version: "2.1.6 (216)", health: "61", healthTone: "bad", newUsers: "9,864", revenueDelta: "-12.6%", arpDau: "$0.0238", retention: "25.9%" },
 };
 
-const productStages = [
+const productStages: FunnelStage[] = [
   { label: "DAU", event: "app_active", value: "128,430", rate: "100%", delta: "+2.8%" },
   { label: "VPN 首页", event: "vpn_home_view", value: "117,804", rate: "91.7%", delta: "+1.4%" },
   { label: "点击连接", event: "connect_start", value: "82,361", rate: "69.9%", delta: "-3.2%" },
@@ -318,12 +322,73 @@ const requestReasons = [
   { code: "UNKNOWN", label: "暂时无法分类", users: "31", share: 2.0, impact: "$2", owner: "数据" },
 ];
 
+const impressionReasons = [
+  { code: "SHOW_FAILED", label: "SDK 返回展示失败或 Activity 状态无效", users: "2,611", share: 36.1, impact: "$158", owner: "客户端 / 广告 SDK" },
+  { code: "IMPRESSION_TIMEOUT", label: "Show Attempt 后窗口内未收到 Impression 回调", users: "1,947", share: 26.9, impact: "$118", owner: "广告 SDK" },
+  { code: "PAGE_LEFT", label: "展示完成前离开当前页面", users: "1,318", share: 18.2, impact: "$80", owner: "产品 / 客户端" },
+  { code: "APP_BACKGROUND", label: "展示完成前 App 进入后台", users: "866", share: 12.0, impact: "$52", owner: "客户端" },
+  { code: "EVENT_NOT_RECEIVED", label: "客户端已展示但 Firebase 未收到 Impression", users: "348", share: 4.8, impact: "$21", owner: "数据 / 客户端" },
+  { code: "UNKNOWN", label: "暂时无法分类", users: "145", share: 2.0, impact: "$9", owner: "数据" },
+];
+
+const paidReasons = [
+  { code: "PAID_CALLBACK_MISSING", label: "Impression 后未收到 Paid Event 回调", users: "792", share: 64.1, impact: "$48", owner: "广告 SDK" },
+  { code: "INVALID_VALUE", label: "value_micros、currency_code 或精度不合法", users: "198", share: 16.0, impact: "$12", owner: "客户端 / 数据" },
+  { code: "DUPLICATE_CALLBACK", label: "同一 ad_instance_id 收到重复 Paid 回调", users: "124", share: 10.0, impact: "$7", owner: "客户端 / 数据" },
+  { code: "EVENT_NOT_RECEIVED", label: "客户端有回调但 Firebase 未收到事件", users: "98", share: 7.9, impact: "$6", owner: "数据 / 客户端" },
+  { code: "UNKNOWN", label: "暂时无法分类", users: "24", share: 2.0, impact: "$1", owner: "数据" },
+];
+
 const cohortRows = [
   { value: "伊朗", volume: "48,420", base: "52.1%", current: "31.8%", change: "-20.3pp", lost: "9,829", impact: "$592", level: "bad" },
   { value: "埃及", volume: "18,304", base: "49.6%", current: "42.7%", change: "-6.9pp", lost: "1,263", impact: "$76", level: "warn" },
   { value: "土耳其", volume: "15,887", base: "47.2%", current: "45.4%", change: "-1.8pp", lost: "286", impact: "$17", level: "ok" },
   { value: "巴基斯坦", volume: "12,641", base: "44.8%", current: "46.1%", change: "+1.3pp", lost: "—", impact: "+$10", level: "good" },
   { value: "印度尼西亚", volume: "9,218", base: "41.3%", current: "40.7%", change: "-0.6pp", lost: "55", impact: "$3", level: "ok" },
+];
+
+const productPageProfiles = {
+  "连接成功页": {
+    pageUv: "117,804", arrival: "91.7%", exposure: "88.3%", click: "79.1%", success: "78.0%", exit: "11.8%",
+    renderP50: "420ms", renderP95: "1.8s", apiLatency: "680ms", errorRate: "0.7%", whiteScreen: "0.12%",
+    opportunity: "36,474", av: "29,671", impression: "101,505", revenue: "$2,147",
+    chain: [
+      ["进入页面", "117,804", "vpn_connect_result_view"], ["渲染完成", "116,980", "99.3%"], ["核心元素曝光", "104,122", "89.0%"],
+      ["主按钮点击", "82,361", "79.1%"], ["业务成功", "64,276", "78.0%"], ["广告机会", "36,474", "56.7%"], ["广告展示用户 AV", "29,671", "81.4%"],
+    ],
+  },
+  "VPN 首页": {
+    pageUv: "128,430", arrival: "100%", exposure: "94.8%", click: "64.1%", success: "50.0%", exit: "18.6%",
+    renderP50: "360ms", renderP95: "1.4s", apiLatency: "540ms", errorRate: "0.4%", whiteScreen: "0.08%",
+    opportunity: "31,208", av: "25,940", impression: "78,328", revenue: "$1,689",
+    chain: [
+      ["进入页面", "128,430", "vpn_home_view"], ["渲染完成", "127,602", "99.4%"], ["核心元素曝光", "121,744", "95.4%"],
+      ["主按钮点击", "82,361", "67.7%"], ["业务成功", "64,276", "78.0%"], ["广告机会", "31,208", "48.6%"], ["广告展示用户 AV", "25,940", "83.1%"],
+    ],
+  },
+  "服务器选择页": {
+    pageUv: "46,820", arrival: "36.5%", exposure: "92.1%", click: "53.8%", success: "81.4%", exit: "23.7%",
+    renderP50: "510ms", renderP95: "2.3s", apiLatency: "910ms", errorRate: "1.2%", whiteScreen: "0.19%",
+    opportunity: "12,682", av: "9,844", impression: "28,843", revenue: "$634",
+    chain: [
+      ["进入页面", "46,820", "server_select_view"], ["渲染完成", "45,982", "98.2%"], ["核心元素曝光", "42,351", "92.1%"],
+      ["主按钮点击", "22,786", "53.8%"], ["业务成功", "18,548", "81.4%"], ["广告机会", "12,682", "68.4%"], ["广告展示用户 AV", "9,844", "77.6%"],
+    ],
+  },
+} as const;
+
+const pageHealthRows = [
+  ["连接成功页", "117,804", "91.7%", "88.3%", "79.1%", "78.0%", "11.8%", "36,474", "29,671", "$2,147", "预警"],
+  ["VPN 首页", "128,430", "100%", "94.8%", "64.1%", "50.0%", "18.6%", "31,208", "25,940", "$1,689", "正常"],
+  ["服务器选择页", "46,820", "36.5%", "92.1%", "53.8%", "81.4%", "23.7%", "12,682", "9,844", "$634", "预警"],
+  ["断开连接页", "38,604", "30.1%", "90.6%", "42.8%", "96.2%", "28.4%", "8,931", "7,504", "$406", "正常"],
+];
+
+const pageElementRows = [
+  ["连接按钮", "connect_primary", "104,122", "82,361", "79.1%", "64,276", "主要转化入口"],
+  ["换节点按钮", "change_server", "76,884", "18,402", "23.9%", "15,731", "弱网用户点击更高"],
+  ["加速动画", "success_animation", "116,980", "—", "—", "64,276", "P95 1.8s，可能延迟机会"],
+  ["订阅入口", "premium_entry", "92,315", "4,608", "5.0%", "1,246", "与广告资格互斥"],
 ];
 
 const eventRows = [
@@ -464,7 +529,7 @@ function ModulePage({ module, project, configs, onProjectChange, openModule, ope
       } catch (error) {
         setSyncRuns([]);
         setCheckLogs([]);
-        setTaskLogError(error instanceof Error ? error.message : "Firebase 绑定日志加载失败");
+        setTaskLogError(error instanceof Error ? error.message : "Firebase 数据任务日志加载失败");
       } finally {
         setTaskLogLoading(false);
       }
@@ -542,6 +607,7 @@ function ModulePage({ module, project, configs, onProjectChange, openModule, ope
       <section className="firebase-status"><div><span className="status-dot" /><strong>Firebase Export</strong><p>最近入库 15:31 · 正常</p></div><i /><div><span className="status-dot" /><strong>标准化任务</strong><p>批次 fb_1530 · 正常</p></div><i /><div><span className="status-dot" /><strong>ADB 聚合</strong><p>水位 15:22 · 延迟9分钟</p></div><i /><div><span className="status-dot warn" /><strong>中台接口</strong><p>成功率 96.7% · 预警</p></div></section>
       <section className="two-column wide-left"><div className="surface"><div className="surface-title"><div><h2>事件健康度</h2><p>按P0覆盖、参数和关联链综合判断</p></div><button className="text-button" onClick={() => openModule("tracking")}>进入打点验收</button></div><div className="table-wrap"><table><thead><tr><th>事件</th><th>今日用户</th><th>事件量</th><th>P0参数</th><th>event_id</th><th>关联链</th><th>版本覆盖</th><th>状态</th></tr></thead><tbody>{[["jk_ad_request","34,921","201,944","100%","100%","99.8%","98.6%","正常"],["jk_ad_impression","29,671","137,628","99.1%","100%","97.8%","异常"],["connect_success","64,276","71,804","100%","99.9%","99.7%","99.2%","正常"],["app_background","82,104","126,908","98.7%","100%","—","96.4%","预警"],["jk_ad_paid_event","29,404","136,392","100%","100%","99.1%","98.6%","正常"]].map(row => <tr key={row[0]}>{row.map((cell,index) => <td key={index}>{index === 7 ? <Badge tone={cell === "正常" ? "good" : cell === "预警" ? "warn" : "bad"}>{cell}</Badge> : cell}</td>)}</tr>)}</tbody></table></div></div><aside className="surface"><div className="surface-title"><div><h2>主要质量问题</h2><p>按影响事件量排序</p></div></div><div className="quality-issues"><button onClick={() => openModule("tracking")}><Badge tone="bad">P0</Badge><strong>impression缺opportunity_id</strong><span>1,824 条 · 1.3%</span></button><button onClick={() => openModule("reconcile")}><Badge tone="warn">同步</Badge><strong>中台接口上报失败</strong><span>4,222 用户 · 3.3%</span></button><button><Badge tone="warn">P1</Badge><strong>background_reason 缺失</strong><span>1,649 条 · 1.3%</span></button><button><Badge tone="neutral">隔离</Badge><strong>event_id 为空</strong><span>1,602 条</span></button></div></aside></section>
       <section className="surface"><div className="surface-title"><div><h2>版本与用户覆盖</h2><p>确认新版本是否完整接入全部事件</p></div><Badge tone="blue">Android</Badge></div><div className="version-coverage">{[["1.8.0 (108)","68.4%",68,"99.1%","31/31"],["1.7.4 (104)","21.7%",22,"99.8%","31/31"],["1.7.2 (102)","7.1%",7,"98.9%","29/31"],["其他","2.8%",3,"95.2%","26/31"]].map(row => <div key={String(row[0])}><strong>{row[0]}</strong><span>{row[1]} DAU</span><div><i style={{width:`${row[2]}%`}} /></div><small>参数 {row[3]}</small><Badge tone={row[4] === "31/31" ? "good" : "warn"}>{row[4]} P0</Badge></div>)}</div></section>
+      <details className="firebase-inline-settings"><summary><div><strong>Firebase 数据源设置</strong><span>连接、资源、同步、最新数据、接口健康与接口说明</span></div><Badge tone="good">2 个连接 · 正常</Badge><em>展开设置</em></summary><FirebaseConfiguration openDialog={openDialog} notify={notify} /></details>
     </div>
   );
 
@@ -594,11 +660,11 @@ function ModulePage({ module, project, configs, onProjectChange, openModule, ope
 
   return (
     <div className="page-stack">
-      <section className="metric-grid six"><Metric label="运行日志" value={String(syncRuns.length)} note={taskLogLoading ? "正在读取" : "Firebase绑定任务"} /><Metric label="运行中" value={String(runningSyncRuns)} note="QUEUED/RUNNING/VERIFYING" tone={runningSyncRuns ? "good" : undefined} /><Metric label="失败运行" value={String(failedSyncRuns)} note="需排查或重试" tone={failedSyncRuns ? "bad" : undefined} /><Metric label="错误日志" value={String(failedCheckLogs)} note="Firebase预检失败" tone={failedCheckLogs ? "bad" : "good"} /><Metric label="检查记录" value={String(checkLogs.length)} note="服务账号/Firebase/BigQuery" /><Metric label="最近运行" value={formatLogTime(latestRunTime).slice(11) || "—"} note={latestRunTime ? formatLogTime(latestRunTime).slice(0, 10) : "等待同步"} /></section>
-      <section className="surface firebase-task-console"><div className="surface-title"><div><h2>Firebase 绑定日志</h2><p>按当前任务中心版式展示 Firebase 绑定的运行日志和错误日志，数据来自 ADB 控制表。</p></div><div className="dimension-tabs"><button className={taskFilter==="all"?"active":""} onClick={()=>setTaskFilter("all")}>全部</button><button className={taskFilter==="failed"?"active":""} onClick={()=>setTaskFilter("failed")}>失败</button><button className={taskFilter==="running"?"active":""} onClick={()=>setTaskFilter("running")}>运行中</button></div></div><div className="firebase-task-toolbar"><input value={taskKeyword} onChange={(event)=>setTaskKeyword(event.target.value)} onKeyDown={(event)=>{ if (event.key === "Enter") void loadFirebaseTaskLogs(); }} placeholder="搜索项目、包名、Firebase Project/App、错误信息" /><button className="secondary-button" onClick={() => { setTaskKeyword(""); setTaskFilter("all"); }}>重置</button><button className="primary-button" onClick={() => void loadFirebaseTaskLogs()}>{taskLogLoading ? "刷新中..." : "刷新日志"}</button></div>{taskLogError && <div className="firebase-log-state warn"><strong>日志接口待接入</strong><p>{taskLogError}。请在 Sites 环境变量配置 NEXT_PUBLIC_TRACKING_API_BASE_URL 和 NEXT_PUBLIC_TRACKING_API_SECURE_PATH，并确认后端已合并日志接口。</p></div>}</section>
+      <section className="metric-grid six"><Metric label="运行日志" value={String(syncRuns.length)} note={taskLogLoading ? "正在读取" : "Firebase同步任务"} /><Metric label="运行中" value={String(runningSyncRuns)} note="QUEUED/RUNNING/VERIFYING" tone={runningSyncRuns ? "good" : undefined} /><Metric label="失败运行" value={String(failedSyncRuns)} note="需排查或重试" tone={failedSyncRuns ? "bad" : undefined} /><Metric label="错误日志" value={String(failedCheckLogs)} note="Firebase预检失败" tone={failedCheckLogs ? "bad" : "good"} /><Metric label="检查记录" value={String(checkLogs.length)} note="服务账号/Firebase/BigQuery" /><Metric label="最近运行" value={formatLogTime(latestRunTime).slice(11) || "—"} note={latestRunTime ? formatLogTime(latestRunTime).slice(0, 10) : "等待同步"} /></section>
+      <section className="surface firebase-task-console"><div className="surface-title"><div><h2>Firebase 数据任务日志</h2><p>统一展示 Firebase 资源检查、同步运行和错误日志，数据来自 ADB 控制表。</p></div><div className="dimension-tabs"><button className={taskFilter==="all"?"active":""} onClick={()=>setTaskFilter("all")}>全部</button><button className={taskFilter==="failed"?"active":""} onClick={()=>setTaskFilter("failed")}>失败</button><button className={taskFilter==="running"?"active":""} onClick={()=>setTaskFilter("running")}>运行中</button></div></div><div className="firebase-task-toolbar"><input value={taskKeyword} onChange={(event)=>setTaskKeyword(event.target.value)} onKeyDown={(event)=>{ if (event.key === "Enter") void loadFirebaseTaskLogs(); }} placeholder="搜索项目、包名、Firebase Project/App、错误信息" /><button className="secondary-button" onClick={() => { setTaskKeyword(""); setTaskFilter("all"); }}>重置</button><button className="primary-button" onClick={() => void loadFirebaseTaskLogs()}>{taskLogLoading ? "刷新中..." : "刷新日志"}</button></div>{taskLogError && <div className="firebase-log-state warn"><strong>日志接口待接入</strong><p>{taskLogError}。请在 Sites 环境变量配置 NEXT_PUBLIC_TRACKING_API_BASE_URL 和 NEXT_PUBLIC_TRACKING_API_SECURE_PATH，并确认后端已合并日志接口。</p></div>}</section>
       <section className="surface"><div className="surface-title"><div><h2>运行日志</h2><p>对应 ADB 表 <code>firebase_sync_runs</code>，用于查看 Firebase 绑定同步任务的水位、处理量和失败原因。</p></div><Badge tone={failedSyncRuns ? "bad" : "blue"}>{visibleSyncRuns.length} 条</Badge></div><div className="table-wrap"><table><thead><tr><th>任务 / 运行ID</th><th>项目</th><th>Firebase资源</th><th>时间范围</th><th>开始 / 结束</th><th>处理量</th><th>耗时</th><th>状态</th><th>错误</th></tr></thead><tbody>{visibleSyncRuns.length ? visibleSyncRuns.map((row) => <tr key={row.runId} className={isFailedStatus(row.status) ? "row-warn" : ""}><td><strong>{row.runType || "SYNC"}</strong><small>Run #{row.runId}{row.externalJobId ? ` · ${row.externalJobId}` : ""}</small></td><td><strong>{logProjectLabel(row)}</strong><small>{row.projectName || row.packageName || row.connectionName || "—"}</small></td><td><strong>{row.firebaseProjectId || "—"}</strong><small>{row.firebaseAppId || row.firebaseAppIdentifier || "—"}</small></td><td><strong>{formatLogTime(row.rangeStart)}</strong><small>{formatLogTime(row.rangeEnd)}</small></td><td><strong>{formatLogTime(row.startedAt)}</strong><small>{formatLogTime(row.finishedAt)}</small></td><td><strong>{formatLogRows(row.adbRows)} ADB</strong><small>{formatLogRows(row.sourceRows)} source</small></td><td>{formatLogDuration(row.durationMs)}</td><td><Badge tone={statusTone(row.status)}>{row.status || "UNKNOWN"}</Badge></td><td>{row.errorMessage || "—"}</td></tr>) : <tr><td colSpan={9}><div className="empty-table-state"><strong>{taskLogLoading ? "正在读取运行日志" : "暂无运行日志"}</strong><span>{taskLogError ? "后端接入后会显示真实 Firebase 同步运行记录。" : "当前筛选条件下没有记录。"}</span></div></td></tr>}</tbody></table></div></section>
       <section className="surface"><div className="surface-title"><div><h2>错误日志 / 接口检查</h2><p>对应 ADB 表 <code>firebase_api_check_logs</code>，覆盖服务账号、Firebase Project/App、BigQuery Dataset 和 events 表检查。</p></div><Badge tone={failedCheckLogs ? "bad" : "good"}>{failedCheckLogs} 个失败</Badge></div><div className="table-wrap"><table><thead><tr><th>检查项 / 日志ID</th><th>项目</th><th>Firebase资源</th><th>检查时间</th><th>耗时</th><th>结果</th><th>错误码</th><th>详情</th></tr></thead><tbody>{visibleCheckLogs.length ? visibleCheckLogs.map((row) => <tr key={row.logId} className={isFailedStatus(row.status) ? "row-warn" : ""}><td><strong>{row.checkType || "CHECK"}</strong><small>Log #{row.logId}</small></td><td><strong>{logProjectLabel(row)}</strong><small>{row.projectName || row.packageName || row.connectionName || "—"}</small></td><td><strong>{row.firebaseProjectId || "—"}</strong><small>{row.firebaseAppId || row.firebaseAppIdentifier || "—"}</small></td><td>{formatLogTime(row.checkedAt || row.createdAt)}</td><td>{formatLogDuration(row.durationMs)}</td><td><Badge tone={statusTone(row.status)}>{row.status || "UNKNOWN"}</Badge></td><td>{row.errorCode || "—"}</td><td>{row.message || "—"}</td></tr>) : <tr><td colSpan={8}><div className="empty-table-state"><strong>{taskLogLoading ? "正在读取错误日志" : "暂无错误日志"}</strong><span>{taskLogError ? "后端接入后会显示 Firebase 绑定预检错误和检查详情。" : "当前筛选条件下没有失败或检查记录。"}</span></div></td></tr>}</tbody></table></div></section>
-      <section className="two-column wide-left"><div className="surface"><div className="surface-title"><div><h2>处理建议</h2><p>根据 Firebase 绑定日志快速定位负责人和下一步动作。</p></div><button className="text-button" onClick={() => openModule("firebaseSetup")}>去 Firebase 对接</button></div><div className="alert-list">{[["P0","SERVICE_ACCOUNT / OAuth 失败","检查 secret:// 引用、服务账号邮箱和 JSON 文件权限","数据平台"],["P0","BIGQUERY_DATASET 或 EVENTS_TABLES 失败","确认 Firebase BigQuery Export 已开启且 Dataset 区域一致","数据平台"],["P1","FIREBASE_APP 包名不一致","回到 Firebase 对接菜单核对 App ID 与 project_projects.package_name","产品/客户端"],["P1","同步运行失败或处理量为 0","查看 run error_message，修复后由任务系统重试","数据平台"]].map(row => <button key={row[1]} onClick={() => notify(`${row[1]}：${row[2]}`)}><Badge tone={row[0]==="P0"?"bad":"warn"}>{row[0]}</Badge><div><strong>{row[1]}</strong><p>{row[2]}</p><small>负责人：{row[3]}</small></div><span>→</span></button>)}</div></div><aside className="surface"><div className="surface-title"><div><h2>告警通知</h2><p>当前值班策略</p></div></div><div className="notification-rules"><div><span>P0</span><strong>绑定校验失败</strong><p>服务账号、Firebase App、BigQuery 不可读立即通知</p></div><div><span>P1</span><strong>同步任务失败</strong><p>连续失败或超过 SLA 通知数据平台</p></div><div><span>P2</span><strong>NO_DATA</strong><p>每日汇总未发现 events 表或水位为空的绑定</p></div></div><button className="primary-button full" onClick={() => openDialog("alert-rule")}>＋ 新建告警规则</button></aside></section>
+      <section className="two-column wide-left"><div className="surface"><div className="surface-title"><div><h2>处理建议</h2><p>根据 Firebase 数据任务日志快速定位负责人和下一步动作。</p></div><button className="text-button" onClick={() => openModule("firebase")}>去 Firebase 数据源</button></div><div className="alert-list">{[["P0","SERVICE_ACCOUNT / OAuth 失败","检查 secret:// 引用、服务账号邮箱和 JSON 文件权限","数据平台"],["P0","BIGQUERY_DATASET 或 EVENTS_TABLES 失败","确认 Firebase BigQuery Export 已开启且 Dataset 区域一致","数据平台"],["P1","FIREBASE_APP 包名不一致","回到 Firebase 数据源设置核对 App ID 与 project_projects.package_name","产品/客户端"],["P1","同步运行失败或处理量为 0","查看 run error_message，修复后由任务系统重试","数据平台"]].map(row => <button key={row[1]} onClick={() => notify(`${row[1]}：${row[2]}`)}><Badge tone={row[0]==="P0"?"bad":"warn"}>{row[0]}</Badge><div><strong>{row[1]}</strong><p>{row[2]}</p><small>负责人：{row[3]}</small></div><span>→</span></button>)}</div></div><aside className="surface"><div className="surface-title"><div><h2>告警通知</h2><p>当前值班策略</p></div></div><div className="notification-rules"><div><span>P0</span><strong>资源校验失败</strong><p>服务账号、Firebase App、BigQuery 不可读立即通知</p></div><div><span>P1</span><strong>同步任务失败</strong><p>连续失败或超过 SLA 通知数据平台</p></div><div><span>P2</span><strong>NO_DATA</strong><p>每日汇总未发现 events 表或数据水位为空</p></div></div><button className="primary-button full" onClick={() => openDialog("alert-rule")}>＋ 新建告警规则</button></aside></section>
     </div>
   );
 }
@@ -672,6 +738,7 @@ export default function Home() {
   const [baseline, setBaseline] = useState("近7日均值");
   const [trendMetric, setTrendMetric] = useState<TrendMetric>("viewer");
   const [transition, setTransition] = useState<TransitionSelection>({ from: "Eligible", to: "Opportunity", rate: "43.9%", scope: "users" });
+  const [selectedProductPage, setSelectedProductPage] = useState<keyof typeof productPageProfiles>("连接成功页");
   const [filtersApplied, setFiltersApplied] = useState(0);
   const [dialog, setDialog] = useState<DialogKey | null>(null);
   const [configRecords, setConfigRecords] = useState<TrackingConfigRecord[]>(trackingConfigs);
@@ -720,7 +787,7 @@ export default function Home() {
   const lastStageCount = Number(stages.at(-1)?.value.replaceAll(",", "") ?? 0);
   const firstToLastRate = firstStageCount > 0 ? `${(lastStageCount / firstStageCount * 100).toFixed(1)}%` : "—";
 
-  const currentPage = pages.find((item) => item.key === page)!;
+  const currentPage = pages.find((item) => item.key === page) ?? pages[1];
   const currentModule = moduleCopy[module];
   const visibleEvents = eventRows
     .map((event, index) => ({ event, index }))
@@ -730,13 +797,23 @@ export default function Home() {
   const trendLabel = trendMetric === "viewer" ? "广告浏览者比例" : "Opportunity机会覆盖率";
   const isFulfillmentDiagnosis = transition.from === "Opportunity" && transition.to === "Show Attempt";
   const isRequestDiagnosis = transition.from === "Opportunity" && transition.to === "Request";
-  const diagnosisReasons = isRequestDiagnosis ? requestReasons : isFulfillmentDiagnosis ? fulfillmentReasons : reasons;
+  const isImpressionDiagnosis = transition.from === "Show Attempt" && ["AV", "Impression"].includes(transition.to);
+  const isPaidDiagnosis = ["AV", "Impression"].includes(transition.from) && ["Paid", "Paid Event"].includes(transition.to);
+  const diagnosisReasons = isRequestDiagnosis ? requestReasons : isFulfillmentDiagnosis ? fulfillmentReasons : isImpressionDiagnosis ? impressionReasons : isPaidDiagnosis ? paidReasons : reasons;
   const transitionStages = funnelMode === "product" ? productStages : transition.scope === "events" ? monetizationEventStages : activeProfile.userStages;
   const fromStage = transitionStages.find((stage) => stage.label === transition.from);
   const toStage = transitionStages.find((stage) => stage.label === transition.to);
-  const transitionLoss = fromStage && toStage
-    ? Math.max(0, Number(fromStage.value.replaceAll(",", "")) - Number(toStage.value.replaceAll(",", ""))).toLocaleString()
-    : "—";
+  const transitionFromValue = Number(fromStage?.value.replaceAll(",", "") ?? 0);
+  const transitionToValue = Number(toStage?.value.replaceAll(",", "") ?? 0);
+  const transitionLossValue = Math.max(0, transitionFromValue - transitionToValue);
+  const transitionLoss = fromStage && toStage ? transitionLossValue.toLocaleString() : "—";
+  const transitionConversion = transitionFromValue > 0 ? `${(transitionToValue / transitionFromValue * 100).toFixed(1)}%` : "—";
+  const estimatedRevenueImpact = `$${Math.round(transitionLossValue * 0.0602).toLocaleString()}`;
+  const transitionFromIndex = transitionStages.findIndex((stage) => stage.label === transition.from);
+  const diagnosisToOptions = transitionStages.slice(Math.max(transitionFromIndex + 1, 1));
+  const transitionToIndex = transitionStages.findIndex((stage) => stage.label === transition.to);
+  const diagnosisHasNonLinearStage = transitionStages.slice(Math.max(transitionFromIndex, 0), transitionToIndex + 1).some((stage) => stage.nonLinear);
+  const selectedPageProfile = productPageProfiles[selectedProductPage];
   const sourceStatus: Record<ModuleKey, { title: string; detail: string; note: string }> = {
     global: { title: "混合时效", detail: "Firebase T+0 · AdMob T+3 · 刷新", note: "DAU和用户行为使用Firebase实时预估；收入、消耗和ROAS使用最近已结算日期，卡片必须标注数据日。" },
     project: { title: "项目诊断", detail: "Firebase延迟约8分钟 · AdMob T+3", note: "用户与产品指标可看当天；收入和AdMob效率使用已结算日期，不参与当天实时结论。" },
@@ -764,8 +841,14 @@ export default function Home() {
   function openModule(next: ModuleKey) {
     setConfigWorkspaceOpen(false);
     setEditingConfig(null);
-    setModule(next);
-    if (next === "funnel") setPage("overview");
+    if (next === "global" || next === "project" || next === "funnel") {
+      setModule("funnel");
+      setPage(next === "project" ? "workbench" : "overview");
+    } else if (next === "firebaseSetup") {
+      setModule("firebase");
+    } else {
+      setModule(next);
+    }
     if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
@@ -817,15 +900,48 @@ export default function Home() {
     notify("筛选条件已恢复默认");
   }
 
+  function focusWorkbenchSection(sectionId: "funnel-workbench" | "step-diagnosis" | "page-product-analysis" | "workbench-rules") {
+    setModule("funnel");
+    setPage("workbench");
+    window.setTimeout(() => document.getElementById(sectionId)?.scrollIntoView({ behavior: "smooth", block: "start" }), 80);
+  }
+
+  function openDiagnosisSelection(selection: TransitionSelection) {
+    setTransition(selection);
+    setUnitMode(selection.scope);
+    focusWorkbenchSection("step-diagnosis");
+  }
+
+  function changeDiagnosisScope(scope: UnitMode) {
+    const options = funnelMode === "product" ? productStages : scope === "events" ? monetizationEventStages : activeProfile.userStages;
+    const from = options[Math.min(2, options.length - 2)];
+    const to = options[Math.min(3, options.length - 1)];
+    setUnitMode(scope);
+    setTransition({ from: from.label, to: to.label, rate: to.rate, scope });
+  }
+
+  function changeDiagnosisBoundary(boundary: "from" | "to", label: string) {
+    const options = funnelMode === "product" ? productStages : transition.scope === "events" ? monetizationEventStages : activeProfile.userStages;
+    const currentFromIndex = options.findIndex((stage) => stage.label === transition.from);
+    const currentToIndex = options.findIndex((stage) => stage.label === transition.to);
+    if (boundary === "from") {
+      const nextFromIndex = options.findIndex((stage) => stage.label === label);
+      const nextTo = currentToIndex > nextFromIndex ? options[currentToIndex] : options[Math.min(nextFromIndex + 1, options.length - 1)];
+      setTransition({ from: label, to: nextTo.label, rate: nextTo.rate, scope: transition.scope });
+      return;
+    }
+    const nextTo = options.find((stage) => stage.label === label) ?? options[Math.min(currentFromIndex + 1, options.length - 1)];
+    setTransition({ ...transition, to: nextTo.label, rate: nextTo.rate });
+  }
+
   function openTransition(from: FunnelStage, to: FunnelStage) {
-    setTransition({ from: from.label, to: to.label, rate: to.rate, scope: unitMode });
-    go("diagnosis");
+    openDiagnosisSelection({ from: from.label, to: to.label, rate: to.rate, scope: unitMode });
   }
 
   return (
     <div className={`app-shell ${embedded ? "embedded" : ""}`}>
       <aside className="sidebar">
-        <div className="brand"><span className="brand-mark">JK</span><span><strong>变现与埋点</strong><small>质量分析中心 · V13</small></span></div>
+        <div className="brand"><span className="brand-mark">JK</span><span><strong>变现与埋点</strong><small>质量分析中心 · V23</small></span></div>
         <div className="nav-group-label">经营分析</div>
         {moduleMenus.filter((item) => item.group === "经营分析").map((item) => <button key={item.key} className={`main-nav-item ${module === item.key ? "active" : ""}`} onClick={() => openModule(item.key)}><span>{item.index}</span>{item.label}</button>)}
         <div className="nav-group-label">质量治理</div>
@@ -843,15 +959,14 @@ export default function Home() {
           {configWorkspaceOpen ? <TrackingConfigWorkspace editingConfig={editingConfig} onCancel={() => { setConfigWorkspaceOpen(false); setEditingConfig(null); }} onSave={saveTrackingConfig} /> : <>
           <section className="page-heading">
             <div><h1>{currentModule.title}</h1><p>{currentModule.description}</p></div>
-            <div className="heading-actions"><button className="secondary-button" onClick={() => module === "funnel" ? go("snapshot") : notify("数据已刷新至最新水位")}>{module === "funnel" ? "查看口径 V1.7" : "刷新数据"}</button><button className="primary-button" onClick={() => module === "config" ? openConfigEditor(null) : setDialog(moduleDialog[module])}>{["project", "funnel", "tracking", "config", "firebaseSetup", "tasks"].includes(module) ? "＋ " : ""}{currentModule.action}</button></div>
+            <div className="heading-actions"><button className="secondary-button" onClick={() => module === "funnel" ? focusWorkbenchSection("workbench-rules") : notify("数据已刷新至最新水位")}>{module === "funnel" ? "查看口径 V1.7" : "刷新数据"}</button><button className="primary-button" onClick={() => module === "config" ? openConfigEditor(null) : setDialog(moduleDialog[module])}>{["project", "funnel", "tracking", "config", "firebaseSetup", "tasks"].includes(module) ? "＋ " : ""}{currentModule.action}</button></div>
           </section>
 
           {module === "funnel" && <section className="workflow-strip" aria-label="漏斗诊断流程">
             {[
-              ["发现", "多项目总览"], ["定位", "单项目漏斗"], ["拆解", "步骤与分群"], ["取证", "路径与事件"], ["闭环", "修复与验证"],
+              ["发现", "多项目总览"], ["分析", "单项目工作台"], ["取证", "事件与原始参数"], ["闭环", "修复与效果验证"],
             ].map(([name, hint], index) => {
-              const pageIndex = pages.findIndex((item) => item.key === page);
-              const phase = pageIndex === 0 ? 0 : pageIndex === 1 ? 1 : pageIndex <= 3 ? 2 : pageIndex <= 5 ? 3 : 4;
+              const phase = page === "overview" ? 0 : page === "workbench" ? 1 : page === "evidence" ? 2 : 3;
               return <div key={name} className={`workflow-step ${phase === index ? "current" : ""} ${phase > index ? "done" : ""}`}><span>{phase > index ? "✓" : index + 1}</span><div><strong>{name}</strong><small>{hint}</small></div></div>;
             })}
           </section>}
@@ -874,7 +989,7 @@ export default function Home() {
             <div className="context-summary"><Badge tone="blue">{module === "funnel" ? currentPage.hint : currentModule.title}</Badge><span>{project}</span><i /> <span>{range}</span><i /> <span>{platform} · {appVersion}</span><i /> <span>{country}</span><i /> <span>口径 V1.7</span></div>
             <div className="context-actions"><button onClick={() => notify("当前分析视图已保存")}>保存视图</button><button onClick={() => setDialog(module === "admob" ? "admob-report" : "project-report")}>导出报表</button></div>
           </section>}
-          <section className="freshness-note"><div><strong>数据使用提示：</strong>{sourceStatus[module].note}</div><button onClick={() => module === "funnel" ? go("snapshot") : notify(`${currentModule.title}数据口径说明已展开`)}>查看数据口径</button></section>
+          <section className="freshness-note"><div><strong>数据使用提示：</strong>{sourceStatus[module].note}</div><button onClick={() => module === "funnel" ? focusWorkbenchSection("workbench-rules") : notify(`${currentModule.title}数据口径说明已展开`)}>查看数据口径</button></section>
 
           {module !== "funnel" && <ModulePage module={module as Exclude<ModuleKey, "funnel">} project={project} configs={configRecords} onProjectChange={setProject} openModule={openModule} openDialog={setDialog} openConfigEditor={openConfigEditor} notify={notify} />}
 
@@ -906,11 +1021,11 @@ export default function Home() {
                 <aside className="surface">
                   <div className="surface-title"><div><h2>优先处理</h2><p>按影响用户与收入排序</p></div></div>
                   <div className="issue-list">
-                    <button onClick={() => { setProject("IRAN-VPN-01"); setTransition({from:"Eligible",to:"Opportunity",rate:"43.9%",scope:"users"}); go("diagnosis"); }}><span className="rank bad">1</span><div><strong>IRAN-VPN-01</strong><p>Eligible→Opportunity 下降 12.8pp</p><small>影响 46,632 用户 · 约 $2,807/日</small></div></button>
-                    <button onClick={() => { setProject("TURBO-CLEAN-05"); setTransition({from:"Opportunity",to:"Request",rate:"93.2%",scope:"users"}); go("diagnosis"); }}><span className="rank bad">2</span><div><strong>TURBO-CLEAN-05</strong><p>广告机会 → 请求用户覆盖下降</p><small>优先排查预加载覆盖与实时请求分支</small></div></button>
-                    <button onClick={() => { setProject("CLEAN-MAX-03"); setTransition({from:"Opportunity",to:"Request",rate:"95.5%",scope:"users"}); go("diagnosis"); }}><span className="rank warn">3</span><div><strong>CLEAN-MAX-03</strong><p>广告机会 → 请求用户（Opportunity → Request UV）下降</p><small>检查请求事件覆盖及 request_id 关联</small></div></button>
+                    <button onClick={() => { setProject("IRAN-VPN-01"); openDiagnosisSelection({from:"Eligible",to:"Opportunity",rate:"43.9%",scope:"users"}); }}><span className="rank bad">1</span><div><strong>IRAN-VPN-01</strong><p>Eligible→Opportunity 下降 12.8pp</p><small>影响 46,632 用户 · 约 $2,807/日</small></div></button>
+                    <button onClick={() => { setProject("TURBO-CLEAN-05"); openDiagnosisSelection({from:"Opportunity",to:"Request",rate:"93.2%",scope:"users"}); }}><span className="rank bad">2</span><div><strong>TURBO-CLEAN-05</strong><p>广告机会 → 请求用户覆盖下降</p><small>优先排查预加载覆盖与实时请求分支</small></div></button>
+                    <button onClick={() => { setProject("CLEAN-MAX-03"); openDiagnosisSelection({from:"Opportunity",to:"Request",rate:"95.5%",scope:"users"}); }}><span className="rank warn">3</span><div><strong>CLEAN-MAX-03</strong><p>广告机会 → 请求用户（Opportunity → Request UV）下降</p><small>检查请求事件覆盖及 request_id 关联</small></div></button>
                   </div>
-                  <button className="full-link" onClick={() => go("diagnosis")}>进入异常诊断 →</button>
+                  <button className="full-link" onClick={() => focusWorkbenchSection("step-diagnosis")}>进入单项目诊断工作台 →</button>
                 </aside>
               </section>
 
@@ -933,12 +1048,28 @@ export default function Home() {
               <section className="analysis-head surface">
                 <div><div className="eyebrow">{project} · Android 1.8.0</div><h2>{funnelMode === "product" ? "VPN 产品主漏斗" : "广告变现主漏斗"}</h2><p>当前周期：{range} 00:00–当前 · 对比昨日同期</p></div>
                 <div className="mode-controls">
-                  <Segmented label="漏斗类型" active={funnelMode} onChange={(key) => { setFunnelMode(key as FunnelMode); if (key === "product") setUnitMode("users"); }} items={[{ key: "product", label: "产品漏斗" }, { key: "monetization", label: "变现漏斗" }]} />
+                  <Segmented label="漏斗类型" active={funnelMode} onChange={(key) => {
+                    const nextMode = key as FunnelMode;
+                    setFunnelMode(nextMode);
+                    if (nextMode === "product") {
+                      setUnitMode("users");
+                      setTransition({ from: productStages[0].label, to: productStages[1].label, rate: productStages[1].rate, scope: "users" });
+                    } else if (productStages.some((stage) => stage.label === transition.from)) {
+                      setTransition({ from: "Eligible", to: "Opportunity", rate: activeProfile.userStages[3].rate, scope: "users" });
+                    }
+                  }} items={[{ key: "product", label: "产品漏斗" }, { key: "monetization", label: "变现漏斗" }]} />
                   {funnelMode === "monetization" && <Segmented label="统计单位" active={unitMode} onChange={(key) => setUnitMode(key as UnitMode)} items={[{ key: "users", label: "用户数" }, { key: "events", label: "事件数" }]} />}
                 </div>
               </section>
 
-              <section className="surface funnel-surface">
+              <nav className="workbench-jumpbar" aria-label="单项目工作台区块导航">
+                <button onClick={() => focusWorkbenchSection("funnel-workbench")}><span>01</span>变现与产品漏斗</button>
+                <button onClick={() => focusWorkbenchSection("step-diagnosis")}><span>02</span>区间流失诊断</button>
+                <button onClick={() => focusWorkbenchSection("page-product-analysis")}><span>03</span>页面与产品路径</button>
+                <button onClick={() => focusWorkbenchSection("workbench-rules")}><span>04</span>口径与技术建议</button>
+              </nav>
+
+              <section className="surface funnel-surface" id="funnel-workbench">
                 <div className="surface-title"><div><h2>{funnelMode === "product" ? "产品用户到达漏斗" : unitMode === "users" ? "用户覆盖主漏斗" : "事件覆盖与展示漏斗"}</h2><p>{funnelMode === "monetization" ? unitMode === "users" ? "全部节点按用户去重；Request UV 含预加载与实时请求，仅作覆盖观察，缓存命中用户可跳过 Request / Load，不能把 Opportunity → Request 当成严格流失率" : "事件漏斗展示请求、加载、Ready、Show、Impression 与 Paid 回调；点击箭头诊断当前步骤" : "点击转化箭头进入步骤诊断"}</p></div><div className="funnel-title-tools"><div className="legend"><span className="dot blue" />当前 <span className="dot neutral" />昨日同期</div><span className="funnel-scroll-hint">⇆ 横向滚动查看全部 {stages.length} 个节点</span></div></div>
                 <div className={`funnel-stages ${stages.length > 6 ? "dense" : ""}`} tabIndex={0} aria-label={`漏斗共 ${stages.length} 个节点，可横向滚动查看完整信息`}>
                   {stages.map((stage, index) => <div className="stage-group" key={stage.label}>
@@ -992,18 +1123,70 @@ export default function Home() {
                 <aside className="surface"><div className="surface-title"><div><h2>预加载与缓存库存</h2><p>发生在真实业务场景之前，按事件次数独立统计，不绑定 opportunity_id</p></div><Badge tone="warn">独立口径</Badge></div><div className="preload-chain">{[["Preload Trigger",preloadInventory.trigger,"100%"],["Preload Request",preloadInventory.request,"94.1%"],["Request Accepted",238984,"98.3%"],["Load Success",preloadInventory.loadSuccess,activeProfile.preloadSuccess],["Cache Store",preloadInventory.cacheStore,"98.0%"],["Cache Ready",216630,"97.8%"]].map(([label,value,rate],index)=><div key={String(label)}><span>{index+1}</span><p><strong>{label}</strong><small>{Number(value).toLocaleString()} · {rate}</small></p></div>)}</div><div className="inventory-outcomes"><div><span>Cache Hit / 被业务消费</span><strong>{preloadInventory.cacheHit.toLocaleString()}</strong></div><div><span>Expired / TTL过期</span><strong>{preloadInventory.expired.toLocaleString()}</strong></div><div><span>Evicted / 被驱逐</span><strong>{preloadInventory.evicted.toLocaleString()}</strong></div><div><span>未消费库存</span><strong>{preloadInventory.unusedReady.toLocaleString()}</strong></div></div><div className="conclusion-block warn"><strong>缓存浪费率 20.1%</strong><p>(Expired + Evicted) / Cache Store。建议继续按广告位、格式、TTL、网络类型和 App 前后台状态拆解。</p></div><div className="funnel-rule-note compact"><strong>Context</strong><span>广告对象入缓存时必须连同 requestContext / instanceContext 保存；取出时再绑定当前 opportunity_id，直到 paid / dismiss / failed 终态。</span></div></aside>
               </section>}
 
-              <section className="two-column">
-                <div className="surface">
-                  <div className="surface-title"><div><h2>关键指标趋势</h2><p>{trendMetric === "viewer" ? "广告浏览用户持续减少，当前低于35%目标" : "请求前机会覆盖持续下降，当前低于40%基线"}</p></div><Segmented label="趋势指标" active={trendMetric} onChange={(key) => setTrendMetric(key as TrendMetric)} items={[{ key: "viewer", label: "浏览者比例" }, { key: "opportunity", label: "机会覆盖" }]} /></div>
-                  <div className="trend-current"><span>{trendLabel}</span><strong>{trendValues.at(-1)}%</strong><small>{trendMetric === "viewer" ? "目标 ≥ 35%" : "目标 ≥ 40%"}</small></div>
-                  <div className="bar-chart" aria-label={`近七日${trendLabel}趋势`}>{trendValues.map((value, index) => <div key={`${trendMetric}-${index}`}><span style={{ height: `${value * 2}px` }} className={index > 3 ? "alert" : ""}><em>{value}%</em></span><small>{["8/5", "8/6", "8/7", "8/8", "8/9", "8/10", "今天"][index]}</small></div>)}</div>
+              <section className="surface diagnosis-workspace" id="step-diagnosis">
+                <div className="surface-title"><div><h2>区间流失诊断</h2><p>选择任意上游与下游指标，立即重算转化、流失、原因、分群和收入影响</p></div><Badge tone={diagnosisHasNonLinearStage ? "warn" : "blue"}>{funnelMode === "product" ? "产品用户口径" : transition.scope === "events" ? "事件次数口径" : "用户 UV 口径"}</Badge></div>
+                <div className="diagnosis-selector-bar">
+                  <div className="diagnosis-scope"><span>统计口径</span>{funnelMode === "product" ? <strong>用户 UV</strong> : <Segmented label="诊断统计口径" active={transition.scope} onChange={(key) => changeDiagnosisScope(key as UnitMode)} items={[{ key: "users", label: "用户 UV" }, { key: "events", label: "事件次数" }]} />}</div>
+                  <label>起点指标<select value={fromStage?.label ?? transitionStages[0].label} onChange={(event) => changeDiagnosisBoundary("from", event.target.value)}>{transitionStages.slice(0, -1).map((stage) => <option key={stage.label} value={stage.label}>{displayFunnelStage(stage.label)}</option>)}</select></label>
+                  <span className="diagnosis-arrow">→</span>
+                  <label>终点指标<select value={toStage?.label ?? diagnosisToOptions[0]?.label} onChange={(event) => changeDiagnosisBoundary("to", event.target.value)}>{diagnosisToOptions.map((stage) => <option key={stage.label} value={stage.label}>{displayFunnelStage(stage.label)}</option>)}</select></label>
+                  <div className="diagnosis-result"><span>区间转化</span><strong>{transitionConversion}</strong><small>流失 {transitionLoss} {transition.scope === "events" ? "次事件" : "用户"}</small></div>
+                  <div className="diagnosis-result impact"><span>预估收入影响</span><strong>{estimatedRevenueImpact}/日</strong><small>模型估算 · AdMob T+3校准</small></div>
                 </div>
-                <aside className="surface diagnostic-card">
-                  <div className="surface-title"><div><h2>智能诊断</h2><p>基于漏斗与数据质量规则</p></div><Badge tone="bad">严重</Badge></div>
-                  <h3>{project === "IRAN-VPN-01" ? "主要问题在真实机会生成之前" : "当前项目按分支判断履约健康"}</h3>
-                  <p>{project === "IRAN-VPN-01" ? "Opportunity覆盖从41.2%降至28.4%；预加载请求独立统计，缓存命中与实时请求按履约分支判断。" : `${project} 当前机会履约率 ${activeProfile.fulfillmentRate}，缓存命中率 ${activeProfile.cacheHitRate}。`}</p>
-                  <ul><li>主漏斗请求节点按广告请求用户（Request UV）统计</li><li>预加载次数不作为 Opportunity 后的线性请求次数</li><li>缓存命中不要求新请求；实时请求仅以 Cache Miss 为前置条件</li></ul>
-                  <button className="primary-button full" onClick={() => { setTransition({from:"Eligible",to:"Opportunity",rate:activeProfile.userStages[3].rate,scope:"users"}); go("diagnosis"); }}>诊断 Eligible → Opportunity</button>
+                {diagnosisHasNonLinearStage && <div className="nonlinear-warning"><strong>含非严格观察节点：</strong>Request UV 合并预加载与实时请求用户；缓存命中可跳过新请求，因此本区间只表示覆盖关系，不能直接认定为线性技术流失。</div>}
+                <div className="diagnosis-quality compact">
+                  <div><span>原因分类覆盖率</span><strong>98.0%</strong><div><i className="warn" style={{ width: "98%" }} /></div></div>
+                  <div><span>事件链可关联率</span><strong>95.8%</strong><div><i style={{ width: "95.8%" }} /></div></div>
+                  <div><span>Unknown率</span><strong>2.0%</strong><div><i className="warn" style={{ width: "20%" }} /></div></div>
+                  <p><strong>诊断可信度：中高。</strong>目标为原因覆盖 ≥99%、Unknown &lt;1%；当前仍需补齐 2.0% 未知原因。</p>
+                </div>
+                <div className="diagnosis-main-grid">
+                  <div className="diagnosis-reasons-panel">
+                    <div className="subsection-head"><div><h3>流失原因</h3><p>点击原因进入事件证据，并保留当前区间和筛选条件</p></div><span>覆盖 {diagnosisReasons.reduce((sum, reason) => sum + reason.share, 0).toFixed(1)}%</span></div>
+                    <div className="reason-list compact">{diagnosisReasons.map((reason) => <button key={reason.code} onClick={() => go("evidence")}><div className="reason-title"><strong>{reason.code}</strong><span>{reason.users} {transition.scope === "events" ? "事件" : "用户"} · {reason.share}%</span></div><p>{reason.label}</p><div className="reason-bar"><span style={{ width: `${reason.share}%` }} /></div><div className="reason-meta"><span>影响 {reason.impact}/日</span><Badge tone={reason.code === "UNKNOWN" ? "neutral" : reason.share > 20 ? "bad" : "warn"}>{reason.owner}</Badge></div></button>)}</div>
+                  </div>
+                  <aside className="diagnosis-action-panel">
+                    <div className="conclusion-block bad"><strong>优先技术结论</strong><p>{isRequestDiagnosis ? "先查预加载 requestContext 保存、request_id 关联与 Cache Miss 后的实时请求发送。" : isFulfillmentDiagnosis ? "先查缓存 instanceContext、对象 TTL 和 Cache Miss 后实时加载错误。" : isImpressionDiagnosis ? "先查 show_failed、页面切换、Activity 状态和 Impression 回调超时。" : isPaidDiagnosis ? "先查 Paid 回调注册、value_micros 类型、币种和重复回调去重。" : funnelMode === "product" ? "先定位页面到达、元素曝光、按钮点击和业务成功之间的具体断点。" : "主要流失集中在机会生成前，先检查触发场景、频控、前后台切换和 Opportunity 创建时机。"}</p></div>
+                    <div className="tech-checklist"><button onClick={() => go("evidence")}><strong>1. 抽查事件链</strong><span>核对关键 ID 与时间顺序</span></button><button onClick={() => setDimension("App版本")}><strong>2. 对比版本</strong><span>确认是否集中在最新版本</span></button><button onClick={() => focusWorkbenchSection("page-product-analysis")}><strong>3. 检查页面</strong><span>定位页面和元素级断点</span></button><button onClick={() => setDialog("diagnosis")}><strong>4. 创建任务</strong><span>带入区间、证据与负责人</span></button></div>
+                  </aside>
+                </div>
+                <div className="diagnosis-dimension-block">
+                  <div className="subsection-head cohort-header"><div><h3>问题集中在哪一群</h3><p>将当前区间按维度与 {baseline} 对比</p></div><div className="dimension-tabs">{["国家", "App版本", "广告位", "网络类型", "新老用户", "VPN状态"].map((item) => <button key={item} className={dimension === item ? "active" : ""} onClick={() => setDimension(item)}>{item}</button>)}</div></div>
+                  <div className="comparison-controls compact"><label>基准<select value={baseline} onChange={(event) => setBaseline(event.target.value)}><option>近7日均值</option><option>昨日同期</option><option>上周同期</option><option>版本1.7.4</option></select></label><label>排序<select><option>异常流失贡献</option><option>转化下降幅度</option><option>收入影响</option></select></label><span>最大异常：<strong>{dimension === "国家" ? "伊朗" : dimension === "App版本" ? "1.8.0 (108)" : "vpn_connect_success"}</strong></span></div>
+                  <div className="table-wrap"><table><thead><tr><th>{dimension}</th><th>{displayFunnelStage(transition.from)}</th><th>历史基线</th><th>当前转化</th><th>变化</th><th>异常流失</th><th>收入影响/日</th><th>证据</th></tr></thead><tbody>{cohortRows.map((row, index) => <tr key={`${dimension}-${row.value}`} className={row.level === "bad" ? "row-bad" : ""}><td><strong>{dimension === "国家" ? row.value : dimension === "App版本" ? ["1.8.0 (108)", "1.7.4 (104)", "1.7.2 (102)", "1.6.9 (98)", "其他"][index] : dimension === "广告位" ? ["vpn_connect_success", "vpn_home_banner", "server_select", "vpn_disconnect", "home_resume"][index] : row.value}</strong></td><td>{row.volume}</td><td>{row.base}</td><td><span className={`heat-cell ${row.level}`}>{row.current}</span></td><td className={row.change.startsWith("-") ? "negative" : "positive"}>{row.change}</td><td>{row.lost}</td><td>{row.impact}</td><td><button className="table-link" onClick={() => go("evidence")}>查看</button></td></tr>)}</tbody></table></div>
+                </div>
+              </section>
+
+              <section className="surface page-product-workspace" id="page-product-analysis">
+                <div className="surface-title"><div><h2>页面与产品路径分析</h2><p>把页面健康、单页转化、元素行为、性能和变现贡献放在同一区域</p></div><label className="inline-page-selector">当前页面<select value={selectedProductPage} onChange={(event) => setSelectedProductPage(event.target.value as keyof typeof productPageProfiles)}>{Object.keys(productPageProfiles).map((item) => <option key={item}>{item}</option>)}</select></label></div>
+                <div className="page-health-strip">
+                  <div><span>页面 UV</span><strong>{selectedPageProfile.pageUv}</strong><small>进入页面用户</small></div><div><span>到达率</span><strong>{selectedPageProfile.arrival}</strong><small>Page UV / DAU</small></div><div><span>核心曝光率</span><strong>{selectedPageProfile.exposure}</strong><small>元素曝光 / 渲染</small></div><div><span>主按钮 CTR</span><strong>{selectedPageProfile.click}</strong><small>点击 UV / 曝光 UV</small></div><div><span>业务成功率</span><strong>{selectedPageProfile.success}</strong><small>成功 UV / 点击 UV</small></div><div><span>页面退出率</span><strong>{selectedPageProfile.exit}</strong><small>离开且无目标动作</small></div>
+                </div>
+                <div className="subsection-head page-chain-head"><div><h3>{selectedProductPage}单页转化链</h3><p>进入 → 渲染 → 曝光 → 点击 → 业务成功 → Opportunity → AV</p></div><Badge tone="warn">最大断点：业务成功 → Opportunity</Badge></div>
+                <div className="page-conversion-chain">{selectedPageProfile.chain.map(([label, value, rate], index) => <div className="page-chain-group" key={label}><button onClick={() => notify(`${selectedProductPage} · ${label}明细已筛选`)}><span>{label}</span><strong>{value}</strong><small>{rate}</small></button>{index < selectedPageProfile.chain.length - 1 && <i>→</i>}</div>)}</div>
+                <div className="page-analysis-grid">
+                  <div className="page-analysis-block page-overview-table"><div className="subsection-head"><div><h3>页面健康总览</h3><p>点击页面行切换上方完整分析</p></div><span>4 个核心页面</span></div><div className="table-wrap"><table><thead><tr><th>页面</th><th>Page UV</th><th>到达</th><th>曝光</th><th>点击</th><th>成功</th><th>退出</th><th>Opportunity</th><th>AV</th><th>收入</th><th>状态</th></tr></thead><tbody>{pageHealthRows.map((row) => <tr key={row[0]} className={`clickable-row ${selectedProductPage === row[0] ? "row-selected" : ""}`} onClick={() => row[0] in productPageProfiles && setSelectedProductPage(row[0] as keyof typeof productPageProfiles)}>{row.map((cell, index) => <td key={index}>{index === 0 ? <strong>{cell}</strong> : index === 10 ? <Badge tone={cell === "正常" ? "good" : "warn"}>{cell}</Badge> : cell}</td>)}</tr>)}</tbody></table></div></div>
+                  <div className="page-analysis-block"><div className="subsection-head"><div><h3>元素曝光与点击</h3><p>每个按钮的曝光 UV、点击 UV、CTR 和后续成功</p></div></div><div className="table-wrap"><table><thead><tr><th>元素</th><th>element_id</th><th>曝光UV</th><th>点击UV</th><th>CTR</th><th>后续成功</th><th>诊断</th></tr></thead><tbody>{pageElementRows.map((row) => <tr key={row[1]}>{row.map((cell, index) => <td key={index}>{index === 1 ? <code>{cell}</code> : cell}</td>)}</tr>)}</tbody></table></div></div>
+                </div>
+                <div className="page-insight-grid">
+                  <article><header><div><h3>页面路径</h3><p>来源、去向、退出与后台分开</p></div><Badge tone="warn">退出 11.8%</Badge></header><div className="path-mini-list"><div><span>来源页</span><strong>VPN 首页 72.4%</strong></div><div><span>去向页</span><strong>连接详情 48.1%</strong></div><div><span>页面离开</span><strong>8.7%</strong></div><div><span>App 后台</span><strong>3.1%</strong></div></div><button onClick={() => notify("页面路径事件样本已展开")}>查看路径样本</button></article>
+                  <article><header><div><h3>页面性能</h3><p>性能异常与转化同屏判断</p></div><Badge tone={selectedPageProfile.errorRate === "1.2%" ? "bad" : "good"}>P95 {selectedPageProfile.renderP95}</Badge></header><div className="page-performance-grid"><div><span>渲染 P50</span><strong>{selectedPageProfile.renderP50}</strong></div><div><span>渲染 P95</span><strong>{selectedPageProfile.renderP95}</strong></div><div><span>接口耗时</span><strong>{selectedPageProfile.apiLatency}</strong></div><div><span>错误率</span><strong>{selectedPageProfile.errorRate}</strong></div><div><span>白屏率</span><strong>{selectedPageProfile.whiteScreen}</strong></div></div></article>
+                  <article><header><div><h3>页面变现贡献</h3><p>用户覆盖与展示次数分开</p></div><Badge tone="blue">收入 {selectedPageProfile.revenue}</Badge></header><div className="page-performance-grid"><div><span>Opportunity UV</span><strong>{selectedPageProfile.opportunity}</strong></div><div><span>AV</span><strong>{selectedPageProfile.av}</strong></div><div><span>Impression</span><strong>{selectedPageProfile.impression}</strong></div><div><span>收入占比</span><strong>44.5%</strong></div></div></article>
+                  <article><header><div><h3>版本与 A/B</h3><p>上线前后及实验组收益对比</p></div><Badge tone="bad">V1.8.0 下降</Badge></header><div className="version-ab-list"><div><span>V1.7.4</span><strong>机会 41.2% · AV 34.8%</strong><small>基准版本</small></div><div><span>V1.8.0</span><strong>机会 28.4% · AV 23.1%</strong><small>-12.8pp / -11.7pp</small></div><div><span>实验 B</span><strong>提前创建 Opportunity</strong><small>预计收入 +9.6%</small></div></div><button onClick={() => notify("A/B 实验配置已打开")}>新建页面实验</button></article>
+                </div>
+              </section>
+
+              <section className="two-column workbench-rules-section" id="workbench-rules">
+                <div className="surface">
+                  <div className="surface-title"><div><h2>趋势与统一口径</h2><p>趋势用于发现，动态区间诊断用于定位</p></div><Segmented label="趋势指标" active={trendMetric} onChange={(key) => setTrendMetric(key as TrendMetric)} items={[{ key: "viewer", label: "浏览者比例" }, { key: "opportunity", label: "机会覆盖" }]} /></div>
+                  <div className="trend-current"><span>{trendLabel}</span><strong>{trendValues.at(-1)}%</strong><small>{trendMetric === "viewer" ? "目标 ≥ 35%" : "目标 ≥ 40%"}</small></div>
+                  <div className="bar-chart compact" aria-label={`近七日${trendLabel}趋势`}>{trendValues.map((value, index) => <div key={`${trendMetric}-${index}`}><span style={{ height: `${value * 1.35}px` }} className={index > 3 ? "alert" : ""}><em>{value}%</em></span><small>{["8/5", "8/6", "8/7", "8/8", "8/9", "8/10", "今天"][index]}</small></div>)}</div>
+                  <div className="formula-list compact"><div><strong>广告浏览者比例</strong><code>AV / DAU</code><p>AV 为 Impression 独立用户，不是展示次数。</p></div><div><strong>人均展示次数</strong><code>Impression / AV</code><p>衡量展示是否集中在少数用户。</p></div><div><strong>原因分类质量</strong><code>coverage ≥99% · unknown &lt;1%</code><p>未达标时不能直接给出高可信根因。</p></div><div><strong>Request UV</strong><code>preload UV ∪ realtime UV</code><p>非严格观察节点，不替代机会履约率。</p></div></div>
+                </div>
+                <aside className="surface">
+                  <div className="surface-title"><div><h2>技术落地检查</h2><p>研发可直接按证据字段定位</p></div><Badge tone="blue">V1.7</Badge></div>
+                  <div className="id-chain-list"><div><code>decision_id</code><span>资格检查与阻止原因</span><strong>P0</strong></div><div><code>opportunity_id</code><span>一次真实业务广告机会</span><strong>P0</strong></div><div><code>request_id</code><span>每次真实 load；重试必须新建</span><strong>P0</strong></div><div><code>ad_instance_id</code><span>加载成功后绑定缓存对象到终态</span><strong>P0</strong></div></div>
+                  <div className="technical-actions"><button onClick={() => go("evidence")}><strong>上下文关联</strong><span>检查缓存对象是否保存 instanceContext</span></button><button onClick={() => openModule("tracking")}><strong>打点完整性</strong><span>P0 事件、参数与关联链必须 100%</span></button><button onClick={() => openModule("reconcile")}><strong>分源对账</strong><span>Firebase T+0 与 AdMob T+3 分开判断</span></button><button onClick={() => setDialog("diagnosis")}><strong>修复闭环</strong><span>带证据创建任务并回归验证</span></button></div>
                 </aside>
               </section>
             </div>
