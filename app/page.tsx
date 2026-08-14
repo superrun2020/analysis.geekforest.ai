@@ -939,8 +939,8 @@ export default function Home() {
               </section>
 
               <section className="surface funnel-surface">
-                <div className="surface-title"><div><h2>{funnelMode === "product" ? "产品用户到达漏斗" : unitMode === "users" ? "用户覆盖主漏斗" : "事件覆盖与展示漏斗"}</h2><p>{funnelMode === "monetization" ? unitMode === "users" ? "全部节点按用户去重；Request UV 含预加载与实时请求，仅作覆盖观察，缓存命中用户可跳过 Request / Load，不能把 Opportunity → Request 当成严格流失率" : "事件漏斗展示请求、加载、Ready、Show、Impression 与 Paid 回调；点击箭头诊断当前步骤" : "点击转化箭头进入步骤诊断"}</p></div><div className="legend"><span className="dot blue" />当前 <span className="dot neutral" />昨日同期</div></div>
-                <div className={`funnel-stages ${stages.length > 6 ? "dense" : ""}`}>
+                <div className="surface-title"><div><h2>{funnelMode === "product" ? "产品用户到达漏斗" : unitMode === "users" ? "用户覆盖主漏斗" : "事件覆盖与展示漏斗"}</h2><p>{funnelMode === "monetization" ? unitMode === "users" ? "全部节点按用户去重；Request UV 含预加载与实时请求，仅作覆盖观察，缓存命中用户可跳过 Request / Load，不能把 Opportunity → Request 当成严格流失率" : "事件漏斗展示请求、加载、Ready、Show、Impression 与 Paid 回调；点击箭头诊断当前步骤" : "点击转化箭头进入步骤诊断"}</p></div><div className="funnel-title-tools"><div className="legend"><span className="dot blue" />当前 <span className="dot neutral" />昨日同期</div><span className="funnel-scroll-hint">⇆ 横向滚动查看全部 {stages.length} 个节点</span></div></div>
+                <div className={`funnel-stages ${stages.length > 6 ? "dense" : ""}`} tabIndex={0} aria-label={`漏斗共 ${stages.length} 个节点，可横向滚动查看完整信息`}>
                   {stages.map((stage, index) => <div className="stage-group" key={stage.label}>
                     <button className={`funnel-stage ${stage.nonLinear ? "stage-context" : ""} ${stage.delta.startsWith("-") && Math.abs(parseFloat(stage.delta)) > 5 ? "stage-alert" : ""}`} onClick={() => index > 0 && openTransition(stages[index - 1], stage)}>
                       <span>{displayFunnelStage(stage.label)}</span><strong>{stage.value}</strong><small>{displayFunnelEvent(stage.event)}</small>
