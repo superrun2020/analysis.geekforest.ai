@@ -32,6 +32,37 @@ type ModuleKey = "global" | "project" | "funnel" | "admob" | "firebase" | "recon
 const moduleKeys = new Set<ModuleKey>(["global", "project", "funnel", "admob", "firebase", "reconcile", "tracking", "config", "firebaseSetup", "tasks"]);
 const pageKeys = new Set<PageKey>(["overview", "workbench", "diagnosis", "cohort", "path", "evidence", "issues", "snapshot"]);
 
+const funnelStageDisplayNames: Record<string, string> = {
+  DAU: "日活跃用户（DAU）",
+  "Eligibility Check": "广告资格检查（Eligibility Check）",
+  Eligible: "符合广告资格（Eligible）",
+  Opportunity: "广告机会（Opportunity）",
+  "Show Attempt": "广告展示尝试（Show Attempt）",
+  AV: "广告浏览用户（AV）",
+  Impression: "广告展示（Impression）",
+  Paid: "产生收益用户（Paid）",
+  "Paid Event": "广告收益回调（Paid Event）",
+};
+
+const funnelEventDisplayNames: Record<string, string> = {
+  app_active: "app_active（日活事件）",
+  jk_ad_eligibility_check: "jk_ad_eligibility_check（广告资格检查事件）",
+  "eligible=1": "eligible=1（符合广告资格）",
+  "jk_ad_eligibility_check · eligible=1": "jk_ad_eligibility_check · eligible=1（符合广告资格）",
+  jk_ad_opportunity: "jk_ad_opportunity（广告机会事件）",
+  jk_ad_show_attempt: "jk_ad_show_attempt（广告展示尝试事件）",
+  jk_ad_impression: "jk_ad_impression（广告展示事件）",
+  jk_ad_paid_event: "jk_ad_paid_event（广告收益事件）",
+};
+
+function displayFunnelStage(label: string) {
+  return funnelStageDisplayNames[label] ?? label;
+}
+
+function displayFunnelEvent(event: string) {
+  return funnelEventDisplayNames[event] ?? event;
+}
+
 function readInitialAnalysisView(): { module: ModuleKey; page: PageKey; embedded: boolean } {
   if (typeof window === "undefined") {
     return { module: "funnel", page: "overview", embedded: false };
@@ -850,13 +881,13 @@ export default function Home() {
               </section>
 
               <section className="surface funnel-surface">
-                <div className="surface-title"><div><h2>{funnelMode === "product" ? "产品用户到达漏斗" : unitMode === "users" ? "用户覆盖主漏斗" : "事件覆盖与展示漏斗"}</h2><p>{funnelMode === "monetization" ? "Request/Load仅存在于履约分支；点击箭头诊断当前步骤" : "点击转化箭头进入步骤诊断"}</p></div><div className="legend"><span className="dot blue" />当前 <span className="dot neutral" />昨日同期</div></div>
+                <div className="surface-title"><div><h2>{funnelMode === "product" ? "产品用户到达漏斗" : unitMode === "users" ? "用户覆盖主漏斗" : "事件覆盖与展示漏斗"}</h2><p>{funnelMode === "monetization" ? "广告请求/加载（Request/Load）仅存在于履约分支；点击箭头诊断当前步骤" : "点击转化箭头进入步骤诊断"}</p></div><div className="legend"><span className="dot blue" />当前 <span className="dot neutral" />昨日同期</div></div>
                 <div className={`funnel-stages ${stages.length > 6 ? "dense" : ""}`}>
-                  {stages.map((stage, index) => <div className="stage-group" key={stage.label}><button className={`funnel-stage ${stage.delta.startsWith("-") && Math.abs(parseFloat(stage.delta)) > 5 ? "stage-alert" : ""}`} onClick={() => index > 0 && openTransition(stages[index - 1], stage)}><span>{stage.label}</span><strong>{stage.value}</strong><small>{stage.event}</small></button>{index < stages.length - 1 && <button className={`conversion-arrow ${stages[index + 1].delta.startsWith("-") ? "down" : ""}`} onClick={() => openTransition(stage, stages[index + 1])}><strong>{stages[index + 1].rate}</strong><span>→</span><small>{stages[index + 1].delta}</small></button>}</div>)}
+                  {stages.map((stage, index) => <div className="stage-group" key={stage.label}><button className={`funnel-stage ${stage.delta.startsWith("-") && Math.abs(parseFloat(stage.delta)) > 5 ? "stage-alert" : ""}`} onClick={() => index > 0 && openTransition(stages[index - 1], stage)}><span>{displayFunnelStage(stage.label)}</span><strong>{stage.value}</strong><small>{displayFunnelEvent(stage.event)}</small></button>{index < stages.length - 1 && <button className={`conversion-arrow ${stages[index + 1].delta.startsWith("-") ? "down" : ""}`} onClick={() => openTransition(stage, stages[index + 1])}><strong>{stages[index + 1].rate}</strong><span>→</span><small>{stages[index + 1].delta}</small></button>}</div>)}
                 </div>
-                <div className="funnel-summary"><div><span>首尾转化率</span><strong>{funnelMode === "product" ? "42.6%" : unitMode === "users" ? activeProfile.userStages.at(-1)?.rate : "38.3%"}</strong></div><div><span>最大流失步骤</span><strong>{funnelMode === "product" ? "首页 → 点击连接" : unitMode === "users" ? "Eligible → Opportunity" : "Opportunity → Show Attempt"}</strong></div><div><span>{unitMode === "events" ? "流失事件" : "流失用户"}</span><strong>{funnelMode === "product" ? "35,443" : unitMode === "users" ? "46,632" : "69,435"}</strong></div><div><span>预计收入影响</span><strong className="negative">$2,807 / 日</strong></div></div>
-                {funnelMode === "monetization" && unitMode === "users" && <div className="denominator-audit"><div><span>广告浏览者比例</span><strong>AV / DAU = {activeProfile.viewerTrend.at(-1)}%</strong><small>衡量覆盖用户</small></div><div><span>机会覆盖率</span><strong>Opportunity UV / DAU = {activeProfile.opportunityTrend.at(-1)}%</strong><small>定位请求前问题</small></div><div><span>机会履约率</span><strong>Show Attempt UV / Opportunity UV = {activeProfile.fulfillmentRate}</strong><small>覆盖缓存与实时两条路径</small></div><div><span>人均展示</span><strong>Impression / AV = 3.42</strong><small>衡量展示集中度</small></div></div>}
-                {funnelMode === "monetization" && unitMode === "events" && <div className="denominator-audit"><div><span>资格通过率</span><strong>Eligible / Check = 79.4%</strong><small>按检查事件</small></div><div><span>机会生成率</span><strong>Opportunity / Eligible = 75.7%</strong><small>按事件次数</small></div><div><span>机会履约率</span><strong>Show Attempt / Opportunity = 67.6%</strong><small>不以Request为分母</small></div><div><span>展示成功率</span><strong>Impression / Show Attempt = 95.0%</strong><small>衡量SDK展示效率</small></div></div>}
+                <div className="funnel-summary"><div><span>首尾转化率</span><strong>{funnelMode === "product" ? "42.6%" : unitMode === "users" ? activeProfile.userStages.at(-1)?.rate : "38.3%"}</strong></div><div><span>最大流失步骤</span><strong>{funnelMode === "product" ? "首页 → 点击连接" : unitMode === "users" ? "符合广告资格 → 广告机会（Eligible → Opportunity）" : "广告机会 → 广告展示尝试（Opportunity → Show Attempt）"}</strong></div><div><span>{unitMode === "events" ? "流失事件" : "流失用户"}</span><strong>{funnelMode === "product" ? "35,443" : unitMode === "users" ? "46,632" : "69,435"}</strong></div><div><span>预计收入影响</span><strong className="negative">$2,807 / 日</strong></div></div>
+                {funnelMode === "monetization" && unitMode === "users" && <div className="denominator-audit"><div><span>广告浏览者比例</span><strong>广告浏览用户（AV）/ 日活跃用户（DAU）= {activeProfile.viewerTrend.at(-1)}%</strong><small>衡量覆盖用户</small></div><div><span>机会覆盖率</span><strong>广告机会用户（Opportunity UV）/ 日活跃用户（DAU）= {activeProfile.opportunityTrend.at(-1)}%</strong><small>定位请求前问题</small></div><div><span>机会履约率</span><strong>展示尝试用户（Show Attempt UV）/ 广告机会用户（Opportunity UV）= {activeProfile.fulfillmentRate}</strong><small>覆盖缓存与实时两条路径</small></div><div><span>人均展示</span><strong>广告展示次数（Impression）/ 广告浏览用户（AV）= 3.42</strong><small>衡量展示集中度</small></div></div>}
+                {funnelMode === "monetization" && unitMode === "events" && <div className="denominator-audit"><div><span>资格通过率</span><strong>符合资格（Eligible）/ 资格检查（Check）= 79.4%</strong><small>按检查事件</small></div><div><span>机会生成率</span><strong>广告机会（Opportunity）/ 符合资格（Eligible）= 75.7%</strong><small>按事件次数</small></div><div><span>机会履约率</span><strong>展示尝试（Show Attempt）/ 广告机会（Opportunity）= 67.6%</strong><small>不以广告请求（Request）为分母</small></div><div><span>展示成功率</span><strong>广告展示（Impression）/ 展示尝试（Show Attempt）= 95.0%</strong><small>衡量广告 SDK 展示效率</small></div></div>}
               </section>
 
               {funnelMode === "monetization" && <section className="fulfillment-layout">

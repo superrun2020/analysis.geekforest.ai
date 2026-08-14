@@ -191,18 +191,18 @@ td small { margin-top: 3px; color: var(--soft-muted); font-size: 7px; }
 .funnel-surface { overflow: hidden; }
 .funnel-stages { display: flex; align-items: stretch; overflow-x: auto; padding: 8px 0 12px; }
 .stage-group { flex: 1; min-width: 0; display: flex; align-items: center; }
-.funnel-stage { flex: 1; min-width: 112px; min-height: 98px; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; padding: 11px; border: 1px solid #cad9ff; border-radius: 8px; background: #eff4ff; text-align: left; cursor: pointer; }
+.funnel-stage { flex: 1; min-width: 128px; min-height: 118px; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; padding: 11px; border: 1px solid #cad9ff; border-radius: 8px; background: #eff4ff; text-align: left; cursor: pointer; }
 .funnel-stage:hover { border-color: #7798f3; }
-.funnel-stage span { color: #41516a; font-size: 8px; font-weight: 750; }
+.funnel-stage span { color: #41516a; font-size: 8px; font-weight: 750; line-height: 1.45; }
 .funnel-stage strong { margin-top: 7px; font-size: 16px; }
-.funnel-stage small { margin-top: 5px; max-width: 100%; color: #73809a; font-size: 7px; overflow: hidden; text-overflow: ellipsis; }
+.funnel-stage small { margin-top: 5px; max-width: 100%; color: #73809a; font-size: 7px; line-height: 1.45; overflow-wrap: anywhere; }
 .funnel-stage.stage-alert { border-color: #efb2b9; background: var(--red-soft); }
 .conversion-arrow { flex: 0 0 68px; min-height: 72px; display: flex; flex-direction: column; align-items: center; justify-content: center; border: 0; background: transparent; cursor: pointer; }
 .conversion-arrow strong { font-size: 10px; }
 .conversion-arrow span { color: #8391a7; font-size: 18px; }
 .conversion-arrow small { color: var(--green); font-size: 8px; }
 .conversion-arrow.down small { color: var(--red); }
-.funnel-stages.dense .funnel-stage { min-width: 96px; }
+.funnel-stages.dense .funnel-stage { min-width: 128px; }
 .funnel-stages.dense .conversion-arrow { flex-basis: 52px; }
 .funnel-summary { display: grid; grid-template-columns: repeat(4, 1fr); border-top: 1px solid var(--line-soft); }
 .funnel-summary > div { padding: 12px 14px 3px; border-right: 1px solid var(--line-soft); }
@@ -388,7 +388,7 @@ td small { margin-top: 3px; color: var(--soft-muted); font-size: 7px; }
 .denominator-audit > div:last-child { border-right: 0; }
 .denominator-audit span, .denominator-audit strong, .denominator-audit small { display: block; }
 .denominator-audit span { color: var(--muted); font-size: 7px; }
-.denominator-audit strong { margin-top: 4px; font-family: var(--font-geist-mono), monospace; font-size: 8px; }
+.denominator-audit strong { margin-top: 4px; font-family: var(--font-geist-mono), monospace; font-size: 8px; line-height: 1.55; }
 .denominator-audit small { margin-top: 3px; color: var(--soft-muted); font-size: 7px; }
 .fulfillment-layout { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(310px, .85fr); gap: 12px; align-items: stretch; }
 .fulfillment-flow { display: grid; grid-template-columns: 1fr 42px 1fr 1fr; grid-template-areas: "origin split hit merge" "origin split miss request" "origin split miss load"; gap: 7px; align-items: stretch; }
