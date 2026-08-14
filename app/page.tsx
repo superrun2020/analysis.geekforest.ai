@@ -8,6 +8,11 @@ import { trackingDatabaseFieldRows } from "./tracking-config-repository";
 import { TrackingConfigWorkspace, type TrackingConfigSubmission } from "./tracking-config-workspace";
 import { TrackingAcceptanceCenter } from "./tracking-acceptance-center";
 import { firebaseTaskLogsApi, type FirebaseCheckLog, type FirebaseSyncRunLog } from "./firebase-task-logs-api";
+import {
+  MetricDictionaryDrawer,
+  MetricInspectContext,
+  MetricLabel,
+} from "./metric-dictionary";
 
 type PageKey =
   | "overview"
@@ -384,6 +389,69 @@ const pageHealthRows = [
   ["断开连接页", "38,604", "30.1%", "90.6%", "42.8%", "96.2%", "28.4%", "8,931", "7,504", "$406", "正常"],
 ];
 
+const operationDiagnosisProfiles = {
+  opportunity_coverage: {
+    label: "广告机会覆盖率",
+    value: "28.4%",
+    delta: "-12.8pp",
+    conclusion: "1.8.0 连接成功页把广告机会创建推迟到动画完成后，弱网和短会话用户在机会生成前离开或进入后台。",
+    evidence: ["伊朗 × 1.8.0 贡献 61.2% 流失", "screen_exit=animation_not_finished 占 31.6%", "app_background 且 pending_ad_count>0 占 21.2%"],
+    actions: ["将 opportunity_id 创建前移到连接成功页真正可见时", "保留动画，但不再以动画完成作为广告机会前置条件", "补充 Opportunity 前后 30 秒 screen_exit / app_background 关联验证"],
+    fields: "screen_name · exit_action · app_state · background_reason · app_version · network_type · opportunity_id",
+  },
+  viewer_ratio: {
+    label: "广告浏览者比例",
+    value: "23.1%",
+    delta: "-11.7pp",
+    conclusion: "机会覆盖下降是主因，次因是缓存命中后 instanceContext 关联不完整，部分 Show Attempt 未形成 Impression。",
+    evidence: ["Opportunity UV/DAU 下降 12.8pp", "AV/Opportunity 仍有 6.3pp 可优化空间", "opportunity_id 关联缺失集中在缓存命中分支"],
+    actions: ["先修机会创建时机，再处理缓存实例关联", "广告对象与 instanceContext 一起缓存至终态", "展示前校验 opportunity_id、ad_instance_id、Activity 状态"],
+    fields: "my_user_id · opportunity_id · request_id · ad_instance_id · cache_age_ms · activity_state · app_state",
+  },
+  page_ctr: {
+    label: "主按钮点击率（CTR）",
+    value: "53.8%",
+    delta: "-9.4pp",
+    conclusion: "服务器选择页在 1.8.0 的 UI 样式 B 上点击下降，并集中于首屏渲染较慢的低端设备。",
+    evidence: ["ui_style=B 点击 UV/Page UV 低 13.2pp", "Android 10 以下设备贡献 47.8% 下滑", "screen_duration_ms<3s 的退出用户显著增加"],
+    actions: ["下沉主按钮位置并取消首屏二次动画阻塞", "按 device_model/os_version 降级重动画", "V1.7 只能算 Click UV/Page UV；正式 CTR 需新增 element_exposure"],
+    fields: "screen_name · element_name · action_name · ui_style · device_model · os_version · screen_duration_ms",
+  },
+  vpn_connection_rate: {
+    label: "VPN 连接成功率",
+    value: "78.0%",
+    delta: "-5.6pp",
+    conclusion: "失败集中在伊朗蜂窝网络和 eu-west 节点，connect_timeout 与 dns_failed 同时升高。",
+    evidence: ["network_type=cellular 下降 8.1pp", "node_region=eu-west 贡献 54.6% 失败", "ip_after_status=timeout 与 error_code=connect_timeout 同向"],
+    actions: ["对伊朗蜂窝网络切换备用 DNS 与协议", "降低 eu-west 节点权重并启用健康熔断", "把 ip_after_capture_rate 纳入版本灰度门禁"],
+    fields: "connection_id · vpn_status · node_region · network_type · duration_ms · error_code · ip_after_status",
+  },
+  arpdau: {
+    label: "每活跃用户收入（ARPDAU）",
+    value: "$0.035",
+    delta: "-18.4%",
+    conclusion: "收入下降主要由广告覆盖变差造成，而非 eCPM；展示集中在少数用户掩盖了未变现用户扩大。",
+    evidence: ["AV/DAU 下降 11.7pp", "Impression/AV 保持 3.42", "AdMob eCPM 结算口径仅下降 1.6%"],
+    actions: ["优先恢复 Opportunity 与 AV 覆盖，不先加频次", "按 0/1/2~3/4~5/6~10/10+ 展示分桶观察", "用 AdMob T+3 结算收入验证 Firebase T+0 方向"],
+    fields: "my_user_id · event_id · value_micros · currency_code · ad_source · placement · app_version",
+  },
+} as const;
+
+const v17DiagnosisDimensions = [
+  ["页面与路径", "screen_name · previous_screen · next_screen · screen_index · exit_action · screen_duration_ms", "V1.7可用"],
+  ["用户生命周期", "install_source · is_reinstall · open_times · session_index · user_lifecycle_day · is_first_day", "V1.7可用"],
+  ["地域与本地化", "country_code · city · attribution_country · locale_country · locale_language · timezone", "V1.7可用"],
+  ["网络与VPN", "network_type · vpn_active · node_region · duration_ms · error_code · disconnect_reason", "V1.7可用"],
+  ["连接前后IP", "ip_before_status · ip_after_status · ip_change · country_change · firebase_ip_join", "中台关联"],
+  ["设备与版本", "platform · app_version · app_build · os_version · device_model", "V1.7可用"],
+  ["配置与实验", "remote_config_applied · abtest_id · abtest_group · ui_style", "V1.7可用"],
+  ["用户权益", "is_subscriber · subscription_status · consent_status · personalized_allowed", "V1.7可用"],
+  ["广告履约", "placement · ad_format · ad_unit_id · is_preload · retry_index · cache_age_ms · blocked_reason", "V1.7可用"],
+  ["广告源与错误", "ad_source · mediation_adapter · error_category · error_code · load_duration_ms", "V1.7可用"],
+  ["上报质量", "batch_id · queue_size · oldest_event_age_ms · accepted_count · rejected_count", "中台直传"],
+  ["元素曝光/渲染", "element_exposure · screen_render_complete · visibility_reason", "需扩展"],
+] as const;
+
 const pageElementRows = [
   ["连接按钮", "connect_primary", "104,122", "82,361", "79.1%", "64,276", "主要转化入口"],
   ["换节点按钮", "change_server", "76,884", "18,402", "23.9%", "15,731", "弱网用户点击更高"],
@@ -410,7 +478,7 @@ function Badge({ children, tone = "neutral" }: { children: React.ReactNode; tone
 function Metric({ label, value, note, tone }: { label: string; value: string; note: string; tone?: "bad" | "good" }) {
   return (
     <article className="metric-card">
-      <div className="metric-label">{label}</div>
+      <div className="metric-label"><MetricLabel metric={label}>{label}</MetricLabel></div>
       <div className={`metric-value ${tone ? `metric-${tone}` : ""}`}>{value}</div>
       <div className="metric-note">{note}</div>
     </article>
@@ -744,6 +812,10 @@ export default function Home() {
   const [configRecords, setConfigRecords] = useState<TrackingConfigRecord[]>(trackingConfigs);
   const [editingConfig, setEditingConfig] = useState<TrackingConfigRecord | null>(null);
   const [configWorkspaceOpen, setConfigWorkspaceOpen] = useState(false);
+  const [metricDictionaryOpen, setMetricDictionaryOpen] = useState(false);
+  const [selectedMetric, setSelectedMetric] = useState("dau");
+  const [operationMetric, setOperationMetric] = useState<keyof typeof operationDiagnosisProfiles>("opportunity_coverage");
+  const [aiDiagnosisReady, setAiDiagnosisReady] = useState(false);
 
   useEffect(() => {
     if (!dialog) return;
@@ -814,6 +886,7 @@ export default function Home() {
   const transitionToIndex = transitionStages.findIndex((stage) => stage.label === transition.to);
   const diagnosisHasNonLinearStage = transitionStages.slice(Math.max(transitionFromIndex, 0), transitionToIndex + 1).some((stage) => stage.nonLinear);
   const selectedPageProfile = productPageProfiles[selectedProductPage];
+  const operationDiagnosis = operationDiagnosisProfiles[operationMetric];
   const sourceStatus: Record<ModuleKey, { title: string; detail: string; note: string }> = {
     global: { title: "混合时效", detail: "Firebase T+0 · AdMob T+3 · 刷新", note: "DAU和用户行为使用Firebase实时预估；收入、消耗和ROAS使用最近已结算日期，卡片必须标注数据日。" },
     project: { title: "项目诊断", detail: "Firebase延迟约8分钟 · AdMob T+3", note: "用户与产品指标可看当天；收入和AdMob效率使用已结算日期，不参与当天实时结论。" },
@@ -830,6 +903,11 @@ export default function Home() {
   function notify(message: string) {
     setNotice(message);
     window.setTimeout(() => setNotice(""), 2600);
+  }
+
+  function openMetricDefinition(metric: string) {
+    setSelectedMetric(metric);
+    setMetricDictionaryOpen(true);
   }
 
   function go(next: PageKey) {
@@ -939,9 +1017,10 @@ export default function Home() {
   }
 
   return (
+    <MetricInspectContext.Provider value={openMetricDefinition}>
     <div className={`app-shell ${embedded ? "embedded" : ""}`}>
       <aside className="sidebar">
-        <div className="brand"><span className="brand-mark">JK</span><span><strong>变现与埋点</strong><small>质量分析中心 · V23</small></span></div>
+        <div className="brand"><span className="brand-mark">JK</span><span><strong>变现与埋点</strong><small>质量分析中心 · V24</small></span></div>
         <div className="nav-group-label">经营分析</div>
         {moduleMenus.filter((item) => item.group === "经营分析").map((item) => <button key={item.key} className={`main-nav-item ${module === item.key ? "active" : ""}`} onClick={() => openModule(item.key)}><span>{item.index}</span>{item.label}</button>)}
         <div className="nav-group-label">质量治理</div>
@@ -959,7 +1038,7 @@ export default function Home() {
           {configWorkspaceOpen ? <TrackingConfigWorkspace editingConfig={editingConfig} onCancel={() => { setConfigWorkspaceOpen(false); setEditingConfig(null); }} onSave={saveTrackingConfig} /> : <>
           <section className="page-heading">
             <div><h1>{currentModule.title}</h1><p>{currentModule.description}</p></div>
-            <div className="heading-actions"><button className="secondary-button" onClick={() => module === "funnel" ? focusWorkbenchSection("workbench-rules") : notify("数据已刷新至最新水位")}>{module === "funnel" ? "查看口径 V1.7" : "刷新数据"}</button><button className="primary-button" onClick={() => module === "config" ? openConfigEditor(null) : setDialog(moduleDialog[module])}>{["project", "funnel", "tracking", "config", "firebaseSetup", "tasks"].includes(module) ? "＋ " : ""}{currentModule.action}</button></div>
+            <div className="heading-actions"><button className="secondary-button" onClick={() => openMetricDefinition("dau")}>指标口径字典</button><button className="primary-button" onClick={() => module === "config" ? openConfigEditor(null) : setDialog(moduleDialog[module])}>{["project", "funnel", "tracking", "config", "firebaseSetup", "tasks"].includes(module) ? "＋ " : ""}{currentModule.action}</button></div>
           </section>
 
           {module === "funnel" && <section className="workflow-strip" aria-label="漏斗诊断流程">
@@ -989,7 +1068,7 @@ export default function Home() {
             <div className="context-summary"><Badge tone="blue">{module === "funnel" ? currentPage.hint : currentModule.title}</Badge><span>{project}</span><i /> <span>{range}</span><i /> <span>{platform} · {appVersion}</span><i /> <span>{country}</span><i /> <span>口径 V1.7</span></div>
             <div className="context-actions"><button onClick={() => notify("当前分析视图已保存")}>保存视图</button><button onClick={() => setDialog(module === "admob" ? "admob-report" : "project-report")}>导出报表</button></div>
           </section>}
-          <section className="freshness-note"><div><strong>数据使用提示：</strong>{sourceStatus[module].note}</div><button onClick={() => module === "funnel" ? focusWorkbenchSection("workbench-rules") : notify(`${currentModule.title}数据口径说明已展开`)}>查看数据口径</button></section>
+          <section className="freshness-note"><div><strong>数据使用提示：</strong>{sourceStatus[module].note}</div><button onClick={() => openMetricDefinition(module === "admob" ? "match_rate" : module === "tracking" ? "event_pass_rate" : "dau")}>查看数据口径</button></section>
 
           {module !== "funnel" && <ModulePage module={module as Exclude<ModuleKey, "funnel">} project={project} configs={configRecords} onProjectChange={setProject} openModule={openModule} openDialog={setDialog} openConfigEditor={openConfigEditor} notify={notify} />}
 
@@ -1160,19 +1239,58 @@ export default function Home() {
               <section className="surface page-product-workspace" id="page-product-analysis">
                 <div className="surface-title"><div><h2>页面与产品路径分析</h2><p>把页面健康、单页转化、元素行为、性能和变现贡献放在同一区域</p></div><label className="inline-page-selector">当前页面<select value={selectedProductPage} onChange={(event) => setSelectedProductPage(event.target.value as keyof typeof productPageProfiles)}>{Object.keys(productPageProfiles).map((item) => <option key={item}>{item}</option>)}</select></label></div>
                 <div className="page-health-strip">
-                  <div><span>页面 UV</span><strong>{selectedPageProfile.pageUv}</strong><small>进入页面用户</small></div><div><span>到达率</span><strong>{selectedPageProfile.arrival}</strong><small>Page UV / DAU</small></div><div><span>核心曝光率</span><strong>{selectedPageProfile.exposure}</strong><small>元素曝光 / 渲染</small></div><div><span>主按钮 CTR</span><strong>{selectedPageProfile.click}</strong><small>点击 UV / 曝光 UV</small></div><div><span>业务成功率</span><strong>{selectedPageProfile.success}</strong><small>成功 UV / 点击 UV</small></div><div><span>页面退出率</span><strong>{selectedPageProfile.exit}</strong><small>离开且无目标动作</small></div>
+                  <div><span><MetricLabel metric="page_uv">页面独立用户数（Page UV）</MetricLabel></span><strong>{selectedPageProfile.pageUv}</strong><small>进入页面用户</small></div><div><span><MetricLabel metric="page_arrival_rate">页面到达率</MetricLabel></span><strong>{selectedPageProfile.arrival}</strong><small>Page UV / DAU</small></div><div><span><MetricLabel metric="element_exposure_rate">核心元素曝光率</MetricLabel></span><strong>{selectedPageProfile.exposure}</strong><small>元素曝光 UV / 渲染 UV</small></div><div><span><MetricLabel metric="element_ctr">主按钮点击率（CTR）</MetricLabel></span><strong>{selectedPageProfile.click}</strong><small>点击 UV / 曝光 UV</small></div><div><span><MetricLabel metric="business_success_rate">业务成功率</MetricLabel></span><strong>{selectedPageProfile.success}</strong><small>成功 UV / 点击 UV</small></div><div><span><MetricLabel metric="page_exit_rate">页面退出率</MetricLabel></span><strong>{selectedPageProfile.exit}</strong><small>离开且无目标动作</small></div>
                 </div>
                 <div className="subsection-head page-chain-head"><div><h3>{selectedProductPage}单页转化链</h3><p>进入 → 渲染 → 曝光 → 点击 → 业务成功 → Opportunity → AV</p></div><Badge tone="warn">最大断点：业务成功 → Opportunity</Badge></div>
-                <div className="page-conversion-chain">{selectedPageProfile.chain.map(([label, value, rate], index) => <div className="page-chain-group" key={label}><button onClick={() => notify(`${selectedProductPage} · ${label}明细已筛选`)}><span>{label}</span><strong>{value}</strong><small>{rate}</small></button>{index < selectedPageProfile.chain.length - 1 && <i>→</i>}</div>)}</div>
+                <div className="page-conversion-chain">{selectedPageProfile.chain.map(([label, value, rate], index) => <div className="page-chain-group" key={label}><button onClick={() => notify(`${selectedProductPage} · ${label}明细已筛选`)}><span><MetricLabel metric={label}>{label}</MetricLabel></span><strong>{value}</strong><small>{rate}</small></button>{index < selectedPageProfile.chain.length - 1 && <i>→</i>}</div>)}</div>
                 <div className="page-analysis-grid">
-                  <div className="page-analysis-block page-overview-table"><div className="subsection-head"><div><h3>页面健康总览</h3><p>点击页面行切换上方完整分析</p></div><span>4 个核心页面</span></div><div className="table-wrap"><table><thead><tr><th>页面</th><th>Page UV</th><th>到达</th><th>曝光</th><th>点击</th><th>成功</th><th>退出</th><th>Opportunity</th><th>AV</th><th>收入</th><th>状态</th></tr></thead><tbody>{pageHealthRows.map((row) => <tr key={row[0]} className={`clickable-row ${selectedProductPage === row[0] ? "row-selected" : ""}`} onClick={() => row[0] in productPageProfiles && setSelectedProductPage(row[0] as keyof typeof productPageProfiles)}>{row.map((cell, index) => <td key={index}>{index === 0 ? <strong>{cell}</strong> : index === 10 ? <Badge tone={cell === "正常" ? "good" : "warn"}>{cell}</Badge> : cell}</td>)}</tr>)}</tbody></table></div></div>
-                  <div className="page-analysis-block"><div className="subsection-head"><div><h3>元素曝光与点击</h3><p>每个按钮的曝光 UV、点击 UV、CTR 和后续成功</p></div></div><div className="table-wrap"><table><thead><tr><th>元素</th><th>element_id</th><th>曝光UV</th><th>点击UV</th><th>CTR</th><th>后续成功</th><th>诊断</th></tr></thead><tbody>{pageElementRows.map((row) => <tr key={row[1]}>{row.map((cell, index) => <td key={index}>{index === 1 ? <code>{cell}</code> : cell}</td>)}</tr>)}</tbody></table></div></div>
+                  <div className="page-analysis-block page-overview-table"><div className="subsection-head"><div><h3>页面健康总览</h3><p>点击页面行切换上方完整分析</p></div><span>4 个核心页面</span></div><div className="table-wrap"><table><thead><tr><th>页面</th><th><MetricLabel metric="page_uv">页面独立用户数（Page UV）</MetricLabel></th><th><MetricLabel metric="page_arrival_rate">页面到达率</MetricLabel></th><th><MetricLabel metric="element_exposure_rate">元素曝光率</MetricLabel></th><th><MetricLabel metric="element_ctr">点击率（CTR）</MetricLabel></th><th><MetricLabel metric="business_success_rate">业务成功率</MetricLabel></th><th><MetricLabel metric="page_exit_rate">页面退出率</MetricLabel></th><th><MetricLabel metric="opportunity_uv">广告机会用户（Opportunity UV）</MetricLabel></th><th><MetricLabel metric="av">广告展示独立用户（AV）</MetricLabel></th><th><MetricLabel metric="revenue">广告收入</MetricLabel></th><th>状态</th></tr></thead><tbody>{pageHealthRows.map((row) => <tr key={row[0]} className={`clickable-row ${selectedProductPage === row[0] ? "row-selected" : ""}`} onClick={() => row[0] in productPageProfiles && setSelectedProductPage(row[0] as keyof typeof productPageProfiles)}>{row.map((cell, index) => <td key={index}>{index === 0 ? <strong>{cell}</strong> : index === 10 ? <Badge tone={cell === "正常" ? "good" : "warn"}>{cell}</Badge> : cell}</td>)}</tr>)}</tbody></table></div></div>
+                  <div className="page-analysis-block"><div className="subsection-head"><div><h3>元素曝光与点击</h3><p>每个按钮的曝光 UV、点击 UV、CTR 和后续成功</p></div></div><div className="table-wrap"><table><thead><tr><th>元素</th><th>元素标识（element_id）</th><th><MetricLabel metric="element_exposure_uv">元素曝光用户（Exposure UV）</MetricLabel></th><th><MetricLabel metric="element_click_uv">元素点击用户（Click UV）</MetricLabel></th><th><MetricLabel metric="element_ctr">点击率（CTR）</MetricLabel></th><th><MetricLabel metric="business_success_uv">后续成功用户</MetricLabel></th><th>诊断</th></tr></thead><tbody>{pageElementRows.map((row) => <tr key={row[1]}>{row.map((cell, index) => <td key={index}>{index === 1 ? <code>{cell}</code> : cell}</td>)}</tr>)}</tbody></table></div></div>
                 </div>
                 <div className="page-insight-grid">
-                  <article><header><div><h3>页面路径</h3><p>来源、去向、退出与后台分开</p></div><Badge tone="warn">退出 11.8%</Badge></header><div className="path-mini-list"><div><span>来源页</span><strong>VPN 首页 72.4%</strong></div><div><span>去向页</span><strong>连接详情 48.1%</strong></div><div><span>页面离开</span><strong>8.7%</strong></div><div><span>App 后台</span><strong>3.1%</strong></div></div><button onClick={() => notify("页面路径事件样本已展开")}>查看路径样本</button></article>
-                  <article><header><div><h3>页面性能</h3><p>性能异常与转化同屏判断</p></div><Badge tone={selectedPageProfile.errorRate === "1.2%" ? "bad" : "good"}>P95 {selectedPageProfile.renderP95}</Badge></header><div className="page-performance-grid"><div><span>渲染 P50</span><strong>{selectedPageProfile.renderP50}</strong></div><div><span>渲染 P95</span><strong>{selectedPageProfile.renderP95}</strong></div><div><span>接口耗时</span><strong>{selectedPageProfile.apiLatency}</strong></div><div><span>错误率</span><strong>{selectedPageProfile.errorRate}</strong></div><div><span>白屏率</span><strong>{selectedPageProfile.whiteScreen}</strong></div></div></article>
-                  <article><header><div><h3>页面变现贡献</h3><p>用户覆盖与展示次数分开</p></div><Badge tone="blue">收入 {selectedPageProfile.revenue}</Badge></header><div className="page-performance-grid"><div><span>Opportunity UV</span><strong>{selectedPageProfile.opportunity}</strong></div><div><span>AV</span><strong>{selectedPageProfile.av}</strong></div><div><span>Impression</span><strong>{selectedPageProfile.impression}</strong></div><div><span>收入占比</span><strong>44.5%</strong></div></div></article>
+                  <article><header><div><h3>页面路径</h3><p>来源、去向、退出与后台分开</p></div><Badge tone="warn">退出 11.8%</Badge></header><div className="path-mini-list"><div><span><MetricLabel metric="path_source_share">页面来源占比</MetricLabel></span><strong>VPN 首页 72.4%</strong></div><div><span><MetricLabel metric="path_destination_share">页面去向占比</MetricLabel></span><strong>连接详情 48.1%</strong></div><div><span><MetricLabel metric="page_exit_rate">页面离开率</MetricLabel></span><strong>8.7%</strong></div><div><span><MetricLabel metric="page_background_rate">页面停留期间 App 后台率</MetricLabel></span><strong>3.1%</strong></div></div><button onClick={() => notify("页面路径事件样本已展开")}>查看路径样本</button></article>
+                  <article><header><div><h3>页面性能</h3><p>性能异常与转化同屏判断</p></div><Badge tone={selectedPageProfile.errorRate === "1.2%" ? "bad" : "good"}>P95 {selectedPageProfile.renderP95}</Badge></header><div className="page-performance-grid"><div><span><MetricLabel metric="render_p50">页面渲染耗时 P50</MetricLabel></span><strong>{selectedPageProfile.renderP50}</strong></div><div><span><MetricLabel metric="render_p95">页面渲染耗时 P95</MetricLabel></span><strong>{selectedPageProfile.renderP95}</strong></div><div><span><MetricLabel metric="api_latency">接口耗时</MetricLabel></span><strong>{selectedPageProfile.apiLatency}</strong></div><div><span><MetricLabel metric="page_error_rate">页面错误率</MetricLabel></span><strong>{selectedPageProfile.errorRate}</strong></div><div><span><MetricLabel metric="white_screen_rate">页面白屏率</MetricLabel></span><strong>{selectedPageProfile.whiteScreen}</strong></div></div></article>
+                  <article><header><div><h3>页面变现贡献</h3><p>用户覆盖与展示次数分开</p></div><Badge tone="blue">收入 {selectedPageProfile.revenue}</Badge></header><div className="page-performance-grid"><div><span><MetricLabel metric="opportunity_uv">广告机会独立用户（Opportunity UV）</MetricLabel></span><strong>{selectedPageProfile.opportunity}</strong></div><div><span><MetricLabel metric="av">广告展示独立用户（AV）</MetricLabel></span><strong>{selectedPageProfile.av}</strong></div><div><span><MetricLabel metric="impression_count">广告展示次数（Impression）</MetricLabel></span><strong>{selectedPageProfile.impression}</strong></div><div><span><MetricLabel metric="revenue_share">页面广告收入占比</MetricLabel></span><strong>44.5%</strong></div></div></article>
                   <article><header><div><h3>版本与 A/B</h3><p>上线前后及实验组收益对比</p></div><Badge tone="bad">V1.8.0 下降</Badge></header><div className="version-ab-list"><div><span>V1.7.4</span><strong>机会 41.2% · AV 34.8%</strong><small>基准版本</small></div><div><span>V1.8.0</span><strong>机会 28.4% · AV 23.1%</strong><small>-12.8pp / -11.7pp</small></div><div><span>实验 B</span><strong>提前创建 Opportunity</strong><small>预计收入 +9.6%</small></div></div><button onClick={() => notify("A/B 实验配置已打开")}>新建页面实验</button></article>
+                </div>
+              </section>
+
+              <section className="surface intelligent-diagnosis-workspace">
+                <div className="surface-title"><div><h2>精细化运营诊断与版本学习</h2><p>基于 V1.7 字段先做可解释规则诊断，再用 AI 复核跨维度证据；结论必须进入版本验证闭环</p></div><label className="inline-page-selector">异常指标<select value={operationMetric} onChange={(event) => { setOperationMetric(event.target.value as keyof typeof operationDiagnosisProfiles); setAiDiagnosisReady(false); }}>{Object.entries(operationDiagnosisProfiles).map(([key, item]) => <option key={key} value={key}>{item.label}</option>)}</select></label></div>
+                <div className="diagnosis-command-strip">
+                  <div><span><MetricLabel metric={operationMetric}>{operationDiagnosis.label}</MetricLabel></span><strong>{operationDiagnosis.value}</strong><small>较基线 <b>{operationDiagnosis.delta}</b></small></div>
+                  <div><span>规则诊断可信度</span><strong>86%</strong><small>原因覆盖 98.0% · Unknown 2.0%</small></div>
+                  <div><span>最大异常切片</span><strong>伊朗 · 1.8.0</strong><small>贡献 61.2% 指标损失</small></div>
+                  <div><span>关联字段</span><p>{operationDiagnosis.fields}</p></div>
+                  <button onClick={() => { setAiDiagnosisReady(true); notify(`${operationDiagnosis.label} AI 诊断已基于当前演示数据生成`); }}>运行 AI 复核</button>
+                </div>
+                <div className="diagnosis-engine-grid">
+                  <article>
+                    <header><div><span>规则引擎 · 始终可用</span><h3>可解释根因结论</h3></div><Badge tone="good">有证据</Badge></header>
+                    <p className="engine-conclusion">{operationDiagnosis.conclusion}</p>
+                    <div className="engine-evidence">{operationDiagnosis.evidence.map((item, index) => <div key={item}><span>{index + 1}</span><p>{item}</p></div>)}</div>
+                  </article>
+                  <article>
+                    <header><div><span>技术修改建议 · 可直接建任务</span><h3>按优先级执行</h3></div><Badge tone="warn">3 项</Badge></header>
+                    <ol className="technical-fix-list">{operationDiagnosis.actions.map((item, index) => <li key={item}><span>P{index}</span><p>{item}</p></li>)}</ol>
+                    <button onClick={() => setDialog("diagnosis")}>生成带证据的技术任务</button>
+                  </article>
+                  <article className={aiDiagnosisReady ? "ai-ready" : ""}>
+                    <header><div><span>AI 诊断 · 数据库只读</span><h3>{aiDiagnosisReady ? "AI 复核结果" : "等待运行"}</h3></div><Badge tone={aiDiagnosisReady ? "blue" : "neutral"}>{aiDiagnosisReady ? "已生成" : "可选"}</Badge></header>
+                    {aiDiagnosisReady ? <><p className="engine-conclusion">AI 与规则引擎结论一致，并发现 app_build=108、network_type=cellular 与异常同时出现；建议优先做版本内修复，不调整 AdMob 填充策略。</p><div className="ai-evidence-meta"><span>读取 7 个指标</span><span>对比 12 个切片</span><span>检索 18 条历史发布</span><span>证据覆盖 98.0%</span></div><small>AI 只能引用指标注册表、聚合数据、异常样本和历史版本；无 SQL/事件证据的猜测不进入正式结论。</small></> : <><p className="engine-conclusion">AI 将读取同一 metric_key 的趋势、切片、事件关联链、错误码、版本变更和历史修复效果，补充规则未覆盖的交叉原因。</p><div className="ai-placeholder">先由规则引擎确定事实，再让 AI 排序原因、生成解释和建议，避免模型凭经验猜测。</div></>}
+                  </article>
+                </div>
+                <div className="diagnosis-dimension-catalog">
+                  <div className="subsection-head"><div><h3>V1.7 可下钻诊断维度</h3><p>任何指标变差先自动跑这些切片，输出“变化幅度 × 影响用户 × 收入影响 × 置信度”排序</p></div><span>12 组维度</span></div>
+                  <div className="dimension-chip-grid">{v17DiagnosisDimensions.map(([name, fields, status]) => <button key={name} className={status === "需扩展" ? "needs-extension" : ""} onClick={() => notify(`${name}维度已加入当前诊断`)}><span>{name}</span><p>{fields}</p><small>{status}</small></button>)}</div>
+                </div>
+                <div className="version-learning-loop">
+                  <div className="subsection-head"><div><h3>修复版本与主动学习</h3><p>每次建议都必须绑定 release_id；只在新版本显著改善且护栏未恶化时，才沉淀为可复用经验</p></div><Badge tone="blue">闭环进行中</Badge></div>
+                  <div className="release-comparison-flow">
+                    <div><span>稳定基线</span><strong>1.7.4 (104)</strong><em>机会覆盖 41.2%</em><small>7 天同国家/同渠道</small></div><i>→</i><div className="bad"><span>异常版本</span><strong>1.8.0 (108)</strong><em>机会覆盖 28.4%</em><small>诊断 ID：DIA-0824</small></div><i>→</i><div className="pending"><span>修复版本</span><strong>1.8.1 (109)</strong><em>灰度 10% · 待满样本</em><small>目标 ≥40.0%</small></div><i>→</i><div><span>学习结果</span><strong>等待验证</strong><em>改善显著才入库</em><small>无改善则自动回退假设</small></div>
+                  </div>
+                  <div className="learning-gates"><div><span>主指标</span><strong>Opportunity UV / DAU</strong><small>提升 ≥8pp</small></div><div><span>产品护栏</span><strong>VPN成功率 · D1留存</strong><small>不得下降 &gt;1pp</small></div><div><span>广告护栏</span><strong>展示失败率 · eCPM</strong><small>不得显著恶化</small></div><div><span>数据护栏</span><strong>P0完整率 · 关联率</strong><small>必须 100% / ≥99%</small></div><button onClick={() => notify("已打开 1.8.1 版本效果验证")}>查看版本效果</button></div>
+                  <div className="learning-schema-note"><strong>必须记录：</strong><code>diagnosis_id · metric_key · hypothesis · evidence_query_id · change_item · release_id · baseline_window · treatment_window · uplift · guardrail_result · final_result · learning_tag</code></div>
                 </div>
               </section>
 
@@ -1390,5 +1508,7 @@ export default function Home() {
       }} />}
       {notice && <div className="toast" role="status"><span>✓</span>{notice}</div>}
     </div>
+    <MetricDictionaryDrawer open={metricDictionaryOpen} selectedMetric={selectedMetric} onSelect={setSelectedMetric} onClose={() => setMetricDictionaryOpen(false)} />
+    </MetricInspectContext.Provider>
   );
 }
