@@ -166,6 +166,7 @@ td small { margin-top: 3px; color: var(--soft-muted); font-size: 7px; }
 .mini-funnel > div { min-height: 25px; display: flex; align-items: center; justify-content: space-between; padding: 0 10px; background: linear-gradient(90deg, #edf8f2, #dff4e8); border: 1px solid #cbe8d7; color: #2c6548; font-size: 8px; font-weight: 700; clip-path: polygon(3% 0,97% 0,100% 100%,0 100%); }
 .mini-funnel.blue > div { background: linear-gradient(90deg, #eef3ff, #e0e9ff); border-color: #cedbff; color: #3d5fba; }
 .mini-funnel small { font-size: 7px; font-weight: 500; }
+.mini-funnel-note { margin: 6px 0 0; color: var(--muted); font-size: 7px; text-align: center; }
 .overview-fulfillment { display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid var(--line-soft); border-radius: 8px; overflow: hidden; }
 .overview-fulfillment > div { min-width: 0; padding: 11px; border-right: 1px solid var(--line-soft); background: var(--surface-soft); }
 .overview-fulfillment > div:last-child { border-right: 0; }
@@ -196,6 +197,7 @@ td small { margin-top: 3px; color: var(--soft-muted); font-size: 7px; }
 .funnel-stage span { color: #41516a; font-size: 8px; font-weight: 750; line-height: 1.45; }
 .funnel-stage strong { margin-top: 7px; font-size: 16px; }
 .funnel-stage small { margin-top: 5px; max-width: 100%; color: #73809a; font-size: 7px; line-height: 1.45; overflow-wrap: anywhere; }
+.funnel-stage .stage-derived { margin-top: 5px; padding: 3px 6px; border-radius: 999px; background: #e4ebff; color: #3558ad; font-size: 7px; font-style: normal; font-weight: 750; line-height: 1.35; }
 .funnel-stage.stage-alert { border-color: #efb2b9; background: var(--red-soft); }
 .conversion-arrow { flex: 0 0 68px; min-height: 72px; display: flex; flex-direction: column; align-items: center; justify-content: center; border: 0; background: transparent; cursor: pointer; }
 .conversion-arrow strong { font-size: 10px; }
