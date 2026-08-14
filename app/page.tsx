@@ -42,8 +42,8 @@ type FunnelStage = {
   nonLinear?: boolean;
 };
 type TransitionSelection = { from: string; to: string; rate: string; scope: "users" | "events" };
-type ModuleKey = "global" | "project" | "funnel" | "admob" | "firebase" | "reconcile" | "tracking" | "config" | "firebaseSetup" | "tasks";
-const moduleKeys = new Set<ModuleKey>(["global", "project", "funnel", "admob", "firebase", "reconcile", "tracking", "config", "firebaseSetup", "tasks"]);
+type ModuleKey = "global" | "project" | "funnel" | "vpn" | "admob" | "firebase" | "reconcile" | "tracking" | "config" | "firebaseSetup" | "tasks";
+const moduleKeys = new Set<ModuleKey>(["global", "project", "funnel", "vpn", "admob", "firebase", "reconcile", "tracking", "config", "firebaseSetup", "tasks"]);
 const pageKeys = new Set<PageKey>(["overview", "workbench", "diagnosis", "cohort", "path", "evidence", "issues", "snapshot"]);
 const legacyWorkbenchPages = new Set<PageKey>(["diagnosis", "cohort", "path", "snapshot"]);
 
@@ -114,18 +114,20 @@ function readInitialAnalysisView(): { module: ModuleKey; page: PageKey; embedded
 
 const moduleMenus: Array<{ key: ModuleKey; index: string; label: string; group: "经营分析" | "质量治理" }> = [
   { key: "funnel", index: "01", label: "项目与漏斗分析", group: "经营分析" },
-  { key: "admob", index: "02", label: "AdMob 分析", group: "经营分析" },
-  { key: "firebase", index: "03", label: "Firebase 数据", group: "经营分析" },
-  { key: "reconcile", index: "04", label: "数据对账", group: "经营分析" },
-  { key: "tracking", index: "05", label: "打点验收", group: "质量治理" },
-  { key: "config", index: "06", label: "规范与配置", group: "质量治理" },
-  { key: "tasks", index: "07", label: "任务与告警", group: "质量治理" },
+  { key: "vpn", index: "02", label: "VPN 功能分析", group: "经营分析" },
+  { key: "admob", index: "03", label: "AdMob 分析", group: "经营分析" },
+  { key: "firebase", index: "04", label: "Firebase 数据", group: "经营分析" },
+  { key: "reconcile", index: "05", label: "数据对账", group: "经营分析" },
+  { key: "tracking", index: "06", label: "打点验收", group: "质量治理" },
+  { key: "config", index: "07", label: "规范与配置", group: "质量治理" },
+  { key: "tasks", index: "08", label: "任务与告警", group: "质量治理" },
 ];
 
 const moduleCopy: Record<ModuleKey, { title: string; description: string; action: string }> = {
   global: { title: "全局项目总览", description: "统一查看所有项目的用户、投放、收入、利润和数据健康度", action: "导出项目日报" },
   project: { title: "单项目诊断", description: "围绕单个项目串联用户增长、产品漏斗、广告变现和数据质量", action: "创建诊断任务" },
   funnel: { title: "项目与漏斗分析", description: "一个入口完成多项目发现、单项目漏斗、页面路径、事件证据和修复验证", action: "新建诊断任务" },
+  vpn: { title: "VPN 功能分析", description: "基于 V1.8 弱网专项分析权限、配置、节点、连接阶段、协议回退、可用性、IP 与会话质量", action: "新建 VPN 诊断" },
   admob: { title: "AdMob 分析", description: "分析请求、匹配、展示、广告浏览用户、eCPM和收入变化", action: "导出 AdMob 报表" },
   firebase: { title: "Firebase 数据", description: "统一查看活跃、事件质量、版本覆盖、数据源连接和同步健康", action: "查看事件字典" },
   reconcile: { title: "数据对账", description: "对比 Firebase、AdMob、中台与 ADB 的用户、展示和收入口径", action: "发起重新对账" },
@@ -139,6 +141,7 @@ const moduleDialog: Record<ModuleKey, DialogKey> = {
   global: "project-report",
   project: "diagnosis",
   funnel: "diagnosis",
+  vpn: "diagnosis",
   admob: "admob-report",
   firebase: "event-dictionary",
   reconcile: "reconcile-run",
@@ -257,13 +260,13 @@ const diagnosticMetricGroups = {
 } as const;
 
 const vpnStageHealth = [
-  ["连接点击", "jk_vpn_connect_attempt", "82,361", "100%", "—", "0ms", "good"],
-  ["权限通过", "jk_vpn_permission_result", "76,409", "92.8%", "-0.6pp", "480ms", "good"],
-  ["节点选择", "jk_vpn_node_selected", "76,409", "100%", "+0.1pp", "126ms", "good"],
-  ["节点可用", "jk_vpn_node_select_result", "68,463", "89.6%", "-2.3pp", "920ms", "warn"],
-  ["隧道建立", "jk_vpn_tunnel_result", "62,781", "91.7%", "-3.4pp", "4.82s", "warn"],
-  ["认证通过", "jk_vpn_auth_result", "61,904", "98.6%", "-0.4pp", "1.31s", "good"],
-  ["出口 IP 验证", "jk_vpn_ip_verify", "61,423", "99.2%", "-0.2pp", "2.08s", "good"],
+  ["连接开始", "vpn_connection_start", "82,361", "100%", "—", "0ms", "good"],
+  ["权限通过", "vpn_permission_result", "76,409", "92.8%", "-0.6pp", "480ms", "good"],
+  ["节点选择", "vpn_node_selected", "76,409", "100%", "+0.1pp", "126ms", "good"],
+  ["DNS解析", "vpn_connection_phase · dns_resolve", "72,884", "95.4%", "-2.3pp", "920ms", "warn"],
+  ["Socket连接", "vpn_connection_phase · socket_connect", "68,463", "93.9%", "-3.4pp", "4.82s", "warn"],
+  ["协议握手", "vpn_connection_phase · protocol_handshake", "62,781", "91.7%", "-2.8pp", "3.31s", "warn"],
+  ["出口可用性", "vpn_connectivity_check", "61,423", "97.8%", "-0.7pp", "2.08s", "good"],
 ] as const;
 
 const qualityIssues = [
@@ -714,6 +717,33 @@ function ModulePage({ module, project, configs, onProjectChange, openModule, ope
     </div>
   );
 
+  if (module === "vpn") return (
+    <div className="page-stack vpn-v18-page">
+      <section className="vpn-version-banner surface"><div><div className="eyebrow">JKCL 埋点规范 V1.8 · VPN 弱网专项</div><h2>俄罗斯 / 伊朗 VPN 功能质量</h2><p>权限 → 配置 → 节点探测与选择 → 连接阶段 → 回退恢复 → 出口可用 → 会话稳定性 → 广告请求</p></div><div><Badge tone="warn">3 个重点异常</Badge><small>基线：同国家 · 同ASN · 同小时近7日</small></div></section>
+      <section className="metric-grid six"><Metric label="会话最终成功率" value="74.6%" note="61,423 / 82,361 vpn_session_id" tone="bad" /><Metric label="连接尝试成功率" value="78.0%" note="connection_id 口径 · -5.9pp" tone="bad" /><Metric label="连接结果覆盖率" value="99.7%" note="result / start · 缺253条" tone="good" /><Metric label="连接后可用率" value="92.4%" note="connectivity_check / success" tone="warn" /><Metric label="异常断开率" value="8.7%" note="非用户/配置断开" tone="bad" /><Metric label="低质量会话率" value="16.8%" note="poor / unusable" tone="warn" /></section>
+
+      <section className="vpn-analysis-grid">
+        <div className="surface span-main"><div className="surface-title"><div><h2>V1.8 全连接漏斗</h2><p>每个阶段必须形成 success / failed / timeout / cancelled / skipped 终态</p></div><Badge tone="bad">首个恶化：Socket连接</Badge></div><div className="vpn-v18-chain">{[
+          ['权限授权','vpn_permission_result','92.8%','480ms','good'],['配置可得','vpn_config_fetch_result','96.1%','2.8s','good'],['候选节点可达','vpn_server_probe_result','88.6%','1.9s','warn'],['节点选择有效','vpn_node_selected + result','89.6%','—','warn'],['DNS解析','phase: dns_resolve','95.4%','920ms','warn'],['Socket连接','phase: socket_connect','93.9%','4.82s','bad'],['TLS握手','phase: tls_handshake','96.7%','3.40s','warn'],['协议握手','phase: protocol_handshake','91.7%','3.31s','bad'],['隧道就绪','phase: ready','98.6%','1.28s','good'],['出口可用','vpn_connectivity_check','92.4%','2.08s','warn']
+        ].map(([name,event,rate,p95,tone],index)=><button key={name} className={tone} onClick={()=>{setModule('funnel');setPage('evidence');notify(`${event} 事件样本已筛选`)}}><span>{index+1}</span><strong>{name}</strong><code>{event}</code><em>{rate}</em><small>P95 {p95}</small></button>)}</div><div className="vpn-stage-summary"><div><span>首个失败阶段</span><strong>Socket Connect · 31.4%</strong><small>避免同一连接多错误重复归因</small></div><div><span>连接总耗时</span><strong>P50 5.8s · P95 14.7s</strong><small>告警阈值 P95 &gt;15s</small></div><div><span>无结果连接</span><strong>253 connection_id</strong><small>查杀进程、回调遗漏、超时终态</small></div><div><span>会话内平均尝试</span><strong>1.34 次</strong><small>重试/回退沿用 vpn_session_id</small></div></div></div>
+        <aside className="surface"><div className="surface-title"><div><h2>弱网限制信号</h2><p>推断信号，不作为监管事实</p></div><Badge tone="warn">伊朗 · 蜂窝</Badge></div><div className="restriction-list">{[['udp_blocked','24.8%','协议回退到 TCP/TLS'],['dns_timeout','18.2%','切换解析线路/缓存'],['tcp_reset','14.6%','更换节点与端口'],['tls_intercept','9.7%','核查SNI/证书/时间'],['quic_blocked','7.9%','禁用QUIC并验证恢复'],['ip_blocked','6.4%','节点下线或降权'],['unknown','3.1%','补充 network_diagnostic']].map(([signal,rate,action])=><button key={signal} onClick={()=>notify(`${signal} 已按ASN和协议下钻`)}><code>{signal}</code><strong>{rate}</strong><small>{action}</small></button>)}</div></aside>
+      </section>
+
+      <section className="surface"><div className="surface-title"><div><h2>国家 × ASN × 网络 × 协议质量矩阵</h2><p>先定位市场和运营商，再判断协议/端口/混淆与节点，不使用全球统一阈值</p></div><Badge tone="blue">V1.8 五层下钻</Badge></div><div className="table-wrap"><table><thead><tr><th>国家 / ASN</th><th>网络</th><th>协议 / 传输 / 端口</th><th>节点</th><th>尝试成功率</th><th>会话成功率</th><th>P95</th><th>丢包P95</th><th>回退恢复</th><th>主要信号</th><th>判定</th></tr></thead><tbody>{[
+        ['IR · AS44244','cellular','WireGuard / UDP / 51820','IR-17','63.8%','72.1%','18.4s','15.8%','78.2%','udp_blocked','严重'],['IR · AS58224','wifi','IKEv2 / UDP / 4500','TR-09','82.6%','88.9%','11.2s','6.4%','71.4%','dns_timeout','预警'],['RU · AS12389','cellular','OpenVPN / TCP / 443','DE-22','86.8%','91.2%','9.7s','4.1%','64.8%','tcp_reset','正常'],['RU · AS8359','wifi','WireGuard / UDP / 51820','FI-06','77.1%','84.6%','13.8s','9.8%','82.5%','quic_blocked','预警'],['TR · AS9121','wifi','IKEv2 / UDP / 4500','TR-11','93.7%','96.2%','6.1s','2.8%','—','—','正常']
+      ].map(row=><tr key={`${row[0]}${row[2]}`}>{row.map((cell,index)=><td key={index}>{index===10?<Badge tone={cell==='正常'?'good':cell==='预警'?'warn':'bad'}>{cell}</Badge>:index===9?<code>{cell}</code>:cell}</td>)}</tr>)}</tbody></table></div></section>
+
+      <section className="vpn-four-grid">
+        <div className="surface"><div className="surface-title"><div><h2>控制面与节点供给</h2><p>配置拉取与节点探测必须在连接前单独判断</p></div></div><div className="vpn-kpi-list"><div><span>配置拉取成功率</span><strong>96.1%</strong><small>remote 82.4% · cache 14.8% · fallback 2.8%</small></div><div><span>配置拉取 P95</span><strong>2.8s</strong><small>IR cellular 高至 6.4s</small></div><div><span>候选节点可达率</span><strong>88.6%</strong><small>UDP 79.2% · TCP 94.1% · QUIC 76.4%</small></div><div><span>节点评分偏差</span><strong className="negative">12.7%</strong><small>excellent 但最终失败</small></div></div></div>
+        <div className="surface"><div className="surface-title"><div><h2>协议回退策略</h2><p>普通 retry 与 fallback 分口径</p></div></div><div className="fallback-matrix">{[['WG/UDP → OVPN/TCP','1,824','82.5%','+19.4pp'],['IKEv2 → OVPN/TCP','1,102','71.8%','+11.2pp'],['QUIC → TLS/443','846','78.6%','+21.7pp'],['节点 IR-17 → TR-09','896','63.4%','+8.1pp']].map(row=><div key={row[0]}><strong>{row[0]}</strong><span>{row[1]}次</span><span>恢复 {row[2]}</span><em>{row[3]}</em></div>)}</div><div className="conclusion-block warn"><strong>协议回退率 18.7% · 恢复率 68.2%</strong><p>优先优化 IR · AS44244 的主协议选择；不要因为全局回退率上升直接关闭 WireGuard。</p></div></div>
+        <div className="surface"><div className="surface-title"><div><h2>前后 IP 与出口可用性</h2><p>完整IP仅进受控中台；Firebase只传状态和关联键</p></div></div><div className="vpn-kpi-list"><div><span>连接前IP采集率</span><strong>98.7%</strong><small>probe_stage=before_connect</small></div><div><span>连接后IP采集率</span><strong>96.8%</strong><small>probe_stage=after_connect</small></div><div><span>出口IP变化率</span><strong>96.8%</strong><small>ip_changed=1 / 双端成功会话</small></div><div><span>出口国家一致率</span><strong>94.1%</strong><small>after country vs node_region</small></div><div><span>广告请求 after IP 关联</span><strong className="negative">91.6%</strong><small>ad_request.vpn_session_id + ip_after_status</small></div></div></div>
+        <div className="surface"><div className="surface-title"><div><h2>稳定性与质量</h2><p>成功连接不等于体验可用</p></div></div><div className="vpn-kpi-list"><div><span>网络切换存活率</span><strong>87.6%</strong><small>切网后60秒仍连接或恢复</small></div><div><span>自动重连成功率</span><strong>83.6%</strong><small>trigger_type=auto_reconnect</small></div><div><span>质量采样覆盖率</span><strong>91.4%</strong><small>有 quality_sample 的成功会话</small></div><div><span>延迟 P50 / P95</span><strong>148 / 684ms</strong><small>按country/asn/protocol/server拆解</small></div><div><span>丢包率 P95</span><strong className="negative">11.8%</strong><small>超过10%专项告警</small></div></div></div>
+      </section>
+
+      <section className="two-column wide-left"><div className="surface"><div className="surface-title"><div><h2>VPN × 广告变现联动</h2><p>连接成功后继续按同一 vpn_session_id 关联广告机会、请求、after IP 与展示</p></div><button className="text-button" onClick={()=>{setModule('funnel');setPage('workbench');setDiagnosticDomain('ads')}}>进入分析工作台</button></div><div className="diagnostic-chain">{[['连接成功','61,423','100%','normal'],['出口IP成功','59,458','96.8%','normal'],['广告机会','42,687','69.5%','normal'],['广告请求','39,204','91.8%','normal'],['加载成功','37,419','95.4%','normal'],['广告浏览AV','31,806','85.0%','bad']].map(([label,value,rate,status],index)=><div key={label} className={status==='bad'?'bad':''}><span>{index+1}</span><strong>{label}</strong><em>{value}</em><small>{rate}</small></div>)}</div><div className="vpn-ad-dimensions"><span>可下钻：</span><button>before/after国家</button><button>access ASN</button><button>server_id</button><button>protocol</button><button>transport</button><button>quality_status</button><button>AdMob error</button></div></div><aside className="surface"><div className="surface-title"><div><h2>数据可信度</h2><p>V1.8 VPN P0门禁</p></div><Badge tone="bad">未达标</Badge></div><div className="quality-gates"><div><span>vpn_session_id完整率</span><strong>99.1% / 100%</strong></div><div><span>connection_id完整率</span><strong>99.4% / 100%</strong></div><div><span>连接结果覆盖率</span><strong>99.7% / ≈100%</strong></div><div><span>阶段终态完整率</span><strong>98.8% / 100%</strong></div><button onClick={()=>openModule('tracking')}>按 V1.8 配置发起验收</button></div></aside></section>
+    </div>
+  );
+
   if (module === "admob") return (
     <div className="page-stack">
       <section className="metric-grid six"><Metric label="预估收入" value="$4,821" note="较昨日 -8.4%" tone="bad" /><Metric label="广告请求" value="201,944" note="+4.9%" /><Metric label="匹配率" value="100%" note="AdMob已结算" tone="good" /><Metric label="展示率" value="70.2%" note="目标 ≥68%" tone="good" /><Metric label="eCPM" value="$35.03" note="-3.1%" /><Metric label="广告展示独立用户 AV" value="29,671" note="人均展示 3.42 次" tone="bad" /></section>
@@ -947,6 +977,7 @@ export default function Home() {
     global: { title: "混合时效", detail: "Firebase T+0 · AdMob T+3 · 刷新", note: "DAU和用户行为使用Firebase实时预估；收入、消耗和ROAS使用最近已结算日期，卡片必须标注数据日。" },
     project: { title: "项目诊断", detail: "Firebase延迟约8分钟 · AdMob T+3", note: "用户与产品指标可看当天；收入和AdMob效率使用已结算日期，不参与当天实时结论。" },
     funnel: { title: "实时预估", detail: "Firebase · 延迟约8分钟", note: "用户漏斗与事件漏斗来自Firebase实时数据；收入影响为模型估算，最终以AdMob结算为准。" },
+    vpn: { title: "V1.8 弱网专项", detail: "Firebase T+0 · 会话/连接/阶段关联", note: "本页以 vpn_session_id 串联用户会话，以 connection_id 区分每次真实连接尝试；俄罗斯/伊朗须按 ASN、网络、协议、端口和限制信号联合判断。" },
     admob: { title: "结算数据", detail: "AdMob已结算至8月8日", note: "本页默认只展示AdMob已结算日期；Firebase AV仅作为覆盖诊断对照，并明确标记来源。" },
     firebase: { title: "实时数据", detail: "BigQuery intraday · 延迟约8分钟", note: "本页展示Firebase实时预估、事件质量与同步水位；中台数字仅用于差异诊断。" },
     reconcile: { title: "分源对账", detail: "今日双源 · T+3全量", note: "当天只比较Firebase与中台；含AdMob的最终对账仅在结算日期执行，避免跨时效误报。" },
@@ -1076,7 +1107,7 @@ export default function Home() {
     <MetricInspectContext.Provider value={openMetricDefinition}>
     <div className={`app-shell ${embedded ? "embedded" : ""}`}>
       <aside className="sidebar">
-        <div className="brand"><span className="brand-mark">JK</span><span><strong>变现与埋点</strong><small>质量分析中心 · V24</small></span></div>
+        <div className="brand"><span className="brand-mark">JK</span><span><strong>变现与埋点</strong><small>质量分析中心 · V26</small></span></div>
         <div className="nav-group-label">经营分析</div>
         {moduleMenus.filter((item) => item.group === "经营分析").map((item) => <button key={item.key} className={`main-nav-item ${module === item.key ? "active" : ""}`} onClick={() => openModule(item.key)}><span>{item.index}</span>{item.label}</button>)}
         <div className="nav-group-label">质量治理</div>
@@ -1220,7 +1251,7 @@ export default function Home() {
                 </div>}
 
                 {diagnosticDomain === 'vpn' && <div className="diagnostic-detail-grid vpn-detail">
-                  <div className="detail-panel span-two"><div className="subsection-head"><div><h3>连接阶段成功率与 P95 耗时</h3><p>使用同一 vpn_session_id 串联；重试用 connect_attempt_id 区分，会话最终成功单独计算</p></div><Badge tone="warn">隧道阶段异常</Badge></div><div className="stage-health-table"><div className="stage-health-head"><span>阶段</span><span>事件</span><span>成功量</span><span>阶段成功率</span><span>较基线</span><span>P95耗时</span></div>{vpnStageHealth.map(([name,event,count,rate,delta,p95,tone])=><button key={name} className={tone} onClick={()=>go('evidence')}><strong>{name}</strong><code>{event}</code><span>{count}</span><span>{rate}</span><em>{delta}</em><span>{p95}</span></button>)}</div></div>
+                  <div className="detail-panel span-two"><div className="subsection-head"><div><h3>连接阶段成功率与 P95 耗时</h3><p>使用同一 vpn_session_id 串联；每次真实底层 connect 用新的 connection_id，普通重试/回退/自动重连沿用会话ID</p></div><Badge tone="warn">Socket / 协议握手异常</Badge></div><div className="stage-health-table"><div className="stage-health-head"><span>阶段</span><span>事件</span><span>成功量</span><span>阶段成功率</span><span>较基线</span><span>P95耗时</span></div>{vpnStageHealth.map(([name,event,count,rate,delta,p95,tone])=><button key={name} className={tone} onClick={()=>go('evidence')}><strong>{name}</strong><code>{event}</code><span>{count}</span><span>{rate}</span><em>{delta}</em><span>{p95}</span></button>)}</div><div className="v18-workbench-strip"><div><span>结果覆盖率</span><strong>99.7%</strong><small>vpn_connection_result / vpn_connection_start</small></div><div><span>首个失败阶段</span><strong>socket_connect 31.4%</strong><small>每个 connection_id 仅归因一次</small></div><div><span>限制信号</span><strong>udp_blocked 24.8%</strong><small>restriction_signal · 推断值</small></div><div><span>连接后可用</span><strong>92.4%</strong><small>vpn_connectivity_check</small></div><button onClick={()=>openModule('vpn')}>打开 VPN 功能分析 →</button></div></div>
                   <div className="detail-panel"><div className="subsection-head"><div><h3>连接前后网络变化</h3><p>成功会话需同时具备 ip_before_connect 与 ip_after_connect</p></div></div><div className="network-quality-grid"><div><span>IP变化</span><strong>96.8%</strong><small>59,458 / 61,423</small></div><div><span>国家变化</span><strong>94.1%</strong><small>出口国家符合节点</small></div><div><span>ASN变化</span><strong>95.6%</strong><small>住宅网→IDC ASN</small></div><div><span>出口验证失败</span><strong className="negative">0.8%</strong><small>481 sessions</small></div></div></div>
                   <div className="detail-panel"><div className="subsection-head"><div><h3>协议与节点质量排行</h3><p>{diagnosticSlice} · 按成功率与 P95 综合排序</p></div></div><div className="quality-ranking">{[['WireGuard · IR-17','94.8%','3.2s','优'],['IKEv2 · TR-09','89.1%','5.8s','中'],['OpenVPN · DE-22','81.4%','8.9s','差'],['Fallback WG→IKEv2','68.2%','11.4s','差']].map(([name,rate,p95,status])=><button key={name}><strong>{name}</strong><span>成功 {rate}</span><span>P95 {p95}</span><Badge tone={status==='优'?'good':status==='中'?'warn':'bad'}>{status}</Badge></button>)}</div></div>
                 </div>}
