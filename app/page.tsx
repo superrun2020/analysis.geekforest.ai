@@ -26,6 +26,7 @@ type PageKey =
 
 type FunnelMode = "product" | "monetization";
 type UnitMode = "users" | "events";
+type DiagnosticDomain = "ads" | "vpn" | "quality";
 type TrendMetric = "viewer" | "opportunity";
 type AdMobDimension = "format" | "placement" | "country";
 type ConfigPackageTab = "events" | "fields" | "enums" | "providers";
@@ -219,6 +220,59 @@ const preloadInventory = {
   evicted: 12702,
   unusedReady: 30184,
 };
+
+const diagnosticMetricGroups = {
+  ads: [
+    ["广告资格通过率", "79.4%", "283,006 / 356,410", "-1.1pp", "warn", "eligible_count / eligibility_check_count"],
+    ["资格后机会完整率", "75.7%", "214,306 / 283,006", "-6.4pp", "bad", "eligible_with_opportunity / eligible"],
+    ["缓存命中率", "68.5%", "146,812 / 214,306", "+2.2pp", "good", "cache_hit / opportunity"],
+    ["实时请求启动率", "93.6%", "63,204 / 67,494", "-0.8pp", "good", "realtime_request / cache_miss"],
+    ["请求加载成功率", "98.0%", "61,940 / 63,204", "+0.3pp", "good", "load_success / realtime_request"],
+    ["请求终态完整率", "99.6%", "62,951 / 63,204", "-0.2pp", "good", "unique terminal request_id / request_id"],
+    ["加载成功未展示率", "14.7%", "28,206 / 191,842", "+4.9pp", "bad", "load_success without impression / load_success"],
+    ["广告浏览者比例", "23.1%", "29,671 AV / 128,430 DAU", "-11.7pp", "bad", "AV / DAU"],
+    ["人均广告展示次数", "4.64", "137,628 / 29,671", "+0.21", "good", "impression_count / AV"],
+    ["请求→展示 P95", "4.82s", "P50 1.36s", "+1.14s", "warn", "impression_time - request_time"],
+    ["加载→展示 P95", "3.27s", "P50 0.71s", "+0.92s", "warn", "impression_time - load_success_time"],
+  ],
+  vpn: [
+    ["连接尝试成功率", "78.0%", "64,276 / 82,361", "-5.9pp", "bad", "connect_success / connect_attempt"],
+    ["会话最终成功率", "74.6%", "61,423 / 82,361", "-4.1pp", "bad", "session_final_success / connect_session"],
+    ["权限阶段成功率", "92.8%", "76,409 / 82,361", "-0.6pp", "good", "permission_granted / permission_requested"],
+    ["节点选择有效率", "89.6%", "68,463 / 76,409", "-2.3pp", "warn", "node_connect_started / node_selected"],
+    ["隧道建立成功率", "91.7%", "62,781 / 68,463", "-3.4pp", "warn", "tunnel_success / tunnel_start"],
+    ["协议回退恢复率", "68.2%", "3,184 / 4,668", "+6.7pp", "warn", "fallback_success / fallback_attempt"],
+    ["切网断连率", "12.4%", "2,806 / 22,629", "+3.1pp", "bad", "network_change_disconnect / active_at_change"],
+    ["自动重连成功率", "83.6%", "2,037 / 2,436", "+2.8pp", "good", "reconnect_success / reconnect_attempt"],
+    ["连接前后 IP 变化率", "96.8%", "59,458 / 61,423", "-0.7pp", "good", "ip_before_connect != ip_after_connect"],
+  ],
+  quality: [
+    ["事件缺失率", "1.8%", "18,402 / 1,022,340", "+0.6pp", "warn", "expected_not_received / expected"],
+    ["孤儿 ID 率", "2.6%", "8,741 / 336,205", "+1.4pp", "bad", "unmatched context events / relevant events"],
+    ["重复终态率", "0.31%", "196 / 63,147", "+0.08pp", "warn", "ids_with_multiple_terminal / terminal_ids"],
+    ["接口补传成功率", "94.7%", "12,884 / 13,603", "+3.9pp", "good", "retry_ack_success / retry_attempt"],
+    ["P0 字段完整率", "99.2%", "缺失 8,178 条", "-0.5pp", "warn", "complete_p0_events / received_events"],
+    ["事件链可关联率", "95.8%", "322,083 / 336,205", "-1.9pp", "warn", "fully_linked_chains / relevant_chains"],
+  ],
+} as const;
+
+const vpnStageHealth = [
+  ["连接点击", "jk_vpn_connect_attempt", "82,361", "100%", "—", "0ms", "good"],
+  ["权限通过", "jk_vpn_permission_result", "76,409", "92.8%", "-0.6pp", "480ms", "good"],
+  ["节点选择", "jk_vpn_node_selected", "76,409", "100%", "+0.1pp", "126ms", "good"],
+  ["节点可用", "jk_vpn_node_select_result", "68,463", "89.6%", "-2.3pp", "920ms", "warn"],
+  ["隧道建立", "jk_vpn_tunnel_result", "62,781", "91.7%", "-3.4pp", "4.82s", "warn"],
+  ["认证通过", "jk_vpn_auth_result", "61,904", "98.6%", "-0.4pp", "1.31s", "good"],
+  ["出口 IP 验证", "jk_vpn_ip_verify", "61,423", "99.2%", "-0.2pp", "2.08s", "good"],
+] as const;
+
+const qualityIssues = [
+  ["opportunity_id 孤儿", "jk_ad_show_attempt", "4,826", "Cache Hit 后未绑定当前机会", "广告位 × App版本"],
+  ["request_id 缺少终态", "jk_ad_request", "253", "超时后 load_failed 未上报", "SDK版本 × adapter"],
+  ["ad_instance_id 重复终态", "jk_ad_paid_event", "196", "Paid 回调重入且未去重", "广告格式 × response_id"],
+  ["vpn_session_id 断链", "jk_vpn_ip_verify", "1,104", "重连时创建了新会话上下文", "协议 × 网络类型"],
+  ["补传仍失败", "outbox_ack", "719", "ACK 超时或重试次数耗尽", "接口状态 × App版本"],
+] as const;
 
 const projectFunnelProfiles: Record<string, {
   userStages: FunnelStage[];
@@ -816,6 +870,8 @@ export default function Home() {
   const [selectedMetric, setSelectedMetric] = useState("dau");
   const [operationMetric, setOperationMetric] = useState<keyof typeof operationDiagnosisProfiles>("opportunity_coverage");
   const [aiDiagnosisReady, setAiDiagnosisReady] = useState(false);
+  const [diagnosticDomain, setDiagnosticDomain] = useState<DiagnosticDomain>("ads");
+  const [diagnosticSlice, setDiagnosticSlice] = useState("全部维度");
 
   useEffect(() => {
     if (!dialog) return;
@@ -1147,6 +1203,34 @@ export default function Home() {
                 <button onClick={() => focusWorkbenchSection("page-product-analysis")}><span>03</span>页面与产品路径</button>
                 <button onClick={() => focusWorkbenchSection("workbench-rules")}><span>04</span>口径与技术建议</button>
               </nav>
+
+              <section className="surface full-diagnosis-board">
+                <div className="surface-title"><div><h2>全链路指标诊断</h2><p>同一项目与日期口径下查看分子、分母、趋势和异常切片；点击指标可进入证据明细</p></div><div className="diagnosis-freshness"><span>Firebase T+0</span><strong>最后更新 19:42:18</strong><small>AdMob 结算值 T+3 对账</small></div></div>
+                <div className="diagnosis-domain-tabs" role="tablist" aria-label="诊断领域">
+                  {([['ads','广告变现与履约','11项指标'],['vpn','VPN连接质量','9项指标'],['quality','数据质量与补传','6项指标']] as const).map(([key,label,count]) => <button key={key} className={diagnosticDomain===key?'active':''} onClick={()=>setDiagnosticDomain(key)}><span>{label}</span><small>{count}</small></button>)}
+                  <label>下钻切片<select value={diagnosticSlice} onChange={(event)=>setDiagnosticSlice(event.target.value)}><option>全部维度</option><option>伊朗 · ASN 44244</option><option>Android 1.8.0</option><option>蜂窝网络</option><option>插屏 · vpn_connect_success</option><option>协议 WireGuard</option></select></label>
+                </div>
+                <div className="diagnostic-metric-grid">
+                  {diagnosticMetricGroups[diagnosticDomain].map(([label,value,fraction,delta,tone,formula]) => <button key={label} className={`diagnostic-metric ${tone}`} onClick={()=>notify(`${label}已按${diagnosticSlice}筛选，并打开事件证据`)}><span>{label}</span><strong>{value}</strong><em>{delta} 较基线</em><small>{fraction}</small><code>{formula}</code></button>)}
+                </div>
+
+                {diagnosticDomain === 'ads' && <div className="diagnostic-detail-grid">
+                  <div className="detail-panel"><div className="subsection-head"><div><h3>广告机会履约分支</h3><p>资格通过后先生成真实业务机会，再按缓存命中与实时请求分流</p></div><Badge tone="bad">最大损失：加载成功未展示</Badge></div><div className="compact-chain"><div><span>Eligible</span><strong>283,006</strong><small>79.4%</small></div><i>→</i><div><span>Opportunity</span><strong>214,306</strong><small>75.7%</small></div><i>↙ ↘</i><div className="branch"><span>Cache Hit</span><strong>146,812</strong><small>68.5%</small></div><div className="branch"><span>Cache Miss</span><strong>67,494</strong><small>31.5%</small></div><i>→</i><div><span>Realtime Request</span><strong>63,204</strong><small>93.6%</small></div><i>→</i><div><span>Load Success</span><strong>61,940</strong><small>98.0%</small></div><i>→</i><div className="alert"><span>Impression</span><strong>137,628</strong><small>按 instance 汇合</small></div></div></div>
+                  <div className="detail-panel"><div className="subsection-head"><div><h3>耗时与未展示原因</h3><p>按 placement / format / country / adapter / request_type 下钻</p></div></div><div className="reason-bars">{[['页面离开或进入后台',34.8,'9,816'],['缓存对象过期/被驱逐',22.1,'6,233'],['Show未调用',18.7,'5,275'],['Show回调失败',14.2,'4,005'],['关联链缺失',6.8,'1,918'],['Unknown',3.4,'959']].map(([name,share,count])=><button key={String(name)} onClick={()=>go('evidence')}><span>{name}</span><div><i style={{width:`${share}%`}} /></div><strong>{share}%</strong><small>{count}</small></button>)}</div></div>
+                </div>}
+
+                {diagnosticDomain === 'vpn' && <div className="diagnostic-detail-grid vpn-detail">
+                  <div className="detail-panel span-two"><div className="subsection-head"><div><h3>连接阶段成功率与 P95 耗时</h3><p>使用同一 vpn_session_id 串联；重试用 connect_attempt_id 区分，会话最终成功单独计算</p></div><Badge tone="warn">隧道阶段异常</Badge></div><div className="stage-health-table"><div className="stage-health-head"><span>阶段</span><span>事件</span><span>成功量</span><span>阶段成功率</span><span>较基线</span><span>P95耗时</span></div>{vpnStageHealth.map(([name,event,count,rate,delta,p95,tone])=><button key={name} className={tone} onClick={()=>go('evidence')}><strong>{name}</strong><code>{event}</code><span>{count}</span><span>{rate}</span><em>{delta}</em><span>{p95}</span></button>)}</div></div>
+                  <div className="detail-panel"><div className="subsection-head"><div><h3>连接前后网络变化</h3><p>成功会话需同时具备 ip_before_connect 与 ip_after_connect</p></div></div><div className="network-quality-grid"><div><span>IP变化</span><strong>96.8%</strong><small>59,458 / 61,423</small></div><div><span>国家变化</span><strong>94.1%</strong><small>出口国家符合节点</small></div><div><span>ASN变化</span><strong>95.6%</strong><small>住宅网→IDC ASN</small></div><div><span>出口验证失败</span><strong className="negative">0.8%</strong><small>481 sessions</small></div></div></div>
+                  <div className="detail-panel"><div className="subsection-head"><div><h3>协议与节点质量排行</h3><p>{diagnosticSlice} · 按成功率与 P95 综合排序</p></div></div><div className="quality-ranking">{[['WireGuard · IR-17','94.8%','3.2s','优'],['IKEv2 · TR-09','89.1%','5.8s','中'],['OpenVPN · DE-22','81.4%','8.9s','差'],['Fallback WG→IKEv2','68.2%','11.4s','差']].map(([name,rate,p95,status])=><button key={name}><strong>{name}</strong><span>成功 {rate}</span><span>P95 {p95}</span><Badge tone={status==='优'?'good':status==='中'?'warn':'bad'}>{status}</Badge></button>)}</div></div>
+                </div>}
+
+                {diagnosticDomain === 'quality' && <div className="diagnostic-detail-grid quality-detail">
+                  <div className="detail-panel span-two"><div className="subsection-head"><div><h3>事件链质量问题清单</h3><p>期望事件来自项目已发布配置；未收到、孤儿ID和重复终态分开统计</p></div><Badge tone="bad">P0 需 100%</Badge></div><div className="table-wrap"><table><thead><tr><th>问题</th><th>涉及事件</th><th>影响量</th><th>疑似原因</th><th>优先下钻</th><th>操作</th></tr></thead><tbody>{qualityIssues.map(row=><tr key={row[0]}><td><strong>{row[0]}</strong></td><td><code>{row[1]}</code></td><td>{row[2]}</td><td>{row[3]}</td><td>{row[4]}</td><td><button className="table-link" onClick={()=>go('evidence')}>查看样本</button></td></tr>)}</tbody></table></div></div>
+                  <div className="detail-panel"><div className="subsection-head"><div><h3>采集与补传链路</h3><p>客户端产生到服务端 ACK 的完整状态</p></div></div><div className="retry-flow">{[['客户端生成','1,022,340','100%'],['Firebase收到','1,003,938','98.2%'],['本地Outbox','13,603','1.3%'],['补传发送','13,603','100%'],['服务端ACK','12,884','94.7%'],['仍失败','719','5.3%']].map(([name,count,rate],index)=><div key={name} className={index===5?'bad':''}><span>{name}</span><strong>{count}</strong><small>{rate}</small></div>)}</div></div>
+                  <div className="detail-panel"><div className="subsection-head"><div><h3>验收门禁</h3><p>质量不足时不输出高可信业务结论</p></div></div><div className="quality-gates"><div><span>P0事件完整率</span><strong className="negative">98.2% / 100%</strong></div><div><span>P0参数完整率</span><strong className="negative">99.2% / 100%</strong></div><div><span>事件链关联率</span><strong>95.8% / ≥99%</strong></div><div><span>Unknown率</span><strong>2.0% / &lt;1%</strong></div><button onClick={()=>openModule('tracking')}>进入打点验收中心</button></div></div>
+                </div>}
+              </section>
 
               <section className="surface funnel-surface" id="funnel-workbench">
                 <div className="surface-title"><div><h2>{funnelMode === "product" ? "产品用户到达漏斗" : unitMode === "users" ? "用户覆盖主漏斗" : "事件覆盖与展示漏斗"}</h2><p>{funnelMode === "monetization" ? unitMode === "users" ? "全部节点按用户去重；Request UV 含预加载与实时请求，仅作覆盖观察，缓存命中用户可跳过 Request / Load，不能把 Opportunity → Request 当成严格流失率" : "事件漏斗展示请求、加载、Ready、Show、Impression 与 Paid 回调；点击箭头诊断当前步骤" : "点击转化箭头进入步骤诊断"}</p></div><div className="funnel-title-tools"><div className="legend"><span className="dot blue" />当前 <span className="dot neutral" />昨日同期</div><span className="funnel-scroll-hint">⇆ 横向滚动查看全部 {stages.length} 个节点</span></div></div>
