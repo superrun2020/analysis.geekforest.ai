@@ -26,7 +26,15 @@ type AdMobDimension = "format" | "placement" | "country";
 type ConfigPackageTab = "events" | "fields" | "enums" | "providers";
 type TaskFilter = "all" | "failed" | "running";
 type TrackingResultFilter = "all" | "passed" | "failed" | "pending";
-type FunnelStage = { label: string; event: string; value: string; rate: string; delta: string };
+type FunnelStage = {
+  label: string;
+  event: string;
+  value: string;
+  rate: string;
+  delta: string;
+  note?: string;
+  nonLinear?: boolean;
+};
 type TransitionSelection = { from: string; to: string; rate: string; scope: "users" | "events" };
 type ModuleKey = "global" | "project" | "funnel" | "admob" | "firebase" | "reconcile" | "tracking" | "config" | "firebaseSetup" | "tasks";
 const moduleKeys = new Set<ModuleKey>(["global", "project", "funnel", "admob", "firebase", "reconcile", "tracking", "config", "firebaseSetup", "tasks"]);
@@ -38,6 +46,7 @@ const funnelStageDisplayNames: Record<string, string> = {
   Eligible: "符合广告资格（Eligible）",
   Opportunity: "广告机会（Opportunity）",
   Request: "广告请求用户（Request UV）",
+  "Request Accepted": "SDK 请求受理用户（Request Accepted UV）",
   "Ad Request": "广告请求（Ad Request）",
   "Load Success": "广告加载成功（Load Success）",
   "Ad Ready": "广告就绪（Ad Ready）",
@@ -55,6 +64,7 @@ const funnelEventDisplayNames: Record<string, string> = {
   "jk_ad_eligibility_check · eligible=1": "jk_ad_eligibility_check · eligible=1（符合广告资格）",
   jk_ad_opportunity: "jk_ad_opportunity（广告机会事件）",
   jk_ad_request: "jk_ad_request（广告请求事件）",
+  request_accepted_derived: "客户端派生（SDK 调用成功且无同步异常）",
   jk_ad_load_success: "jk_ad_load_success（广告加载成功事件）",
   jk_ad_ready: "jk_ad_ready（广告就绪事件）",
   jk_ad_show_attempt: "jk_ad_show_attempt（广告展示尝试事件）",
@@ -165,6 +175,7 @@ const monetizationEventStages: FunnelStage[] = [
   { label: "Eligible", event: "jk_ad_eligibility_check · eligible=1", value: "283,006", rate: "79.4%", delta: "-1.1%" },
   { label: "Opportunity", event: "jk_ad_opportunity", value: "214,306", rate: "75.7%", delta: "-6.4%" },
   { label: "Ad Request", event: "jk_ad_request", value: "201,944", rate: "94.2%", delta: "+0.8%" },
+  { label: "Request Accepted", event: "request_accepted_derived", value: "198,511", rate: "98.3%", delta: "-0.3%", note: "客户端派生检查点，不等于 AdMob Match" },
   { label: "Load Success", event: "jk_ad_load_success", value: "191,842", rate: "95.0%", delta: "-0.5%" },
   { label: "Ad Ready", event: "jk_ad_ready", value: "187,604", rate: "97.8%", delta: "-0.2%" },
   { label: "Show Attempt", event: "jk_ad_show_attempt", value: "144,871", rate: "77.2%", delta: "-2.6%" },
@@ -200,18 +211,31 @@ const preloadInventory = {
   unusedReady: 30184,
 };
 
-const projectFunnelProfiles: Record<string, { userStages: FunnelStage[]; viewerTrend: number[]; opportunityTrend: number[]; fulfillmentRate: string; preloadSuccess: string; cacheHitRate: string; impressionsPerViewer: string }> = {
+const projectFunnelProfiles: Record<string, {
+  userStages: FunnelStage[];
+  viewerTrend: number[];
+  opportunityTrend: number[];
+  fulfillmentRate: string;
+  preloadSuccess: string;
+  cacheHitRate: string;
+  impressionsPerViewer: string;
+  requestCount: string;
+  realtimeRequestUv: string;
+  preloadRequestUv: string;
+  requestsPerUser: string;
+}> = {
   "IRAN-VPN-01": {
     userStages: [
       { label: "DAU", event: "app_active", value: "128,430", rate: "100%", delta: "+2.8%" },
       { label: "Eligibility Check", event: "jk_ad_eligibility_check", value: "101,284", rate: "78.9%", delta: "-0.8%" },
       { label: "Eligible", event: "eligible=1", value: "83,106", rate: "82.1%", delta: "-1.3%" },
       { label: "Opportunity", event: "jk_ad_opportunity", value: "36,474", rate: "43.9%", delta: "-12.8%" },
-      { label: "Request", event: "jk_ad_request", value: "34,921", rate: "95.7%", delta: "-1.8%" },
-      { label: "AV", event: "jk_ad_impression", value: "29,671", rate: "85.0%", delta: "-0.7%" },
+      { label: "Request", event: "jk_ad_request", value: "34,921", rate: "95.7%", delta: "-1.8%", note: "全量 Request UV，含预加载与实时请求；缓存命中可跳过", nonLinear: true },
+      { label: "Show Attempt", event: "jk_ad_show_attempt", value: "31,682", rate: "86.9%", delta: "-0.7%", note: "相对 Opportunity UV；缓存与实时请求两路合并", nonLinear: true },
+      { label: "AV", event: "jk_ad_impression", value: "29,671", rate: "93.7%", delta: "-0.7%" },
       { label: "Paid", event: "jk_ad_paid_event", value: "29,404", rate: "99.1%", delta: "+0.1%" },
     ],
-    viewerTrend: [34.9, 35.4, 34.6, 35.1, 31.8, 26.7, 23.1], opportunityTrend: [41.2, 41.6, 40.8, 40.9, 37.6, 32.9, 28.4], fulfillmentRate: "86.9%", preloadSuccess: "93.0%", cacheHitRate: "68.5%", impressionsPerViewer: "3.42",
+    viewerTrend: [34.9, 35.4, 34.6, 35.1, 31.8, 26.7, 23.1], opportunityTrend: [41.2, 41.6, 40.8, 40.9, 37.6, 32.9, 28.4], fulfillmentRate: "86.9%", preloadSuccess: "93.0%", cacheHitRate: "68.5%", impressionsPerViewer: "3.42", requestCount: "201,944", realtimeRequestUv: "10,755", preloadRequestUv: "27,840", requestsPerUser: "5.78",
   },
   "FAST-VPN-02": {
     userStages: [
@@ -219,11 +243,12 @@ const projectFunnelProfiles: Record<string, { userStages: FunnelStage[]; viewerT
       { label: "Eligibility Check", event: "jk_ad_eligibility_check", value: "79,426", rate: "82.3%", delta: "+0.4%" },
       { label: "Eligible", event: "eligible=1", value: "69,153", rate: "87.1%", delta: "+0.2%" },
       { label: "Opportunity", event: "jk_ad_opportunity", value: "40,631", rate: "58.8%", delta: "+0.8%" },
-      { label: "Request", event: "jk_ad_request", value: "38,447", rate: "94.6%", delta: "+0.3%" },
-      { label: "AV", event: "jk_ad_impression", value: "34,551", rate: "89.9%", delta: "+0.5%" },
+      { label: "Request", event: "jk_ad_request", value: "38,447", rate: "94.6%", delta: "+0.3%", note: "全量 Request UV，含预加载与实时请求；缓存命中可跳过", nonLinear: true },
+      { label: "Show Attempt", event: "jk_ad_show_attempt", value: "36,973", rate: "91.0%", delta: "+0.4%", note: "相对 Opportunity UV；缓存与实时请求两路合并", nonLinear: true },
+      { label: "AV", event: "jk_ad_impression", value: "34,551", rate: "93.5%", delta: "+0.5%" },
       { label: "Paid", event: "jk_ad_paid_event", value: "34,274", rate: "99.2%", delta: "+0.1%" },
     ],
-    viewerTrend: [34.8, 35.1, 35.3, 35.0, 35.5, 35.6, 35.8], opportunityTrend: [41.4, 41.7, 41.8, 41.6, 41.9, 42.0, 42.1], fulfillmentRate: "91.0%", preloadSuccess: "94.6%", cacheHitRate: "72.4%", impressionsPerViewer: "3.18",
+    viewerTrend: [34.8, 35.1, 35.3, 35.0, 35.5, 35.6, 35.8], opportunityTrend: [41.4, 41.7, 41.8, 41.6, 41.9, 42.0, 42.1], fulfillmentRate: "91.0%", preloadSuccess: "94.6%", cacheHitRate: "72.4%", impressionsPerViewer: "3.18", requestCount: "218,402", realtimeRequestUv: "10,472", preloadRequestUv: "30,194", requestsPerUser: "5.68",
   },
   "CLEAN-MAX-03": {
     userStages: [
@@ -231,11 +256,12 @@ const projectFunnelProfiles: Record<string, { userStages: FunnelStage[]; viewerT
       { label: "Eligibility Check", event: "jk_ad_eligibility_check", value: "63,402", rate: "83.2%", delta: "+0.1%" },
       { label: "Eligible", event: "eligible=1", value: "55,924", rate: "88.2%", delta: "-0.3%" },
       { label: "Opportunity", event: "jk_ad_opportunity", value: "34,371", rate: "61.5%", delta: "-0.7%" },
-      { label: "Request", event: "jk_ad_request", value: "32,810", rate: "95.5%", delta: "-5.1%" },
-      { label: "AV", event: "jk_ad_impression", value: "29,493", rate: "89.9%", delta: "-0.8%" },
+      { label: "Request", event: "jk_ad_request", value: "32,810", rate: "95.5%", delta: "-5.1%", note: "全量 Request UV，含预加载与实时请求；缓存命中可跳过", nonLinear: true },
+      { label: "Show Attempt", event: "jk_ad_show_attempt", value: "31,107", rate: "90.5%", delta: "-1.1%", note: "相对 Opportunity UV；缓存与实时请求两路合并", nonLinear: true },
+      { label: "AV", event: "jk_ad_impression", value: "29,493", rate: "94.8%", delta: "-0.8%" },
       { label: "Paid", event: "jk_ad_paid_event", value: "29,198", rate: "99.0%", delta: "0.0%" },
     ],
-    viewerTrend: [39.4, 39.0, 39.2, 38.9, 38.6, 38.9, 38.7], opportunityTrend: [46.2, 46.0, 45.8, 45.5, 45.2, 45.3, 45.1], fulfillmentRate: "90.5%", preloadSuccess: "88.2%", cacheHitRate: "61.6%", impressionsPerViewer: "4.06",
+    viewerTrend: [39.4, 39.0, 39.2, 38.9, 38.6, 38.9, 38.7], opportunityTrend: [46.2, 46.0, 45.8, 45.5, 45.2, 45.3, 45.1], fulfillmentRate: "90.5%", preloadSuccess: "88.2%", cacheHitRate: "61.6%", impressionsPerViewer: "4.06", requestCount: "164,050", realtimeRequestUv: "12,349", preloadRequestUv: "25,844", requestsPerUser: "5.00",
   },
   "AIVORA-LAUNCHER": {
     userStages: [
@@ -243,11 +269,12 @@ const projectFunnelProfiles: Record<string, { userStages: FunnelStage[]; viewerT
       { label: "Eligibility Check", event: "jk_ad_eligibility_check", value: "43,106", rate: "78.6%", delta: "+0.6%" },
       { label: "Eligible", event: "eligible=1", value: "38,950", rate: "90.4%", delta: "+0.2%" },
       { label: "Opportunity", event: "jk_ad_opportunity", value: "20,632", rate: "53.0%", delta: "-0.5%" },
-      { label: "Request", event: "jk_ad_request", value: "19,601", rate: "95.0%", delta: "-0.4%" },
-      { label: "AV", event: "jk_ad_impression", value: "17,229", rate: "87.9%", delta: "+0.3%" },
+      { label: "Request", event: "jk_ad_request", value: "19,601", rate: "95.0%", delta: "-0.4%", note: "全量 Request UV，含预加载与实时请求；缓存命中可跳过", nonLinear: true },
+      { label: "Show Attempt", event: "jk_ad_show_attempt", value: "18,610", rate: "90.2%", delta: "+0.2%", note: "相对 Opportunity UV；缓存与实时请求两路合并", nonLinear: true },
+      { label: "AV", event: "jk_ad_impression", value: "17,229", rate: "92.6%", delta: "+0.3%" },
       { label: "Paid", event: "jk_ad_paid_event", value: "17,108", rate: "99.3%", delta: "+0.1%" },
     ],
-    viewerTrend: [30.5, 30.8, 31.0, 30.9, 31.2, 31.1, 31.4], opportunityTrend: [36.9, 37.1, 37.0, 37.4, 37.2, 37.5, 37.6], fulfillmentRate: "90.2%", preloadSuccess: "92.1%", cacheHitRate: "70.8%", impressionsPerViewer: "2.87",
+    viewerTrend: [30.5, 30.8, 31.0, 30.9, 31.2, 31.1, 31.4], opportunityTrend: [36.9, 37.1, 37.0, 37.4, 37.2, 37.5, 37.6], fulfillmentRate: "90.2%", preloadSuccess: "92.1%", cacheHitRate: "70.8%", impressionsPerViewer: "2.87", requestCount: "91,355", realtimeRequestUv: "5,642", preloadRequestUv: "15,826", requestsPerUser: "4.66",
   },
   "TURBO-CLEAN-05": {
     userStages: [
@@ -255,11 +282,12 @@ const projectFunnelProfiles: Record<string, { userStages: FunnelStage[]; viewerT
       { label: "Eligibility Check", event: "jk_ad_eligibility_check", value: "32,111", rate: "77.6%", delta: "-1.2%" },
       { label: "Eligible", event: "eligible=1", value: "27,840", rate: "86.7%", delta: "-0.9%" },
       { label: "Opportunity", event: "jk_ad_opportunity", value: "10,133", rate: "36.4%", delta: "-8.1%" },
-      { label: "Request", event: "jk_ad_request", value: "9,446", rate: "93.2%", delta: "-3.4%" },
-      { label: "AV", event: "jk_ad_impression", value: "8,189", rate: "86.7%", delta: "-1.0%" },
+      { label: "Request", event: "jk_ad_request", value: "9,446", rate: "93.2%", delta: "-3.4%", note: "全量 Request UV，含预加载与实时请求；缓存命中可跳过", nonLinear: true },
+      { label: "Show Attempt", event: "jk_ad_show_attempt", value: "8,856", rate: "87.4%", delta: "-2.3%", note: "相对 Opportunity UV；缓存与实时请求两路合并", nonLinear: true },
+      { label: "AV", event: "jk_ad_impression", value: "8,189", rate: "92.5%", delta: "-1.0%" },
       { label: "Paid", event: "jk_ad_paid_event", value: "8,098", rate: "98.9%", delta: "-0.2%" },
     ],
-    viewerTrend: [28.1, 27.4, 25.8, 24.0, 22.7, 20.9, 19.8], opportunityTrend: [33.9, 32.8, 30.6, 29.3, 27.6, 25.6, 24.5], fulfillmentRate: "87.4%", preloadSuccess: "84.8%", cacheHitRate: "49.7%", impressionsPerViewer: "3.76",
+    viewerTrend: [28.1, 27.4, 25.8, 24.0, 22.7, 20.9, 19.8], opportunityTrend: [33.9, 32.8, 30.6, 29.3, 27.6, 25.6, 24.5], fulfillmentRate: "87.4%", preloadSuccess: "84.8%", cacheHitRate: "49.7%", impressionsPerViewer: "3.76", requestCount: "48,990", realtimeRequestUv: "4,726", preloadRequestUv: "7,301", requestsPerUser: "5.19",
   },
 };
 
@@ -682,6 +710,8 @@ export default function Home() {
   }, [embedded, module, page]);
 
   const activeProfile = projectFunnelProfiles[project] ?? projectFunnelProfiles["IRAN-VPN-01"];
+  const profileStageCount = (label: string) => Number(activeProfile.userStages.find((stage) => stage.label === label)?.value.replaceAll(",", "") ?? 0);
+  const requestUvCoverage = profileStageCount("DAU") > 0 ? `${(profileStageCount("Request") / profileStageCount("DAU") * 100).toFixed(1)}%` : "—";
   const stages = useMemo(() => {
     if (funnelMode === "product") return productStages;
     return unitMode === "users" ? activeProfile.userStages : monetizationEventStages;
@@ -887,7 +917,7 @@ export default function Home() {
               <section className="surface">
                 <div className="surface-title"><div><h2>全项目变现链路</h2><p>用户覆盖漏斗与事件效率必须分开判断</p></div><Badge tone="blue">Firebase T+0</Badge></div>
                 <div className="dual-funnel">
-                  <div><h3>用户覆盖主漏斗</h3><div className="mini-funnel">{["日活跃用户（DAU）397,380", "广告资格检查（Eligibility Check）319,220", "符合广告资格（Eligible）263,941", "广告机会（Opportunity）138,283", "广告请求用户（Request UV）129,740", "广告展示独立用户（AV）116,842"].map((item, index) => <div key={item} style={{ width: `${100 - index * 8}%` }}>{item}<small>{index === 0 ? "100%" : ["80.3%", "82.7%", "52.4%", "93.8%", "90.1%"][index - 1]}</small></div>)}</div><p className="mini-funnel-note">AV 按 impression 用户去重 · 人均展示次数 3.42</p></div>
+                  <div><h3>用户覆盖主漏斗</h3><div className="mini-funnel">{["日活跃用户（DAU）397,380", "广告资格检查（Eligibility Check）319,220", "符合广告资格（Eligible）263,941", "广告机会（Opportunity）138,283", "广告请求用户（Request UV）129,740", "展示尝试用户（Show Attempt UV）124,900", "广告展示独立用户（AV）116,842"].map((item, index) => <div key={item} style={{ width: `${100 - index * 7}%` }}>{item}<small>{["100%", "80.3%", "82.7%", "52.4%", "32.6% DAU", "90.3% Opp", "93.5%"][index]}</small></div>)}</div><p className="mini-funnel-note">Request UV 含预加载与实时请求，仅作覆盖观察 · AV 按 Impression 用户去重 · 人均展示次数 3.42</p></div>
                   <div><h3>机会履约事件漏斗</h3><div className="mini-funnel blue">{["Opportunity 828,492", "履约入口 801,904", "Show Attempt 566,201", "Impression 537,891", "Paid Event 532,512"].map((item, index) => <div key={item} style={{ width: `${100 - index * 8}%` }}>{item}<small>{index === 0 ? "100%" : ["96.8%", "70.6%", "95.0%", "99.0%"][index - 1]}</small></div>)}</div></div>
                 </div>
               </section>
@@ -909,18 +939,57 @@ export default function Home() {
               </section>
 
               <section className="surface funnel-surface">
-                <div className="surface-title"><div><h2>{funnelMode === "product" ? "产品用户到达漏斗" : unitMode === "users" ? "用户覆盖主漏斗" : "事件覆盖与展示漏斗"}</h2><p>{funnelMode === "monetization" ? unitMode === "users" ? "请求节点按广告请求去重用户（Request UV）统计；展示尝试（Show Attempt）在下方履约分支分析" : "事件漏斗保留展示尝试（Show Attempt）；点击箭头诊断当前步骤" : "点击转化箭头进入步骤诊断"}</p></div><div className="legend"><span className="dot blue" />当前 <span className="dot neutral" />昨日同期</div></div>
+                <div className="surface-title"><div><h2>{funnelMode === "product" ? "产品用户到达漏斗" : unitMode === "users" ? "用户覆盖主漏斗" : "事件覆盖与展示漏斗"}</h2><p>{funnelMode === "monetization" ? unitMode === "users" ? "全部节点按用户去重；Request UV 含预加载与实时请求，仅作覆盖观察，缓存命中用户可跳过 Request / Load，不能把 Opportunity → Request 当成严格流失率" : "事件漏斗展示请求、加载、Ready、Show、Impression 与 Paid 回调；点击箭头诊断当前步骤" : "点击转化箭头进入步骤诊断"}</p></div><div className="legend"><span className="dot blue" />当前 <span className="dot neutral" />昨日同期</div></div>
                 <div className={`funnel-stages ${stages.length > 6 ? "dense" : ""}`}>
-                  {stages.map((stage, index) => <div className="stage-group" key={stage.label}><button className={`funnel-stage ${stage.delta.startsWith("-") && Math.abs(parseFloat(stage.delta)) > 5 ? "stage-alert" : ""}`} onClick={() => index > 0 && openTransition(stages[index - 1], stage)}><span>{displayFunnelStage(stage.label)}</span><strong>{stage.value}</strong><small>{displayFunnelEvent(stage.event)}</small>{stage.label === "AV" && <em className="stage-derived">人均展示次数 {activeProfile.impressionsPerViewer} 次</em>}</button>{index < stages.length - 1 && <button className={`conversion-arrow ${stages[index + 1].delta.startsWith("-") ? "down" : ""}`} onClick={() => openTransition(stage, stages[index + 1])}><strong>{stages[index + 1].rate}</strong><span>→</span><small>{stages[index + 1].delta}</small></button>}</div>)}
+                  {stages.map((stage, index) => <div className="stage-group" key={stage.label}>
+                    <button className={`funnel-stage ${stage.nonLinear ? "stage-context" : ""} ${stage.delta.startsWith("-") && Math.abs(parseFloat(stage.delta)) > 5 ? "stage-alert" : ""}`} onClick={() => index > 0 && openTransition(stages[index - 1], stage)}>
+                      <span>{displayFunnelStage(stage.label)}</span><strong>{stage.value}</strong><small>{displayFunnelEvent(stage.event)}</small>
+                      {stage.note && <small className="stage-note">{stage.note}</small>}
+                      {stage.label === "Request" && <em className="stage-derived">全量请求去重用户</em>}
+                      {stage.label === "AV" && <em className="stage-derived">人均展示次数 {activeProfile.impressionsPerViewer} 次</em>}
+                    </button>
+                    {index < stages.length - 1 && <button className={`conversion-arrow ${stages[index + 1].delta.startsWith("-") ? "down" : ""} ${stages[index + 1].nonLinear ? "non-linear" : ""}`} onClick={() => openTransition(stage, stages[index + 1])}><strong>{stages[index + 1].rate}</strong><span>→</span><small>{stages[index + 1].nonLinear ? `覆盖比 · ${stages[index + 1].delta}` : stages[index + 1].delta}</small>{stages[index + 1].nonLinear && <em>非严格漏斗</em>}</button>}
+                  </div>)}
                 </div>
+                {funnelMode === "monetization" && unitMode === "users" && <div className="request-scope-strip">
+                  <div><span>全量请求用户（Request UV）</span><strong>{activeProfile.userStages[4].value}</strong><small>预加载与实时请求用户并集去重</small></div>
+                  <div><span>业务机会实时请求用户</span><strong>{activeProfile.realtimeRequestUv}</strong><small>仅 Cache Miss 后携带 opportunity_id</small></div>
+                  <div><span>预加载请求用户</span><strong>{activeProfile.preloadRequestUv}</strong><small>业务场景前生产库存；与实时请求 UV 可重叠</small></div>
+                  <div><span>广告请求总次数</span><strong>{activeProfile.requestCount}</strong><small>事件次数，不能替代 Request UV</small></div>
+                  <div><span>人均请求次数</span><strong>{activeProfile.requestsPerUser} 次</strong><small>Request Count / Request UV</small></div>
+                </div>}
                 <div className="funnel-summary"><div><span>首尾转化率</span><strong>{firstToLastRate}</strong></div><div><span>最大流失步骤</span><strong>{funnelMode === "product" ? "首页 → 点击连接" : unitMode === "users" ? "符合广告资格 → 广告机会（Eligible → Opportunity）" : "广告机会 → 广告展示尝试（Opportunity → Show Attempt）"}</strong></div><div><span>{unitMode === "events" ? "流失事件" : "流失用户"}</span><strong>{funnelMode === "product" ? "35,443" : unitMode === "users" ? "46,632" : "69,435"}</strong></div><div><span>预计收入影响</span><strong className="negative">$2,807 / 日</strong></div></div>
-                {funnelMode === "monetization" && unitMode === "users" && <div className="denominator-audit"><div><span>广告展示独立用户比例</span><strong>广告展示独立用户（AV）/ 日活跃用户（DAU）= {activeProfile.viewerTrend.at(-1)}%</strong><small>AV 按 impression 用户去重</small></div><div><span>机会覆盖率</span><strong>广告机会用户（Opportunity UV）/ 日活跃用户（DAU）= {activeProfile.opportunityTrend.at(-1)}%</strong><small>定位请求前问题</small></div><div><span>请求用户覆盖率</span><strong>广告请求用户（Request UV）/ 广告机会用户（Opportunity UV）= {activeProfile.userStages[4].rate}</strong><small>含预加载与实时请求用户</small></div><div><span>人均展示次数</span><strong>广告展示总次数（Impression Count）/ 广告展示独立用户（AV）= {activeProfile.impressionsPerViewer} 次</strong><small>衡量展示是否集中在少数用户</small></div></div>}
+                {funnelMode === "monetization" && unitMode === "users" && <div className="denominator-audit five"><div><span>广告展示独立用户比例</span><strong>广告展示独立用户（AV）/ 日活跃用户（DAU）= {activeProfile.viewerTrend.at(-1)}%</strong><small>AV 按 impression 用户去重</small></div><div><span>机会覆盖率</span><strong>广告机会用户（Opportunity UV）/ 日活跃用户（DAU）= {activeProfile.opportunityTrend.at(-1)}%</strong><small>定位请求前问题</small></div><div><span>请求用户覆盖率</span><strong>全量 Request UV / DAU = {requestUvCoverage}</strong><small>仅衡量请求触达；不与 Opportunity 做严格转化</small></div><div><span>机会履约率</span><strong>Show Attempt UV / Opportunity UV = {activeProfile.fulfillmentRate}</strong><small>缓存与实时请求分支汇合后的结果</small></div><div><span>人均展示次数</span><strong>Impression Count / AV = {activeProfile.impressionsPerViewer} 次</strong><small>衡量展示是否集中在少数用户</small></div></div>}
                 {funnelMode === "monetization" && unitMode === "events" && <div className="denominator-audit"><div><span>资格通过率</span><strong>符合资格（Eligible）/ 资格检查（Check）= 79.4%</strong><small>按检查事件</small></div><div><span>机会生成率</span><strong>广告机会（Opportunity）/ 符合资格（Eligible）= 75.7%</strong><small>按事件次数</small></div><div><span>机会履约率</span><strong>展示尝试（Show Attempt）/ 广告机会（Opportunity）= 67.6%</strong><small>不以广告请求（Request）为分母</small></div><div><span>展示成功率</span><strong>广告展示（Impression）/ 展示尝试（Show Attempt）= 95.0%</strong><small>衡量广告 SDK 展示效率</small></div></div>}
               </section>
 
               {funnelMode === "monetization" && <section className="fulfillment-layout">
-                <div className="surface"><div className="surface-title"><div><h2>机会履约与请求加载明细</h2><p>缓存命中直接去展示；只有缓存未命中才进入实时请求链路</p></div><Badge tone="blue">按 opportunity_id / request_id 关联</Badge></div><div className="fulfillment-flow detailed"><div className="flow-origin"><span>广告机会（Opportunity）</span><strong>{opportunityFulfillment.opportunity.toLocaleString()}</strong><small>真实业务机会 · 100%</small></div><div className="flow-split"><span>查缓存</span></div><div className="flow-branch good"><span>缓存命中（Cache Hit）</span><strong>{opportunityFulfillment.cacheHit.toLocaleString()}</strong><small>68.5% · 不产生新 request_id</small></div><div className="flow-branch warn"><span>缓存未命中（Cache Miss）</span><strong>{opportunityFulfillment.cacheMiss.toLocaleString()}</strong><small>31.5% · 进入实时请求</small></div><div className="flow-request"><span>广告请求（Ad Request）</span><strong>{opportunityFulfillment.realtimeRequest.toLocaleString()}</strong><small>93.6% · jk_ad_request</small></div><div className="flow-request"><span>请求已接受（Request Accepted）</span><strong>{opportunityFulfillment.requestAccepted.toLocaleString()}</strong><small>98.3% · SDK 已接受请求</small></div><div className="flow-request"><span>加载成功（Load Success）</span><strong>{opportunityFulfillment.realtimeLoad.toLocaleString()}</strong><small>99.7% · jk_ad_load_success</small></div><div className="flow-request"><span>广告就绪（Ad Ready）</span><strong>{opportunityFulfillment.adReady.toLocaleString()}</strong><small>98.0% · 可展示实例已绑定 Context</small></div><div className="flow-merge"><span>展示尝试（Show Attempt）</span><strong>{opportunityFulfillment.showAttempt.toLocaleString()}</strong><small>缓存与实时分支汇合 · {activeProfile.fulfillmentRate}</small></div></div><div className="request-loss-strip"><div><span>Miss 后未请求</span><strong>{(opportunityFulfillment.cacheMiss-opportunityFulfillment.realtimeRequest).toLocaleString()}</strong><small>网络/页面/配置阻止</small></div><div><span>请求未接受</span><strong>{opportunityFulfillment.requestFailed.toLocaleString()}</strong><small>SDK 未初始化/参数非法</small></div><div><span>加载失败</span><strong>{opportunityFulfillment.loadFailed.toLocaleString()}</strong><small>no_fill/timeout/adapter</small></div><div><span>成功但未 Ready</span><strong>{opportunityFulfillment.readyLost.toLocaleString()}</strong><small>Context 丢失/对象失效</small></div></div><div className="fulfillment-metrics"><div><span>缓存命中率</span><strong>{activeProfile.cacheHitRate}</strong></div><div><span>Miss 后请求率</span><strong>93.6%</strong></div><div><span>请求接受率</span><strong>98.3%</strong></div><div><span>加载成功率</span><strong>99.7%</strong></div><div><span>Ready 转化率</span><strong>98.0%</strong></div><div><span>机会未履约</span><strong className="negative">{opportunityFulfillment.unfulfilled.toLocaleString()}</strong></div></div><div className="funnel-rule-note"><strong>口径提醒</strong><span>用户主漏斗展示去重请求用户（Request UV），不能使用总 Request 次数。此处只展示 Cache Miss 后、携带当前 opportunity_id 的实时请求链；预加载请求继续在右侧库存链独立统计。</span></div></div>
-                <aside className="surface"><div className="surface-title"><div><h2>预加载与缓存库存</h2><p>发生在真实业务场景之前，不进入主漏斗</p></div><Badge tone="warn">独立口径</Badge></div><div className="preload-chain">{[["Preload Trigger",preloadInventory.trigger,"100%"],["Preload Request",preloadInventory.request,"94.1%"],["Load Success",preloadInventory.loadSuccess,activeProfile.preloadSuccess],["Cache Store",preloadInventory.cacheStore,"98.0%"]].map(([label,value,rate],index)=><div key={String(label)}><span>{index+1}</span><p><strong>{label}</strong><small>{Number(value).toLocaleString()} · {rate}</small></p></div>)}</div><div className="inventory-outcomes"><div><span>Cache Hit</span><strong>{preloadInventory.cacheHit.toLocaleString()}</strong></div><div><span>Expired</span><strong>{preloadInventory.expired.toLocaleString()}</strong></div><div><span>Evicted</span><strong>{preloadInventory.evicted.toLocaleString()}</strong></div><div><span>未消费库存</span><strong>{preloadInventory.unusedReady.toLocaleString()}</strong></div></div><div className="conclusion-block warn"><strong>缓存浪费率 20.1%</strong><p>(Expired + Evicted) / Cache Store。建议按广告位、TTL和网络类型继续拆解。</p></div></aside>
+                <div className="surface">
+                  <div className="surface-title"><div><h2>机会履约与请求加载明细</h2><p>缓存命中直接进入 Ready / Show；只有缓存未命中才进入实时请求链路</p></div><Badge tone="blue">按 opportunity_id / request_id / ad_instance_id 关联</Badge></div>
+                  <div className="request-prechecks">
+                    {[['SDK 初始化','99.8%','sdk_ready'],['隐私同意可投放','96.8%','consent_status'],['非订阅用户','88.4%','subscription_status'],['频控通过','82.1%','blocked_reason'],['网络可用','98.9%','network_type'],['广告位配置有效','100%','ad_unit_id']].map(([label,value,field]) => <div key={label}><span>{label}</span><strong>{value}</strong><small>{field}</small></div>)}
+                  </div>
+                  <div className="fulfillment-flow detailed">
+                    <div className="flow-origin"><span>广告机会（Opportunity）</span><strong>{opportunityFulfillment.opportunity.toLocaleString()}</strong><small>真实业务机会 · 100%</small></div>
+                    <div className="flow-split"><span>查缓存</span></div>
+                    <div className="flow-branch good"><span>缓存命中（Cache Hit）</span><strong>{opportunityFulfillment.cacheHit.toLocaleString()}</strong><small>68.5% · 沿用已有 ad_instance_id，不新建 request_id</small></div>
+                    <div className="flow-branch warn"><span>缓存未命中（Cache Miss）</span><strong>{opportunityFulfillment.cacheMiss.toLocaleString()}</strong><small>31.5% · 当前 opportunity 进入实时请求</small></div>
+                    <div className="flow-request"><span>广告请求（Ad Request）</span><strong>{opportunityFulfillment.realtimeRequest.toLocaleString()}</strong><small>93.6% · jk_ad_request · 创建 request_id</small></div>
+                    <div className="flow-request"><span>SDK 请求受理（Request Accepted）</span><strong>{opportunityFulfillment.requestAccepted.toLocaleString()}</strong><small>98.3% · 客户端派生；无同步异常，不代表 AdMob 已匹配</small></div>
+                    <div className="flow-request"><span>加载成功（Load Success）</span><strong>{opportunityFulfillment.realtimeLoad.toLocaleString()}</strong><small>99.7% · 保存 response_id / ad_source / adapter</small></div>
+                    <div className="flow-request"><span>广告就绪（Ad Ready）</span><strong>{opportunityFulfillment.adReady.toLocaleString()}</strong><small>98.0% · ad_instance_id 与 instanceContext 已绑定且 TTL 有效</small></div>
+                    <div className="flow-merge"><span>展示尝试（Show Attempt）</span><strong>{opportunityFulfillment.showAttempt.toLocaleString()}</strong><small>缓存与实时分支汇合 · {activeProfile.fulfillmentRate}</small></div>
+                  </div>
+                  <div className="request-loss-strip"><div><span>Miss 后未请求</span><strong>{(opportunityFulfillment.cacheMiss-opportunityFulfillment.realtimeRequest).toLocaleString()}</strong><small>网络不可用/页面离开/配置阻止/进入后台</small></div><div><span>请求未受理</span><strong>{opportunityFulfillment.requestFailed.toLocaleString()}</strong><small>SDK 未初始化/广告位非法/同步异常</small></div><div><span>加载失败</span><strong>{opportunityFulfillment.loadFailed.toLocaleString()}</strong><small>no_fill/timeout/network/adapter/internal</small></div><div><span>成功但未 Ready</span><strong>{opportunityFulfillment.readyLost.toLocaleString()}</strong><small>Context 丢失/对象失效/TTL 过期/被驱逐</small></div></div>
+                  <div className="post-show-panel">
+                    <div className="post-show-head"><div><strong>展示与收益回调链</strong><span>请求成功不等于展示成功，Impression 才计展示；AV 对 Impression 用户去重</span></div><Badge tone="good">主链回调完整</Badge></div>
+                    <div className="post-show-main"><div><span>Show Attempt</span><strong>144,871</strong><small>jk_ad_show_attempt</small></div><i><b>95.0%</b>→</i><div><span>Impression</span><strong>137,628</strong><small>展示总次数；AV 另做用户去重</small></div><i><b>99.1%</b>→</i><div><span>Paid Event</span><strong>136,392</strong><small>value_micros / currency_code</small></div></div>
+                    <div className="post-show-outcomes"><div><span>Show Failed</span><strong>2,611</strong><small>show_error_code / show_error_domain</small></div><div><span>已尝试但无 Impression</span><strong>4,632</strong><small>回调超时/页面切换/对象失效</small></div><div><span>Impression 无 Paid</span><strong>1,236</strong><small>Paid 回调延迟或丢失</small></div><div><span>广告点击（可选）</span><strong>6,224</strong><small>自定义事件不得使用保留名 ad_click</small></div><div><span>关闭/返回（按格式适用）</span><strong>131,203</strong><small>插屏/激励广告终态</small></div><div><span>重复 Paid 回调</span><strong>84</strong><small>按 event_id / ad_instance_id 去重</small></div></div>
+                  </div>
+                  <div className="fulfillment-metrics"><div><span>缓存命中率</span><strong>{activeProfile.cacheHitRate}</strong></div><div><span>Miss 后请求率</span><strong>93.6%</strong></div><div><span>请求受理率</span><strong>98.3%</strong></div><div><span>加载成功率</span><strong>99.7%</strong></div><div><span>Ready 转化率</span><strong>98.0%</strong></div><div><span>机会未履约</span><strong className="negative">{opportunityFulfillment.unfulfilled.toLocaleString()}</strong></div></div>
+                  <div className="funnel-rule-note"><strong>口径提醒</strong><span>Request Accepted 只是客户端确认 SDK 调用已发出，不等于 AdMob Match；AdMob 匹配率、展示率和收入使用 T+3 结算数据对照。用户主漏斗使用 UV，事件效率链使用 Count，预加载与当前机会实时请求必须分开统计。</span></div>
+                </div>
+                <aside className="surface"><div className="surface-title"><div><h2>预加载与缓存库存</h2><p>发生在真实业务场景之前，按事件次数独立统计，不绑定 opportunity_id</p></div><Badge tone="warn">独立口径</Badge></div><div className="preload-chain">{[["Preload Trigger",preloadInventory.trigger,"100%"],["Preload Request",preloadInventory.request,"94.1%"],["Request Accepted",238984,"98.3%"],["Load Success",preloadInventory.loadSuccess,activeProfile.preloadSuccess],["Cache Store",preloadInventory.cacheStore,"98.0%"],["Cache Ready",216630,"97.8%"]].map(([label,value,rate],index)=><div key={String(label)}><span>{index+1}</span><p><strong>{label}</strong><small>{Number(value).toLocaleString()} · {rate}</small></p></div>)}</div><div className="inventory-outcomes"><div><span>Cache Hit / 被业务消费</span><strong>{preloadInventory.cacheHit.toLocaleString()}</strong></div><div><span>Expired / TTL过期</span><strong>{preloadInventory.expired.toLocaleString()}</strong></div><div><span>Evicted / 被驱逐</span><strong>{preloadInventory.evicted.toLocaleString()}</strong></div><div><span>未消费库存</span><strong>{preloadInventory.unusedReady.toLocaleString()}</strong></div></div><div className="conclusion-block warn"><strong>缓存浪费率 20.1%</strong><p>(Expired + Evicted) / Cache Store。建议继续按广告位、格式、TTL、网络类型和 App 前后台状态拆解。</p></div><div className="funnel-rule-note compact"><strong>Context</strong><span>广告对象入缓存时必须连同 requestContext / instanceContext 保存；取出时再绑定当前 opportunity_id，直到 paid / dismiss / failed 终态。</span></div></aside>
               </section>}
 
               <section className="two-column">
@@ -1072,7 +1141,7 @@ export default function Home() {
           {module === "funnel" && page === "snapshot" && (
             <div className="page-stack">
               <section className="snapshot-head surface"><div><div className="eyebrow">只读执行快照</div><h2>IRAN-VPN-01 · 漏斗口径 V1.7</h2><p>生效于 2026-08-01 · 套利 VPN v1.7 ＋ 广告 v1.7 ＋ VPN v1.7</p></div><div><Badge tone="good">已发布</Badge> <button className="secondary-button" onClick={() => notify("已定位到项目类型设置中的 V1.7 配置")}>前往项目类型设置</button></div></section>
-              <section className="metric-grid five"><Metric label="产品漏斗" value="6 步" note="严格顺序" /><Metric label="变现用户主漏斗" value="7 步" note="含 Request UV" /><Metric label="变现事件主漏斗" value="6 步" note="event_id 去重" /><Metric label="履约与库存" value="2 条分支" note="Show Attempt 在分支" /><Metric label="规范版本" value="V1.7" note="schema_version 1.7" /></section>
+              <section className="metric-grid five"><Metric label="产品漏斗" value="6 步" note="严格顺序" /><Metric label="变现用户观察链" value="8 节点" note="Request UV 为非严格观察节点" /><Metric label="变现事件效率链" value="10 步" note="含 Request Accepted 派生检查点" /><Metric label="履约与库存" value="3 条路径" note="缓存/实时请求/预加载" /><Metric label="规范版本" value="V1.7" note="schema_version 1.7" /></section>
               <section className="surface">
                 <div className="surface-title"><div><h2>变现用户漏斗定义</h2><p>Firebase 实时口径；AdMob 数据仅用于结算对账</p></div><Badge tone="blue">User Funnel</Badge></div>
                 <div className="table-wrap"><table><thead><tr><th>步骤</th><th>事件</th><th>用户判定</th><th>条件/窗口</th><th>关键关联字段</th><th>优先级</th><th>数据源</th></tr></thead><tbody>{[
@@ -1080,21 +1149,22 @@ export default function Home() {
                   ["Eligibility Check", "jk_ad_eligibility_check", "执行过资格检查的去重用户", "活跃后", "session_id / placement", "P0", "Firebase"],
                   ["Eligible", "jk_ad_eligibility_check", "eligible=1 的去重用户", "检查后", "session_id / eligible", "P0", "Firebase"],
                   ["Opportunity", "jk_ad_opportunity", "生成真实展示机会", "Eligible后30分钟", "opportunity_id", "P0", "Firebase"],
-                  ["Request UV", "jk_ad_request", "至少1次广告请求的去重用户", "统计窗口内；含预加载/实时请求", "request_id / user_pseudo_id", "P0", "Firebase"],
+                  ["Request UV（观察节点）", "jk_ad_request", "至少1次广告请求的去重用户", "统计窗口内；含预加载/实时请求；不作为 Opportunity 的严格下一步", "request_id / user_pseudo_id / request_type", "P0", "Firebase"],
+                  ["Show Attempt UV", "jk_ad_show_attempt", "至少1次展示尝试的去重用户", "缓存命中与实时请求分支汇合后", "opportunity_id / ad_instance_id", "P0", "Firebase"],
                   ["广告展示独立用户（AV）", "jk_ad_impression", "至少1次 Impression 的去重用户", "Opportunity后；缓存命中可不产生新请求", "user_pseudo_id / opportunity_id / ad_instance_id", "P0", "Firebase"],
                   ["Paid", "jk_ad_paid_event", "收到Paid回调用户", "Impression后", "ad_instance_id", "条件P0", "Firebase"],
                 ].map((row) => <tr key={row[0]}>{row.map((cell, index) => <td key={index}>{index === 5 ? <Badge tone="bad">{cell}</Badge> : cell}</td>)}</tr>)}</tbody></table></div>
               </section>
               <section className="two-column snapshot-branches">
-                <div className="surface"><div className="surface-title"><div><h2>机会履约分支定义</h2><p>同一 opportunity_id 只能先进入缓存命中或缓存未命中分支</p></div><Badge tone="blue">Fulfillment</Badge></div><div className="definition-list"><div><strong>Cache Hit</strong><p>命中时不产生新 request_id；必须把当前 opportunity_id 绑定到缓存广告的 ad_instance_id。</p></div><div><strong>Cache Miss</strong><p>未命中后才允许 Realtime Request；request_type=realtime、is_preload=0，并携带 opportunity_id。</p></div><div><strong>Realtime Load</strong><p>以 request_id 关联加载结果；失败和超时必须有 error_code/error_domain。</p></div><div><strong>Show Attempt</strong><p>缓存或实时分支在这里汇合；按 opportunity_id 去重计算机会履约率。</p></div></div></div>
-                <aside className="surface"><div className="surface-title"><div><h2>预加载库存定义</h2><p>发生在业务场景之前，只评估库存效率</p></div><Badge tone="warn">Inventory</Badge></div><div className="definition-list"><div><strong>Preload Trigger → Request</strong><p>request_type=preload、is_preload=1，禁止传 opportunity_id。</p></div><div><strong>Load Success → Cache Store</strong><p>生成并保存 ad_instance_id；广告对象必须与 instanceContext 一起进入缓存。</p></div><div><strong>Hit / Expired / Evicted</strong><p>分别计算消费、过期和淘汰；不能将预加载 Request 放进用户主漏斗。</p></div></div></aside>
+                <div className="surface"><div className="surface-title"><div><h2>机会履约分支定义</h2><p>同一 opportunity_id 先进入缓存命中或缓存未命中分支，再在 Show Attempt 汇合</p></div><Badge tone="blue">Fulfillment</Badge></div><div className="definition-list"><div><strong>Cache Hit</strong><p>命中时不产生新 request_id；必须把当前 opportunity_id 绑定到缓存广告的 ad_instance_id。</p></div><div><strong>Cache Miss → Ad Request</strong><p>未命中后才允许 Realtime Request；request_type=realtime、is_preload=0，并携带 opportunity_id。</p></div><div><strong>Request Accepted</strong><p>只表示客户端已调用 SDK 且没有同步异常，是派生检查点，不等于 AdMob 已 Match。</p></div><div><strong>Load Success / Failed</strong><p>以 request_id 关联加载结果；成功保存 response_id、ad_source、adapter，失败保存 error_code/error_domain。</p></div><div><strong>Ad Ready</strong><p>广告对象、ad_instance_id 与 instanceContext 已绑定，且对象未过 TTL、未被驱逐。</p></div><div><strong>Show Attempt → Impression → Paid</strong><p>Show Attempt 汇合两条履约路径；Impression 证明真实展示，Paid Event 记录收入回调。</p></div></div></div>
+                <aside className="surface"><div className="surface-title"><div><h2>预加载库存定义</h2><p>发生在业务场景之前，只评估库存生产、保存与消费效率</p></div><Badge tone="warn">Inventory</Badge></div><div className="definition-list"><div><strong>Preload Trigger → Request</strong><p>request_type=preload、is_preload=1，创建 request_id，禁止传 opportunity_id。</p></div><div><strong>Request Accepted → Load Result</strong><p>受理只表示 SDK 调用成功；Load Success / Failed 必须继续回传，并以 request_id 关联。</p></div><div><strong>Load Success → Cache Store / Ready</strong><p>生成并保存 ad_instance_id；广告对象必须与 instanceContext 一起进入缓存，并记录 TTL。</p></div><div><strong>Hit / Expired / Evicted / Unused</strong><p>分别计算消费、过期、淘汰和未消费库存；不能将预加载请求次数放进 Opportunity 实时履约链。</p></div></div></aside>
               </section>
               <section className="two-column">
                 <div className="surface"><div className="surface-title"><div><h2>统一计算规则</h2><p>避免不同页面出现不同答案</p></div></div><div className="rule-grid"><div><span>用户去重</span><strong>project_code + user_pseudo_id</strong></div><div><span>事件去重</span><strong>event_id</strong></div><div><span>顺序模式</span><strong>严格按 event_time</strong></div><div><span>同一步重复</span><strong>仅取首次到达</strong></div><div><span>缺失事件</span><strong>进入质量隔离区，不补算</strong></div><div><span>未知 jk_ 事件</span><strong>allowlist 外进入隔离表</strong></div></div></div>
                 <aside className="surface"><div className="surface-title"><div><h2>数据时效</h2><p>页面必须明确显示数据状态</p></div></div><div className="source-list"><div><Badge tone="blue">T+0</Badge><strong>Firebase 实时预估</strong><small>用户与事件漏斗，延迟约 5–15 分钟</small></div><div><Badge tone="good">T+3</Badge><strong>AdMob 已结算</strong><small>收入、匹配率、展示率与广告浏览者</small></div><div><Badge tone="neutral">对账</Badge><strong>Firebase × AdMob</strong><small>只在已结算日期输出最终差异</small></div></div></aside>
               </section>
               <section className="two-column">
-                <div className="surface"><div className="surface-title"><div><h2>核心指标公式</h2><p>页面、导出和告警统一引用；总 Request 不可作为机会主漏斗分母</p></div></div><div className="formula-list"><div><strong>广告展示独立用户（AV）</strong><code>COUNT_DISTINCT(user_pseudo_id WHERE event_name='jk_ad_impression')</code><p>至少产生过一次广告展示事件的独立用户数，不是展示总次数。</p></div><div><strong>广告展示独立用户比例</strong><code>AV / DAU</code><p>回答有多少活跃用户真正看到了广告。</p></div><div><strong>Opportunity覆盖率</strong><code>COUNT_DISTINCT(opportunity_user) / DAU</code><p>定位真实广告机会覆盖问题。</p></div><div><strong>机会履约率</strong><code>COUNT_DISTINCT(opportunity_id with cache_hit or realtime_request) / COUNT_DISTINCT(opportunity_id)</code><p>缓存与实时两条路径合并判断。</p></div><div><strong>缓存命中率</strong><code>cache_hit / (cache_hit + cache_miss)</code><p>判断现有库存能否满足真实机会。</p></div><div><strong>预加载成功率</strong><code>preload_load_success / preload_request</code><p>仅评估预加载库存生产效率。</p></div><div><strong>缓存浪费率</strong><code>(cache_expired + cache_evicted) / cache_store</code><p>定位 TTL、缓存容量和触发策略问题。</p></div><div><strong>展示尝试成功率</strong><code>impression_count / show_attempt_count</code><p>定位真实调用 Show 后的展示失败。</p></div><div><strong>人均展示次数</strong><code>COUNT(jk_ad_impression) / AV</code><p>展示总次数除以广告展示独立用户数，判断展示是否集中。</p></div></div></div>
+                <div className="surface"><div className="surface-title"><div><h2>核心指标公式</h2><p>页面、导出和告警统一引用；总 Request 不可作为机会主漏斗分母</p></div></div><div className="formula-list"><div><strong>广告展示独立用户（AV）</strong><code>COUNT_DISTINCT(user_pseudo_id WHERE event_name='jk_ad_impression')</code><p>至少产生过一次广告展示事件的独立用户数，不是展示总次数。</p></div><div><strong>广告展示独立用户比例</strong><code>AV / DAU</code><p>回答有多少活跃用户真正看到了广告。</p></div><div><strong>请求用户覆盖率</strong><code>Request UV / DAU</code><p>Request UV 合并预加载与实时请求用户，仅衡量请求覆盖，不作为 Opportunity 的严格下一步。</p></div><div><strong>人均请求次数</strong><code>request_count / Request UV</code><p>识别重复请求、过度预加载或重试异常。</p></div><div><strong>Opportunity覆盖率</strong><code>COUNT_DISTINCT(opportunity_user) / DAU</code><p>定位真实广告机会覆盖问题。</p></div><div><strong>机会履约率</strong><code>COUNT_DISTINCT(opportunity_id with show_attempt) / COUNT_DISTINCT(opportunity_id)</code><p>缓存与实时请求两条路径在 Show Attempt 汇合后判断。</p></div><div><strong>Miss 后实时请求率</strong><code>realtime_request_opportunity / cache_miss_opportunity</code><p>定位缓存未命中后没有真正发起请求的问题。</p></div><div><strong>加载成功率</strong><code>load_success / accepted_request</code><p>按 request_type、error_code、adapter 和国家拆解。</p></div><div><strong>缓存命中率</strong><code>cache_hit / (cache_hit + cache_miss)</code><p>判断现有库存能否满足真实机会。</p></div><div><strong>预加载成功率</strong><code>preload_load_success / preload_request</code><p>仅评估预加载库存生产效率。</p></div><div><strong>缓存浪费率</strong><code>(cache_expired + cache_evicted) / cache_store</code><p>定位 TTL、缓存容量和触发策略问题。</p></div><div><strong>展示尝试成功率</strong><code>impression_count / show_attempt_count</code><p>定位真实调用 Show 后的展示失败。</p></div><div><strong>Paid 回调完整率</strong><code>paid_event_count / impression_count</code><p>定位 Paid 回调延迟、丢失或重复。</p></div><div><strong>人均展示次数</strong><code>COUNT(jk_ad_impression) / AV</code><p>展示总次数除以广告展示独立用户数，判断展示是否集中。</p></div></div></div>
                 <aside className="surface"><div className="surface-title"><div><h2>版本变更</h2><p>当前口径相对 V1.6</p></div><Badge tone="blue">V1.7</Badge></div><div className="version-diff"><div><span>新增</span><p>ip_before_connect / ip_after_connect 诊断字段</p></div><div><span>调整</span><p>ip_after_connect 在广告拉取事件中传输派生信息</p></div><div><span>明确</span><p>完整 IP 不进入 Firebase，且不作为漏斗步骤</p></div><button onClick={() => setDialog("version-diff-report")}>导出版本差异</button></div></aside>
               </section>
             </div>
