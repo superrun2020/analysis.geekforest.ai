@@ -675,6 +675,17 @@ td small { margin-top: 3px; color: var(--soft-muted); font-size: 7px; }
 .config-workspace-actions { position: fixed; right: 0; bottom: 0; left: 226px; z-index: 20; display: flex; justify-content: flex-end; gap: 8px; padding: 11px max(24px, calc((100vw - 226px - 1720px) / 2 + 24px)); border-top: 1px solid #d7e0eb; background: rgba(255,255,255,.96); box-shadow: 0 -4px 16px rgba(27,42,70,.08); backdrop-filter: blur(10px); }
 .app-shell.embedded .config-workspace-actions { left: 0; }
 .tracking-product-selector { display: grid; grid-template-columns: minmax(260px, 1.25fr) minmax(180px, .65fr) minmax(210px, .8fr) auto; gap: 12px; align-items: end; padding: 15px 16px; }
+.fulfillment-flow.detailed { grid-template-columns: repeat(5,minmax(120px,1fr)); gap:10px; align-items:stretch; }
+.fulfillment-flow.detailed > div { min-height:78px; }
+.request-loss-strip { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin-top:12px; }
+.request-loss-strip>div { padding:10px 12px; border:1px solid #f3d5d5; border-radius:7px; background:#fff8f8; }
+.request-loss-strip span,.request-loss-strip small { display:block; color:var(--muted); font-size:7px; }
+.request-loss-strip strong { display:block; margin:4px 0; color:var(--red); font-size:15px; }
+.fulfillment-metrics { grid-template-columns:repeat(6,1fr); }
+.funnel-rule-note { display:flex; gap:10px; margin-top:12px; padding:10px 12px; border-left:3px solid var(--blue); border-radius:5px; background:#f5f8ff; font-size:8px; line-height:1.6; }
+.funnel-rule-note strong { flex:none; color:var(--blue); }
+@media (max-width: 1100px) { .fulfillment-flow.detailed { grid-template-columns:repeat(3,1fr); }.request-loss-strip,.fulfillment-metrics { grid-template-columns:repeat(2,1fr); } }
+@media (max-width: 680px) { .fulfillment-flow.detailed,.request-loss-strip,.fulfillment-metrics { grid-template-columns:1fr; } }
 .acceptance-run-bar { display:grid; grid-template-columns:minmax(280px,1.2fr) 1fr auto; gap:16px; align-items:end; padding:14px 16px; }
 .acceptance-run-bar label,.acceptance-run-bar>div { display:grid; gap:5px; }
 .acceptance-run-bar span { color:var(--muted); font-size:8px; font-weight:800; }
