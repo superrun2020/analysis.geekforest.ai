@@ -919,17 +919,6 @@ export default function Home() {
   }, [dialog]);
 
   useEffect(() => {
-    if (module !== "funnel" || page !== "workbench") return;
-    const sectionIds = ["diagnosis-overview", "step-diagnosis", "page-product-analysis", "workbench-rules"];
-    const observer = new IntersectionObserver((entries) => {
-      const visible = entries.filter((entry) => entry.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
-      if (visible?.target.id) setWorkbenchSection(visible.target.id);
-    }, { rootMargin: "-18% 0px -62% 0px", threshold: [0, 0.15, 0.35] });
-    sectionIds.forEach((id) => { const element = document.getElementById(id); if (element) observer.observe(element); });
-    return () => observer.disconnect();
-  }, [module, page]);
-
-  useEffect(() => {
     const initialAnalysisView = readInitialAnalysisView();
     setModule(initialAnalysisView.module);
     setPage(initialAnalysisView.page);
@@ -1083,7 +1072,6 @@ export default function Home() {
     setModule("funnel");
     setPage("workbench");
     setWorkbenchSection(sectionId === "funnel-workbench" ? "diagnosis-overview" : sectionId);
-    window.setTimeout(() => document.getElementById(sectionId)?.scrollIntoView({ behavior: "smooth", block: "start" }), 80);
   }
 
   function openDiagnosisSelection(selection: TransitionSelection) {
@@ -1249,9 +1237,10 @@ export default function Home() {
                   <button className={workbenchSection==='step-diagnosis'?'active':''} onClick={() => focusWorkbenchSection("step-diagnosis")}>流失诊断</button>
                   <button className={workbenchSection==='page-product-analysis'?'active':''} onClick={() => focusWorkbenchSection("page-product-analysis")}>页面路径</button>
                 </div>
-                <button className={`workbench-dictionary ${workbenchSection==='workbench-rules'?'active':''}`} onClick={() => focusWorkbenchSection("workbench-rules")}>指标口径</button>
+                <button className="workbench-dictionary" onClick={() => openMetricDefinition("dau")}>指标口径</button>
               </nav>
 
+              {workbenchSection === 'diagnosis-overview' && <>
               <section className="surface full-diagnosis-board" id="diagnosis-overview">
                 <div className="surface-title"><div><h2>全链路指标诊断</h2><p>同一项目与日期口径下查看分子、分母、趋势和异常切片；点击指标可进入证据明细</p></div><div className="diagnosis-freshness"><span>Firebase T+0</span><strong>最后更新 19:42:18</strong><small>AdMob 结算值 T+3 对账</small></div></div>
                 <div className="diagnosis-domain-section"><span className="control-row-label">诊断领域</span><div className="diagnosis-domain-tabs" role="tablist" aria-label="诊断领域">
@@ -1334,7 +1323,17 @@ export default function Home() {
                 </div>
                 <aside className="surface"><div className="surface-title"><div><h2>预加载与缓存库存</h2><p>发生在真实业务场景之前，按事件次数独立统计，不绑定 opportunity_id</p></div><Badge tone="warn">独立口径</Badge></div><div className="preload-chain">{[["Preload Trigger",preloadInventory.trigger,"100%"],["Preload Request",preloadInventory.request,"94.1%"],["Request Accepted",238984,"98.3%"],["Load Success",preloadInventory.loadSuccess,activeProfile.preloadSuccess],["Cache Store",preloadInventory.cacheStore,"98.0%"],["Cache Ready",216630,"97.8%"]].map(([label,value,rate],index)=><div key={String(label)}><span>{index+1}</span><p><strong>{label}</strong><small>{Number(value).toLocaleString()} · {rate}</small></p></div>)}</div><div className="inventory-outcomes"><div><span>Cache Hit / 被业务消费</span><strong>{preloadInventory.cacheHit.toLocaleString()}</strong></div><div><span>Expired / TTL过期</span><strong>{preloadInventory.expired.toLocaleString()}</strong></div><div><span>Evicted / 被驱逐</span><strong>{preloadInventory.evicted.toLocaleString()}</strong></div><div><span>未消费库存</span><strong>{preloadInventory.unusedReady.toLocaleString()}</strong></div></div><div className="conclusion-block warn"><strong>缓存浪费率 20.1%</strong><p>(Expired + Evicted) / Cache Store。建议继续按广告位、格式、TTL、网络类型和 App 前后台状态拆解。</p></div><div className="funnel-rule-note compact"><strong>Context</strong><span>广告对象入缓存时必须连同 requestContext / instanceContext 保存；取出时再绑定当前 opportunity_id，直到 paid / dismiss / failed 终态。</span></div></aside>
               </section>}
+              <section className="two-column workbench-rules-section">
+                <div className="surface">
+                  <div className="surface-title"><div><h2>趋势与统一口径</h2><p>趋势用于发现，指标口径可通过上方按钮查看完整字典</p></div><Segmented label="趋势指标" active={trendMetric} onChange={(key) => setTrendMetric(key as TrendMetric)} items={[{ key: "viewer", label: "浏览者比例" }, { key: "opportunity", label: "机会覆盖" }]} /></div>
+                  <div className="trend-current"><span>{trendLabel}</span><strong>{trendValues.at(-1)}%</strong><small>{trendMetric === "viewer" ? "目标 ≥ 35%" : "目标 ≥ 40%"}</small></div>
+                  <div className="bar-chart compact" aria-label={`近七日${trendLabel}趋势`}>{trendValues.map((value, index) => <div key={`${trendMetric}-${index}`}><span style={{ height: `${value * 1.35}px` }} className={index > 3 ? "alert" : ""}><em>{value}%</em></span><small>{["8/5", "8/6", "8/7", "8/8", "8/9", "8/10", "今天"][index]}</small></div>)}</div>
+                </div>
+                <aside className="surface"><div className="surface-title"><div><h2>技术落地检查</h2><p>研发可直接按证据字段定位</p></div><Badge tone="blue">V1.8</Badge></div><div className="technical-actions"><button onClick={() => go("evidence")}><strong>上下文关联</strong><span>检查关键ID与Context</span></button><button onClick={() => openModule("tracking")}><strong>打点完整性</strong><span>P0事件、参数与关联链必须100%</span></button><button onClick={() => openModule("reconcile")}><strong>分源对账</strong><span>Firebase T+0与AdMob T+3分开判断</span></button><button onClick={() => setDialog("diagnosis")}><strong>修复闭环</strong><span>带证据创建任务并回归验证</span></button></div></aside>
+              </section>
+              </>}
 
+              {workbenchSection === 'step-diagnosis' && <>
               <section className="surface diagnosis-workspace" id="step-diagnosis">
                 <div className="surface-title"><div><h2>区间流失诊断</h2><p>选择任意上游与下游指标，立即重算转化、流失、原因、分群和收入影响</p></div><Badge tone={diagnosisHasNonLinearStage ? "warn" : "blue"}>{funnelMode === "product" ? "产品用户口径" : transition.scope === "events" ? "事件次数口径" : "用户 UV 口径"}</Badge></div>
                 <div className="diagnosis-selector-bar">
@@ -1369,6 +1368,14 @@ export default function Home() {
                 </div>
               </section>
 
+              <section className="surface intelligent-diagnosis-workspace">
+                <div className="surface-title"><div><h2>精细化运营诊断与版本学习</h2><p>基于当前异常区间运行规则诊断、技术建议和AI复核</p></div><label className="inline-page-selector">异常指标<select value={operationMetric} onChange={(event) => { setOperationMetric(event.target.value as keyof typeof operationDiagnosisProfiles); setAiDiagnosisReady(false); }}>{Object.entries(operationDiagnosisProfiles).map(([key, item]) => <option key={key} value={key}>{item.label}</option>)}</select></label></div>
+                <div className="diagnosis-command-strip"><div><span><MetricLabel metric={operationMetric}>{operationDiagnosis.label}</MetricLabel></span><strong>{operationDiagnosis.value}</strong><small>较基线 <b>{operationDiagnosis.delta}</b></small></div><div><span>规则诊断可信度</span><strong>86%</strong><small>原因覆盖98.0%</small></div><div><span>最大异常切片</span><strong>伊朗 · 1.8.0</strong><small>贡献61.2%指标损失</small></div><div><span>关联字段</span><p>{operationDiagnosis.fields}</p></div><button onClick={() => { setAiDiagnosisReady(true); notify(`${operationDiagnosis.label} AI诊断已生成`); }}>运行AI复核</button></div>
+                <div className="diagnosis-engine-grid"><article><header><div><span>规则引擎</span><h3>可解释根因结论</h3></div><Badge tone="good">有证据</Badge></header><p className="engine-conclusion">{operationDiagnosis.conclusion}</p></article><article><header><div><span>技术建议</span><h3>按优先级执行</h3></div><Badge tone="warn">3项</Badge></header><ol className="technical-fix-list">{operationDiagnosis.actions.map((item,index)=><li key={item}><span>P{index}</span><p>{item}</p></li>)}</ol></article><article className={aiDiagnosisReady?'ai-ready':''}><header><div><span>AI复核</span><h3>{aiDiagnosisReady?'复核完成':'等待运行'}</h3></div><Badge tone={aiDiagnosisReady?'blue':'neutral'}>{aiDiagnosisReady?'已生成':'可选'}</Badge></header><p className="engine-conclusion">{aiDiagnosisReady?'AI与规则结论一致，异常集中于1.8.0蜂窝网络切片。':'运行后对跨维度证据进行复核。'}</p></article></div>
+              </section>
+              </>}
+
+              {workbenchSection === 'page-product-analysis' && <>
               <section className="surface page-product-workspace" id="page-product-analysis">
                 <div className="surface-title"><div><h2>页面与产品路径分析</h2><p>把页面健康、单页转化、元素行为、性能和变现贡献放在同一区域</p></div><label className="inline-page-selector">当前页面<select value={selectedProductPage} onChange={(event) => setSelectedProductPage(event.target.value as keyof typeof productPageProfiles)}>{Object.keys(productPageProfiles).map((item) => <option key={item}>{item}</option>)}</select></label></div>
                 <div className="page-health-strip">
@@ -1387,8 +1394,9 @@ export default function Home() {
                   <article><header><div><h3>版本与 A/B</h3><p>上线前后及实验组收益对比</p></div><Badge tone="bad">V1.8.0 下降</Badge></header><div className="version-ab-list"><div><span>V1.7.4</span><strong>机会 41.2% · AV 34.8%</strong><small>基准版本</small></div><div><span>V1.8.0</span><strong>机会 28.4% · AV 23.1%</strong><small>-12.8pp / -11.7pp</small></div><div><span>实验 B</span><strong>提前创建 Opportunity</strong><small>预计收入 +9.6%</small></div></div><button onClick={() => notify("A/B 实验配置已打开")}>新建页面实验</button></article>
                 </div>
               </section>
+              </>}
 
-              <section className="surface intelligent-diagnosis-workspace">
+              {false && <section className="surface intelligent-diagnosis-workspace">
                 <div className="surface-title"><div><h2>精细化运营诊断与版本学习</h2><p>基于 V1.7 字段先做可解释规则诊断，再用 AI 复核跨维度证据；结论必须进入版本验证闭环</p></div><label className="inline-page-selector">异常指标<select value={operationMetric} onChange={(event) => { setOperationMetric(event.target.value as keyof typeof operationDiagnosisProfiles); setAiDiagnosisReady(false); }}>{Object.entries(operationDiagnosisProfiles).map(([key, item]) => <option key={key} value={key}>{item.label}</option>)}</select></label></div>
                 <div className="diagnosis-command-strip">
                   <div><span><MetricLabel metric={operationMetric}>{operationDiagnosis.label}</MetricLabel></span><strong>{operationDiagnosis.value}</strong><small>较基线 <b>{operationDiagnosis.delta}</b></small></div>
@@ -1425,9 +1433,9 @@ export default function Home() {
                   <div className="learning-gates"><div><span>主指标</span><strong>Opportunity UV / DAU</strong><small>提升 ≥8pp</small></div><div><span>产品护栏</span><strong>VPN成功率 · D1留存</strong><small>不得下降 &gt;1pp</small></div><div><span>广告护栏</span><strong>展示失败率 · eCPM</strong><small>不得显著恶化</small></div><div><span>数据护栏</span><strong>P0完整率 · 关联率</strong><small>必须 100% / ≥99%</small></div><button onClick={() => notify("已打开 1.8.1 版本效果验证")}>查看版本效果</button></div>
                   <div className="learning-schema-note"><strong>必须记录：</strong><code>diagnosis_id · metric_key · hypothesis · evidence_query_id · change_item · release_id · baseline_window · treatment_window · uplift · guardrail_result · final_result · learning_tag</code></div>
                 </div>
-              </section>
+              </section>}
 
-              <section className="two-column workbench-rules-section" id="workbench-rules">
+              {false && <section className="two-column workbench-rules-section" id="workbench-rules">
                 <div className="surface">
                   <div className="surface-title"><div><h2>趋势与统一口径</h2><p>趋势用于发现，动态区间诊断用于定位</p></div><Segmented label="趋势指标" active={trendMetric} onChange={(key) => setTrendMetric(key as TrendMetric)} items={[{ key: "viewer", label: "浏览者比例" }, { key: "opportunity", label: "机会覆盖" }]} /></div>
                   <div className="trend-current"><span>{trendLabel}</span><strong>{trendValues.at(-1)}%</strong><small>{trendMetric === "viewer" ? "目标 ≥ 35%" : "目标 ≥ 40%"}</small></div>
@@ -1439,7 +1447,7 @@ export default function Home() {
                   <div className="id-chain-list"><div><code>decision_id</code><span>资格检查与阻止原因</span><strong>P0</strong></div><div><code>opportunity_id</code><span>一次真实业务广告机会</span><strong>P0</strong></div><div><code>request_id</code><span>每次真实 load；重试必须新建</span><strong>P0</strong></div><div><code>ad_instance_id</code><span>加载成功后绑定缓存对象到终态</span><strong>P0</strong></div></div>
                   <div className="technical-actions"><button onClick={() => go("evidence")}><strong>上下文关联</strong><span>检查缓存对象是否保存 instanceContext</span></button><button onClick={() => openModule("tracking")}><strong>打点完整性</strong><span>P0 事件、参数与关联链必须 100%</span></button><button onClick={() => openModule("reconcile")}><strong>分源对账</strong><span>Firebase T+0 与 AdMob T+3 分开判断</span></button><button onClick={() => setDialog("diagnosis")}><strong>修复闭环</strong><span>带证据创建任务并回归验证</span></button></div>
                 </aside>
-              </section>
+              </section>}
             </div>
           )}
 
