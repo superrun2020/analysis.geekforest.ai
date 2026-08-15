@@ -901,7 +901,10 @@ export default function Home() {
   const [operationMetric, setOperationMetric] = useState<keyof typeof operationDiagnosisProfiles>("opportunity_coverage");
   const [aiDiagnosisReady, setAiDiagnosisReady] = useState(false);
   const [diagnosticDomain, setDiagnosticDomain] = useState<DiagnosticDomain>("ads");
-  const [diagnosticSlice, setDiagnosticSlice] = useState("全部维度");
+  const [diagnosticAsn, setDiagnosticAsn] = useState("全部 ASN");
+  const [diagnosticNetwork, setDiagnosticNetwork] = useState("全部网络");
+  const [workbenchSection, setWorkbenchSection] = useState("diagnosis-overview");
+  const diagnosticSlice = [country, diagnosticAsn, diagnosticNetwork, appVersion].filter((value) => !value.startsWith("全部")).join(" · ") || "全部维度";
 
   useEffect(() => {
     if (!dialog) return;
@@ -914,6 +917,17 @@ export default function Home() {
       window.removeEventListener("keydown", closeOnEscape);
     };
   }, [dialog]);
+
+  useEffect(() => {
+    if (module !== "funnel" || page !== "workbench") return;
+    const sectionIds = ["diagnosis-overview", "step-diagnosis", "page-product-analysis", "workbench-rules"];
+    const observer = new IntersectionObserver((entries) => {
+      const visible = entries.filter((entry) => entry.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+      if (visible?.target.id) setWorkbenchSection(visible.target.id);
+    }, { rootMargin: "-18% 0px -62% 0px", threshold: [0, 0.15, 0.35] });
+    sectionIds.forEach((id) => { const element = document.getElementById(id); if (element) observer.observe(element); });
+    return () => observer.disconnect();
+  }, [module, page]);
 
   useEffect(() => {
     const initialAnalysisView = readInitialAnalysisView();
@@ -1065,9 +1079,10 @@ export default function Home() {
     notify("筛选条件已恢复默认");
   }
 
-  function focusWorkbenchSection(sectionId: "funnel-workbench" | "step-diagnosis" | "page-product-analysis" | "workbench-rules") {
+  function focusWorkbenchSection(sectionId: "diagnosis-overview" | "funnel-workbench" | "step-diagnosis" | "page-product-analysis" | "workbench-rules") {
     setModule("funnel");
     setPage("workbench");
+    setWorkbenchSection(sectionId === "funnel-workbench" ? "diagnosis-overview" : sectionId);
     window.setTimeout(() => document.getElementById(sectionId)?.scrollIntoView({ behavior: "smooth", block: "start" }), 80);
   }
 
@@ -1214,7 +1229,7 @@ export default function Home() {
               <section className="analysis-head surface">
                 <div><div className="eyebrow">{project} · Android 1.8.0</div><h2>{funnelMode === "product" ? "VPN 产品主漏斗" : "广告变现主漏斗"}</h2><p>当前周期：{range} 00:00–当前 · 对比昨日同期</p></div>
                 <div className="mode-controls">
-                  <Segmented label="漏斗类型" active={funnelMode} onChange={(key) => {
+                  <div className="mode-control-group"><span>漏斗类型</span><Segmented label="漏斗类型" active={funnelMode} onChange={(key) => {
                     const nextMode = key as FunnelMode;
                     setFunnelMode(nextMode);
                     if (nextMode === "product") {
@@ -1223,24 +1238,27 @@ export default function Home() {
                     } else if (productStages.some((stage) => stage.label === transition.from)) {
                       setTransition({ from: "Eligible", to: "Opportunity", rate: activeProfile.userStages[3].rate, scope: "users" });
                     }
-                  }} items={[{ key: "product", label: "产品漏斗" }, { key: "monetization", label: "变现漏斗" }]} />
-                  {funnelMode === "monetization" && <Segmented label="统计单位" active={unitMode} onChange={(key) => setUnitMode(key as UnitMode)} items={[{ key: "users", label: "用户数" }, { key: "events", label: "事件数" }]} />}
+                  }} items={[{ key: "product", label: "产品漏斗" }, { key: "monetization", label: "广告变现" }]} /></div>
+                  {funnelMode === "monetization" && <div className="mode-control-group"><span>统计口径</span><Segmented label="统计口径" active={unitMode} onChange={(key) => setUnitMode(key as UnitMode)} items={[{ key: "users", label: "用户 UV" }, { key: "events", label: "事件次数" }]} /></div>}
                 </div>
               </section>
 
               <nav className="workbench-jumpbar" aria-label="单项目工作台区块导航">
-                <button onClick={() => focusWorkbenchSection("funnel-workbench")}><span>01</span>变现与产品漏斗</button>
-                <button onClick={() => focusWorkbenchSection("step-diagnosis")}><span>02</span>区间流失诊断</button>
-                <button onClick={() => focusWorkbenchSection("page-product-analysis")}><span>03</span>页面与产品路径</button>
-                <button onClick={() => focusWorkbenchSection("workbench-rules")}><span>04</span>口径与技术建议</button>
+                <div className="workbench-primary-tabs">
+                  <button className={workbenchSection==='diagnosis-overview'?'active':''} onClick={() => focusWorkbenchSection("diagnosis-overview")}>核心漏斗</button>
+                  <button className={workbenchSection==='step-diagnosis'?'active':''} onClick={() => focusWorkbenchSection("step-diagnosis")}>流失诊断</button>
+                  <button className={workbenchSection==='page-product-analysis'?'active':''} onClick={() => focusWorkbenchSection("page-product-analysis")}>页面路径</button>
+                </div>
+                <button className={`workbench-dictionary ${workbenchSection==='workbench-rules'?'active':''}`} onClick={() => focusWorkbenchSection("workbench-rules")}>指标口径</button>
               </nav>
 
-              <section className="surface full-diagnosis-board">
+              <section className="surface full-diagnosis-board" id="diagnosis-overview">
                 <div className="surface-title"><div><h2>全链路指标诊断</h2><p>同一项目与日期口径下查看分子、分母、趋势和异常切片；点击指标可进入证据明细</p></div><div className="diagnosis-freshness"><span>Firebase T+0</span><strong>最后更新 19:42:18</strong><small>AdMob 结算值 T+3 对账</small></div></div>
-                <div className="diagnosis-domain-tabs" role="tablist" aria-label="诊断领域">
-                  {([['ads','广告变现与履约','11项指标'],['vpn','VPN连接质量','9项指标'],['quality','数据质量与补传','6项指标']] as const).map(([key,label,count]) => <button key={key} className={diagnosticDomain===key?'active':''} onClick={()=>setDiagnosticDomain(key)}><span>{label}</span><small>{count}</small></button>)}
-                  <label>下钻切片<select value={diagnosticSlice} onChange={(event)=>setDiagnosticSlice(event.target.value)}><option>全部维度</option><option>伊朗 · ASN 44244</option><option>Android 1.8.0</option><option>蜂窝网络</option><option>插屏 · vpn_connect_success</option><option>协议 WireGuard</option></select></label>
-                </div>
+                <div className="diagnosis-domain-section"><span className="control-row-label">诊断领域</span><div className="diagnosis-domain-tabs" role="tablist" aria-label="诊断领域">
+                  {([['ads','广告变现','11'],['vpn','VPN功能','9'],['quality','数据质量','6']] as const).map(([key,label,count]) => <button key={key} className={diagnosticDomain===key?'active':''} onClick={()=>setDiagnosticDomain(key)}><span>{label}</span><small>{count}项指标</small></button>)}
+                </div></div>
+                <div className="diagnostic-filter-row"><span className="control-row-label">下钻条件</span><label>国家<select value={country} onChange={(event)=>setCountry(event.target.value)}><option>全部国家</option><option>伊朗</option><option>俄罗斯</option><option>土耳其</option></select></label><label>ASN<select value={diagnosticAsn} onChange={(event)=>setDiagnosticAsn(event.target.value)}><option>全部 ASN</option><option>AS44244</option><option>AS58224</option><option>AS12389</option></select></label><label>网络<select value={diagnosticNetwork} onChange={(event)=>setDiagnosticNetwork(event.target.value)}><option>全部网络</option><option>蜂窝网络</option><option>Wi-Fi</option><option>Ethernet</option></select></label><label>版本<select value={appVersion} onChange={(event)=>setAppVersion(event.target.value)}><option>1.8.0 (108)</option><option>1.7.4 (104)</option><option>全部版本</option></select></label><button className="more-filter" onClick={()=>notify('更多筛选已展开：协议、节点、广告位、格式')}>＋ 更多筛选</button><button className="reset-filter" onClick={()=>{setCountry('全部国家');setDiagnosticAsn('全部 ASN');setDiagnosticNetwork('全部网络');setAppVersion('1.8.0 (108)')}}>重置</button></div>
+                <div className="active-diagnostic-slice"><span>当前切片</span><strong>{diagnosticSlice}</strong><small>所有指标、原因和证据统一使用该筛选</small></div>
                 <div className="diagnostic-metric-grid">
                   {diagnosticMetricGroups[diagnosticDomain].map(([label,value,fraction,delta,tone,formula]) => <button key={label} className={`diagnostic-metric ${tone}`} onClick={()=>notify(`${label}已按${diagnosticSlice}筛选，并打开事件证据`)}><span>{label}</span><strong>{value}</strong><em>{delta} 较基线</em><small>{fraction}</small><code>{formula}</code></button>)}
                 </div>
