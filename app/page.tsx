@@ -564,9 +564,9 @@ const logProjectLabel = (item: FirebaseSyncRunLog | FirebaseCheckLog) => item.pr
 
 function Segmented({ items, active, onChange, label }: { items: Array<{ key: string; label: string }>; active: string; onChange: (key: string) => void; label: string }) {
   return (
-    <div className="segmented" aria-label={label}>
+    <div className="segmented" role="tablist" aria-label={label}>
       {items.map((item) => (
-        <button key={item.key} className={active === item.key ? "selected" : ""} onClick={() => onChange(item.key)}>{item.label}</button>
+        <button type="button" role="tab" aria-selected={active === item.key} key={item.key} className={active === item.key ? "selected" : ""} onClick={() => onChange(item.key)}>{item.label}</button>
       ))}
     </div>
   );
@@ -903,8 +903,20 @@ export default function Home() {
   const [diagnosticDomain, setDiagnosticDomain] = useState<DiagnosticDomain>("ads");
   const [diagnosticAsn, setDiagnosticAsn] = useState("全部 ASN");
   const [diagnosticNetwork, setDiagnosticNetwork] = useState("全部网络");
+  const [diagnosticAdPlacement, setDiagnosticAdPlacement] = useState("全部广告位");
+  const [diagnosticAdFormat, setDiagnosticAdFormat] = useState("全部格式");
+  const [diagnosticAdSource, setDiagnosticAdSource] = useState("全部广告源");
+  const [diagnosticProtocol, setDiagnosticProtocol] = useState("全部协议");
+  const [diagnosticNode, setDiagnosticNode] = useState("全部节点");
+  const [diagnosticQualitySource, setDiagnosticQualitySource] = useState("全部数据源");
+  const [diagnosticQualityStatus, setDiagnosticQualityStatus] = useState("全部状态");
   const [workbenchSection, setWorkbenchSection] = useState("diagnosis-overview");
-  const diagnosticSlice = [country, diagnosticAsn, diagnosticNetwork, appVersion].filter((value) => !value.startsWith("全部")).join(" · ") || "全部维度";
+  const diagnosticSliceValues = diagnosticDomain === "ads"
+    ? [country, diagnosticAdPlacement, diagnosticAdFormat, diagnosticAdSource, appVersion]
+    : diagnosticDomain === "vpn"
+      ? [country, diagnosticAsn, diagnosticNetwork, diagnosticProtocol, diagnosticNode, appVersion]
+      : [diagnosticQualitySource, diagnosticQualityStatus, platform, appVersion];
+  const diagnosticSlice = diagnosticSliceValues.filter((value) => !value.startsWith("全部")).join(" · ") || "全部维度";
 
   useEffect(() => {
     if (!dialog) return;
@@ -993,6 +1005,37 @@ export default function Home() {
   function notify(message: string) {
     setNotice(message);
     window.setTimeout(() => setNotice(""), 2600);
+  }
+
+  function selectFunnelMode(nextMode: FunnelMode) {
+    setFunnelMode(nextMode);
+    if (nextMode === "product") {
+      setDiagnosticDomain("vpn");
+      setUnitMode("users");
+      setTransition({ from: productStages[0].label, to: productStages[1].label, rate: productStages[1].rate, scope: "users" });
+      notify("已切换到产品漏斗，并同步显示 VPN 功能指标与下钻维度");
+      return;
+    }
+    setDiagnosticDomain("ads");
+    if (productStages.some((stage) => stage.label === transition.from)) {
+      setTransition({ from: "Eligible", to: "Opportunity", rate: activeProfile.userStages[3].rate, scope: "users" });
+    }
+    notify("已切换到广告变现漏斗，并同步显示广告指标与下钻维度");
+  }
+
+  function selectDiagnosticDomain(nextDomain: DiagnosticDomain) {
+    setDiagnosticDomain(nextDomain);
+    if (nextDomain === "ads") setFunnelMode("monetization");
+    if (nextDomain === "vpn") {
+      setFunnelMode("product");
+      setUnitMode("users");
+    }
+  }
+
+  function selectUnitMode(nextUnit: UnitMode) {
+    setUnitMode(nextUnit);
+    if (funnelMode === "monetization") changeDiagnosisScope(nextUnit);
+    notify(nextUnit === "users" ? "已按用户去重（UV）重算漏斗" : "已按事件次数（Count）重算漏斗");
   }
 
   function openMetricDefinition(metric: string) {
@@ -1214,23 +1257,6 @@ export default function Home() {
 
           {module === "funnel" && page === "workbench" && (
             <div className="page-stack">
-              <section className="analysis-head surface">
-                <div><div className="eyebrow">{project} · Android 1.8.0</div><h2>{funnelMode === "product" ? "VPN 产品主漏斗" : "广告变现主漏斗"}</h2><p>当前周期：{range} 00:00–当前 · 对比昨日同期</p></div>
-                <div className="mode-controls">
-                  <div className="mode-control-group"><span>漏斗类型</span><Segmented label="漏斗类型" active={funnelMode} onChange={(key) => {
-                    const nextMode = key as FunnelMode;
-                    setFunnelMode(nextMode);
-                    if (nextMode === "product") {
-                      setUnitMode("users");
-                      setTransition({ from: productStages[0].label, to: productStages[1].label, rate: productStages[1].rate, scope: "users" });
-                    } else if (productStages.some((stage) => stage.label === transition.from)) {
-                      setTransition({ from: "Eligible", to: "Opportunity", rate: activeProfile.userStages[3].rate, scope: "users" });
-                    }
-                  }} items={[{ key: "product", label: "产品漏斗" }, { key: "monetization", label: "广告变现" }]} /></div>
-                  {funnelMode === "monetization" && <div className="mode-control-group"><span>统计口径</span><Segmented label="统计口径" active={unitMode} onChange={(key) => setUnitMode(key as UnitMode)} items={[{ key: "users", label: "用户 UV" }, { key: "events", label: "事件次数" }]} /></div>}
-                </div>
-              </section>
-
               <nav className="workbench-jumpbar" aria-label="单项目工作台区块导航">
                 <div className="workbench-primary-tabs">
                   <button className={workbenchSection==='diagnosis-overview'?'active':''} onClick={() => focusWorkbenchSection("diagnosis-overview")}>核心漏斗</button>
@@ -1240,13 +1266,25 @@ export default function Home() {
                 <button className="workbench-dictionary" onClick={() => openMetricDefinition("dau")}>指标口径</button>
               </nav>
 
+              <section className="analysis-context-bar surface" aria-label="当前分析对象与统计口径">
+                <div className="analysis-context-title"><div className="eyebrow">{project} · Android 1.8.0</div><strong>{funnelMode === "product" ? "VPN 产品主漏斗" : unitMode === "users" ? "广告变现 · 用户覆盖漏斗" : "广告变现 · 事件效率漏斗"}</strong><span>{range} 00:00–当前 · 对比昨日同期</span></div>
+                <div className="mode-controls">
+                  <div className="mode-control-group"><span>分析对象</span><Segmented label="分析对象" active={funnelMode} onChange={(key) => selectFunnelMode(key as FunnelMode)} items={[{ key: "product", label: "产品漏斗" }, { key: "monetization", label: "广告变现" }]} /></div>
+                  <div className={`mode-control-group ${funnelMode === "product" ? "disabled-context" : ""}`}><span>统计口径</span>{funnelMode === "product" ? <div className="fixed-unit" title="产品漏斗按用户去重统计">用户 UV <small>产品漏斗固定</small></div> : <Segmented label="统计口径" active={unitMode} onChange={(key) => selectUnitMode(key as UnitMode)} items={[{ key: "users", label: "用户 UV" }, { key: "events", label: "事件次数" }]} />}</div>
+                </div>
+              </section>
+
               {workbenchSection === 'diagnosis-overview' && <>
               <section className="surface full-diagnosis-board" id="diagnosis-overview">
                 <div className="surface-title"><div><h2>全链路指标诊断</h2><p>同一项目与日期口径下查看分子、分母、趋势和异常切片；点击指标可进入证据明细</p></div><div className="diagnosis-freshness"><span>Firebase T+0</span><strong>最后更新 19:42:18</strong><small>AdMob 结算值 T+3 对账</small></div></div>
                 <div className="diagnosis-domain-section"><span className="control-row-label">诊断领域</span><div className="diagnosis-domain-tabs" role="tablist" aria-label="诊断领域">
-                  {([['ads','广告变现','11'],['vpn','VPN功能','9'],['quality','数据质量','6']] as const).map(([key,label,count]) => <button key={key} className={diagnosticDomain===key?'active':''} onClick={()=>setDiagnosticDomain(key)}><span>{label}</span><small>{count}项指标</small></button>)}
+                  {([['ads','广告变现','11'],['vpn','VPN功能','9'],['quality','数据质量','6']] as const).map(([key,label,count]) => <button type="button" role="tab" aria-selected={diagnosticDomain===key} key={key} className={diagnosticDomain===key?'active':''} onClick={()=>selectDiagnosticDomain(key)}><span>{label}</span><small>{count}项指标</small></button>)}
                 </div></div>
-                <div className="diagnostic-filter-row"><span className="control-row-label">下钻条件</span><label>国家<select value={country} onChange={(event)=>setCountry(event.target.value)}><option>全部国家</option><option>伊朗</option><option>俄罗斯</option><option>土耳其</option></select></label><label>ASN<select value={diagnosticAsn} onChange={(event)=>setDiagnosticAsn(event.target.value)}><option>全部 ASN</option><option>AS44244</option><option>AS58224</option><option>AS12389</option></select></label><label>网络<select value={diagnosticNetwork} onChange={(event)=>setDiagnosticNetwork(event.target.value)}><option>全部网络</option><option>蜂窝网络</option><option>Wi-Fi</option><option>Ethernet</option></select></label><label>版本<select value={appVersion} onChange={(event)=>setAppVersion(event.target.value)}><option>1.8.0 (108)</option><option>1.7.4 (104)</option><option>全部版本</option></select></label><button className="more-filter" onClick={()=>notify('更多筛选已展开：协议、节点、广告位、格式')}>＋ 更多筛选</button><button className="reset-filter" onClick={()=>{setCountry('全部国家');setDiagnosticAsn('全部 ASN');setDiagnosticNetwork('全部网络');setAppVersion('1.8.0 (108)')}}>重置</button></div>
+                <div className="diagnostic-filter-row"><span className="control-row-label">下钻条件</span>
+                  {diagnosticDomain === 'ads' && <><label>国家<select value={country} onChange={(event)=>setCountry(event.target.value)}><option>全部国家</option><option>伊朗</option><option>俄罗斯</option><option>土耳其</option></select></label><label>广告位<select value={diagnosticAdPlacement} onChange={(event)=>setDiagnosticAdPlacement(event.target.value)}><option>全部广告位</option><option>vpn_connect_success</option><option>home_interstitial</option><option>app_open</option></select></label><label>广告格式<select value={diagnosticAdFormat} onChange={(event)=>setDiagnosticAdFormat(event.target.value)}><option>全部格式</option><option>Interstitial</option><option>Rewarded</option><option>App Open</option><option>Banner</option></select></label><label>广告源 / Adapter<select value={diagnosticAdSource} onChange={(event)=>setDiagnosticAdSource(event.target.value)}><option>全部广告源</option><option>AdMob Network</option><option>Meta</option><option>Unity Ads</option><option>Mintegral</option></select></label></>}
+                  {diagnosticDomain === 'vpn' && <><label>国家<select value={country} onChange={(event)=>setCountry(event.target.value)}><option>全部国家</option><option>伊朗</option><option>俄罗斯</option><option>土耳其</option></select></label><label>ASN<select value={diagnosticAsn} onChange={(event)=>setDiagnosticAsn(event.target.value)}><option>全部 ASN</option><option>AS44244</option><option>AS58224</option><option>AS12389</option></select></label><label>网络<select value={diagnosticNetwork} onChange={(event)=>setDiagnosticNetwork(event.target.value)}><option>全部网络</option><option>蜂窝网络</option><option>Wi-Fi</option><option>Ethernet</option></select></label><label>协议 / 节点<select value={`${diagnosticProtocol}|${diagnosticNode}`} onChange={(event)=>{const [protocol,node]=event.target.value.split('|');setDiagnosticProtocol(protocol);setDiagnosticNode(node)}}><option value="全部协议|全部节点">全部协议 / 节点</option><option value="WireGuard|全部节点">WireGuard</option><option value="IKEv2|全部节点">IKEv2</option><option value="OpenVPN|全部节点">OpenVPN</option><option value="全部协议|IR-17">节点 IR-17</option></select></label></>}
+                  {diagnosticDomain === 'quality' && <><label>数据源<select value={diagnosticQualitySource} onChange={(event)=>setDiagnosticQualitySource(event.target.value)}><option>全部数据源</option><option>Firebase</option><option>中台接口</option><option>ADB</option></select></label><label>质量状态<select value={diagnosticQualityStatus} onChange={(event)=>setDiagnosticQualityStatus(event.target.value)}><option>全部状态</option><option>P0缺失</option><option>孤儿ID</option><option>重复终态</option><option>补传失败</option></select></label><label>平台<select value={platform} onChange={(event)=>setPlatform(event.target.value)}><option>Android</option><option>iOS</option><option>全部平台</option></select></label><label>事件模块<select><option>全部事件模块</option><option>广告</option><option>VPN</option><option>页面</option><option>应用生命周期</option></select></label></>}
+                  <label>版本<select value={appVersion} onChange={(event)=>setAppVersion(event.target.value)}><option>1.8.0 (108)</option><option>1.7.4 (104)</option><option>全部版本</option></select></label><button type="button" className="more-filter" onClick={()=>notify(diagnosticDomain==='ads'?'更多广告维度：请求类型、网络、国家、Adapter版本':diagnosticDomain==='vpn'?'更多VPN维度：端口、运营商、限制信号、IP变化':'更多质量维度：优先级、Provider、schema版本、客户端版本')}>＋ 更多筛选</button><button type="button" className="reset-filter" onClick={()=>{setCountry('全部国家');setDiagnosticAsn('全部 ASN');setDiagnosticNetwork('全部网络');setDiagnosticAdPlacement('全部广告位');setDiagnosticAdFormat('全部格式');setDiagnosticAdSource('全部广告源');setDiagnosticProtocol('全部协议');setDiagnosticNode('全部节点');setDiagnosticQualitySource('全部数据源');setDiagnosticQualityStatus('全部状态');setAppVersion('1.8.0 (108)')}}>重置</button></div>
                 <div className="active-diagnostic-slice"><span>当前切片</span><strong>{diagnosticSlice}</strong><small>所有指标、原因和证据统一使用该筛选</small></div>
                 <div className="diagnostic-metric-grid">
                   {diagnosticMetricGroups[diagnosticDomain].map(([label,value,fraction,delta,tone,formula]) => <button key={label} className={`diagnostic-metric ${tone}`} onClick={()=>notify(`${label}已按${diagnosticSlice}筛选，并打开事件证据`)}><span>{label}</span><strong>{value}</strong><em>{delta} 较基线</em><small>{fraction}</small><code>{formula}</code></button>)}
