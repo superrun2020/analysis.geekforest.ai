@@ -1280,6 +1280,29 @@ export default function Home() {
                   {diagnosticDomain === 'quality' && <><label>数据源<select value={diagnosticQualitySource} onChange={(event)=>setDiagnosticQualitySource(event.target.value)}><option>全部数据源</option><option>Firebase</option><option>中台接口</option><option>ADB</option></select></label><label>质量状态<select value={diagnosticQualityStatus} onChange={(event)=>setDiagnosticQualityStatus(event.target.value)}><option>全部状态</option><option>P0缺失</option><option>孤儿ID</option><option>重复终态</option><option>补传失败</option></select></label><label>平台<select value={platform} onChange={(event)=>setPlatform(event.target.value)}><option>Android</option><option>iOS</option><option>全部平台</option></select></label><label>事件模块<select><option>全部事件模块</option><option>广告</option><option>VPN</option><option>页面</option><option>应用生命周期</option></select></label></>}
                   <label>版本<select value={appVersion} onChange={(event)=>setAppVersion(event.target.value)}><option>1.8.0 (108)</option><option>1.7.4 (104)</option><option>全部版本</option></select></label><button type="button" className="more-filter" onClick={()=>notify(diagnosticDomain==='ads'?'更多广告维度：请求类型、网络、国家、Adapter版本':diagnosticDomain==='vpn'?'更多VPN维度：端口、运营商、限制信号、IP变化':'更多质量维度：优先级、Provider、schema版本、客户端版本')}>＋ 更多筛选</button><button type="button" className="reset-filter" onClick={()=>{setCountry('全部国家');setDiagnosticAsn('全部 ASN');setDiagnosticNetwork('全部网络');setDiagnosticAdPlacement('全部广告位');setDiagnosticAdFormat('全部格式');setDiagnosticAdSource('全部广告源');setDiagnosticProtocol('全部协议');setDiagnosticNode('全部节点');setDiagnosticQualitySource('全部数据源');setDiagnosticQualityStatus('全部状态');setAppVersion('1.8.0 (108)')}}>重置</button></div>
                 <div className="active-diagnostic-slice"><span>当前切片</span><strong>{diagnosticSlice}</strong><small>所有指标、原因和证据统一使用该筛选</small></div>
+                {diagnosticDomain === 'ads' && <div className="monetization-command-center">
+                  <div className="monetization-verdict">
+                    <div className="verdict-heading"><span>当前诊断结论</span><Badge tone="bad">P0 · 请求前覆盖损失</Badge></div>
+                    <strong>最大问题在“符合资格 → 生成广告机会”，不是 AdMob 填充</strong>
+                    <p>资格后机会完整率仅 75.7%，较基线下降 6.4pp，预计每日少产生 18,112 个可履约机会；加载成功率 98.0%、请求终态完整率 99.6%，请求后的 SDK 链路整体正常。</p>
+                    <div className="verdict-actions"><button onClick={()=>{setWorkbenchSection('step-diagnosis');setTransition({from:'Eligible',to:'Opportunity',scope:'users'})}}>分析最大流失</button><button onClick={()=>go('evidence')}>查看事件证据</button><button onClick={()=>setDialog('diagnosis')}>创建修复任务</button></div>
+                  </div>
+                  <div className="monetization-health">
+                    <div className="health-title"><strong>数据可信度</strong><span>可用于业务判断</span></div>
+                    <div><span>P0事件完整率</span><strong>100%</strong><em>通过</em></div>
+                    <div><span>事件链关联率</span><strong>99.2%</strong><em>通过</em></div>
+                    <div><span>请求终态完整率</span><strong>99.6%</strong><em>通过</em></div>
+                    <div><span>异常口径</span><strong>0项</strong><em>UV/Count已隔离</em></div>
+                  </div>
+                  <div className="monetization-loss-rank">
+                    <div className="loss-rank-head"><strong>损失优先级</strong><span>按可修复收入影响排序</span></div>
+                    {[
+                      ['1','Eligible → Opportunity','-6.4pp','18,112 UV','$1,086/日','产品 / 客户端','bad'],
+                      ['2','Load Success → Impression','14.7%未展示','28,206次','$624/日','客户端 / 广告策略','warn'],
+                      ['3','DAU → AV','23.1%覆盖','98,759 UV','$418/日','产品 / 运营','warn']
+                    ].map(([rank,name,delta,loss,impact,owner,tone])=><button key={rank} className={tone} onClick={()=>setWorkbenchSection('step-diagnosis')}><b>{rank}</b><span><strong>{name}</strong><small>{owner}</small></span><em>{delta}</em><span><strong>{loss}</strong><small>损失量</small></span><span><strong>{impact}</strong><small>预计影响</small></span></button>)}
+                  </div>
+                </div>}
                 <div className="diagnostic-metric-grid">
                   {diagnosticMetricGroups[diagnosticDomain].map(([label,value,fraction,delta,tone,formula]) => <button key={label} className={`diagnostic-metric ${tone}`} onClick={()=>notify(`${label}已按${diagnosticSlice}筛选，并打开事件证据`)}><span>{label}</span><strong>{value}</strong><em>{delta} 较基线</em><small>{fraction}</small><code>{formula}</code></button>)}
                 </div>
