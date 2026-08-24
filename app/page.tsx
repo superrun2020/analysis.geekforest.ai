@@ -740,7 +740,7 @@ function ModulePage({ module, project, configs, onProjectChange, openModule, ope
         <div className="surface"><div className="surface-title"><div><h2>稳定性与质量</h2><p>成功连接不等于体验可用</p></div></div><div className="vpn-kpi-list"><div><span>网络切换存活率</span><strong>87.6%</strong><small>切网后60秒仍连接或恢复</small></div><div><span>自动重连成功率</span><strong>83.6%</strong><small>trigger_type=auto_reconnect</small></div><div><span>质量采样覆盖率</span><strong>91.4%</strong><small>有 quality_sample 的成功会话</small></div><div><span>延迟 P50 / P95</span><strong>148 / 684ms</strong><small>按country/asn/protocol/server拆解</small></div><div><span>丢包率 P95</span><strong className="negative">11.8%</strong><small>超过10%专项告警</small></div></div></div>
       </section>
 
-      <section className="two-column wide-left"><div className="surface"><div className="surface-title"><div><h2>VPN × 广告变现联动</h2><p>连接成功后继续按同一 vpn_session_id 关联广告机会、请求、after IP 与展示</p></div><button className="text-button" onClick={()=>{setModule('funnel');setPage('workbench');setDiagnosticDomain('ads')}}>进入分析工作台</button></div><div className="diagnostic-chain">{[['连接成功','61,423','100%','normal'],['出口IP成功','59,458','96.8%','normal'],['广告机会','42,687','69.5%','normal'],['广告请求','39,204','91.8%','normal'],['加载成功','37,419','95.4%','normal'],['广告浏览AV','31,806','85.0%','bad']].map(([label,value,rate,status],index)=><div key={label} className={status==='bad'?'bad':''}><span>{index+1}</span><strong>{label}</strong><em>{value}</em><small>{rate}</small></div>)}</div><div className="vpn-ad-dimensions"><span>可下钻：</span><button>before/after国家</button><button>access ASN</button><button>server_id</button><button>protocol</button><button>transport</button><button>quality_status</button><button>AdMob error</button></div></div><aside className="surface"><div className="surface-title"><div><h2>数据可信度</h2><p>V1.8 VPN P0门禁</p></div><Badge tone="bad">未达标</Badge></div><div className="quality-gates"><div><span>vpn_session_id完整率</span><strong>99.1% / 100%</strong></div><div><span>connection_id完整率</span><strong>99.4% / 100%</strong></div><div><span>连接结果覆盖率</span><strong>99.7% / ≈100%</strong></div><div><span>阶段终态完整率</span><strong>98.8% / 100%</strong></div><button onClick={()=>openModule('tracking')}>按 V1.8 配置发起验收</button></div></aside></section>
+      <section className="two-column wide-left"><div className="surface"><div className="surface-title"><div><h2>VPN × 广告变现联动</h2><p>仅按同一 vpn_session_id / connection_id 关联连接成功后的广告机会、请求、after IP 与展示</p></div><button className="text-button" onClick={()=>{setModule('funnel');setPage('workbench');setDiagnosticDomain('ads')}}>进入分析工作台</button></div><div className="diagnostic-chain">{[['连接成功','61,423','100%','normal'],['出口IP成功','59,458','96.8%','normal'],['广告机会','42,687','69.5%','normal'],['广告请求','39,204','91.8%','normal'],['加载成功','37,419','95.4%','normal'],['广告浏览AV','31,806','85.0%','bad']].map(([label,value,rate,status],index)=><div key={label} className={status==='bad'?'bad':''}><span>{index+1}</span><strong>{label}</strong><em>{value}</em><small>{rate}</small></div>)}</div><div className="vpn-ad-dimensions"><span>可下钻：</span>{['before/after国家','access ASN','server_id','protocol','transport','quality_status','AdMob error'].map((item)=><button key={item} onClick={()=>{notify(`${item} 下钻已应用`);setModule('funnel');setPage('workbench');setWorkbenchSection('diagnosis-overview')}}>{item}</button>)}</div></div><aside className="surface"><div className="surface-title"><div><h2>数据可信度</h2><p>V1.8 VPN P0门禁</p></div><Badge tone="bad">未达标</Badge></div><div className="quality-gates"><div><span>vpn_session_id完整率</span><strong>99.1% / 100%</strong></div><div><span>connection_id完整率</span><strong>99.4% / 100%</strong></div><div><span>连接结果覆盖率</span><strong>99.7% / ≈100%</strong></div><div><span>阶段终态完整率</span><strong>98.8% / 100%</strong></div><button onClick={()=>openModule('tracking')}>按 V1.8 配置发起验收</button></div></aside></section>
     </div>
   );
 
@@ -884,6 +884,8 @@ export default function Home() {
   const [selectedEvent, setSelectedEvent] = useState(7);
   const [evidenceMode, setEvidenceMode] = useState("ad");
   const [onlyErrors, setOnlyErrors] = useState(false);
+  const [evidenceKeyword, setEvidenceKeyword] = useState("");
+  const [evidenceSource, setEvidenceSource] = useState("全部来源");
   const [rawOpen, setRawOpen] = useState(false);
   const [issueStatus, setIssueStatus] = useState("修复中");
   const [notice, setNotice] = useState("");
@@ -964,7 +966,13 @@ export default function Home() {
   const currentModule = moduleCopy[module];
   const visibleEvents = eventRows
     .map((event, index) => ({ event, index }))
-    .filter(({ event }) => !onlyErrors || event.result !== "有效");
+    .filter(({ event }) => !onlyErrors || event.result !== "有效")
+    .filter(({ event }) => evidenceSource === "全部来源" || event.source === evidenceSource)
+    .filter(({ event }) => {
+      const keyword = evidenceKeyword.trim().toLowerCase();
+      return !keyword || [event.name, event.id, event.detail, event.requestType, event.cacheStatus]
+        .some((value) => value.toLowerCase().includes(keyword));
+    });
   const issuePhase = issueStatus === "重测中" ? 3 : 2;
   const trendValues = trendMetric === "viewer" ? activeProfile.viewerTrend : activeProfile.opportunityTrend;
   const trendLabel = trendMetric === "viewer" ? "广告浏览者比例" : "Opportunity机会覆盖率";
@@ -1153,7 +1161,7 @@ export default function Home() {
     <MetricInspectContext.Provider value={openMetricDefinition}>
     <div className={`app-shell ${embedded ? "embedded" : ""}`}>
       <aside className="sidebar">
-        <div className="brand"><span className="brand-mark">JK</span><span><strong>变现与埋点</strong><small>质量分析中心 · V26</small></span></div>
+        <div className="brand"><span className="brand-mark">JK</span><span><strong>变现与埋点</strong><small>质量分析中心 · V34</small></span></div>
         <div className="nav-group-label">经营分析</div>
         {moduleMenus.filter((item) => item.group === "经营分析").map((item) => <button key={item.key} className={`main-nav-item ${module === item.key ? "active" : ""}`} onClick={() => openModule(item.key)}><span>{item.index}</span>{item.label}</button>)}
         <div className="nav-group-label">质量治理</div>
@@ -1198,7 +1206,7 @@ export default function Home() {
           </section>}
 
           {module !== "firebaseSetup" && <section className="context-toolbar">
-            <div className="context-summary"><Badge tone="blue">{module === "funnel" ? currentPage.hint : currentModule.title}</Badge><span>{project}</span><i /> <span>{range}</span><i /> <span>{platform} · {appVersion}</span><i /> <span>{country}</span><i /> <span>口径 V1.7</span></div>
+            <div className="context-summary"><Badge tone="blue">{module === "funnel" ? currentPage.hint : currentModule.title}</Badge><span>{project}</span><i /> <span>{range}</span><i /> <span>{platform} · {appVersion}</span><i /> <span>{country}</span><i /> <span>口径 V1.8</span></div>
             <div className="context-actions"><button onClick={() => notify("当前分析视图已保存")}>保存视图</button><button onClick={() => setDialog(module === "admob" ? "admob-report" : "project-report")}>导出报表</button></div>
           </section>}
           <section className="freshness-note"><div><strong>数据使用提示：</strong>{sourceStatus[module].note}</div><button onClick={() => openMetricDefinition(module === "admob" ? "match_rate" : module === "tracking" ? "event_pass_rate" : "dau")}>查看数据口径</button></section>
@@ -1452,7 +1460,7 @@ export default function Home() {
               </>}
 
               {false && <section className="surface intelligent-diagnosis-workspace">
-                <div className="surface-title"><div><h2>精细化运营诊断与版本学习</h2><p>基于 V1.7 字段先做可解释规则诊断，再用 AI 复核跨维度证据；结论必须进入版本验证闭环</p></div><label className="inline-page-selector">异常指标<select value={operationMetric} onChange={(event) => { setOperationMetric(event.target.value as keyof typeof operationDiagnosisProfiles); setAiDiagnosisReady(false); }}>{Object.entries(operationDiagnosisProfiles).map(([key, item]) => <option key={key} value={key}>{item.label}</option>)}</select></label></div>
+                <div className="surface-title"><div><h2>精细化运营诊断与版本学习</h2><p>基于 V1.8 字段先做可解释规则诊断，再用 AI 复核跨维度证据；结论必须进入版本验证闭环</p></div><label className="inline-page-selector">异常指标<select value={operationMetric} onChange={(event) => { setOperationMetric(event.target.value as keyof typeof operationDiagnosisProfiles); setAiDiagnosisReady(false); }}>{Object.entries(operationDiagnosisProfiles).map(([key, item]) => <option key={key} value={key}>{item.label}</option>)}</select></label></div>
                 <div className="diagnosis-command-strip">
                   <div><span><MetricLabel metric={operationMetric}>{operationDiagnosis.label}</MetricLabel></span><strong>{operationDiagnosis.value}</strong><small>较基线 <b>{operationDiagnosis.delta}</b></small></div>
                   <div><span>规则诊断可信度</span><strong>86%</strong><small>原因覆盖 98.0% · Unknown 2.0%</small></div>
@@ -1477,7 +1485,7 @@ export default function Home() {
                   </article>
                 </div>
                 <div className="diagnosis-dimension-catalog">
-                  <div className="subsection-head"><div><h3>V1.7 可下钻诊断维度</h3><p>任何指标变差先自动跑这些切片，输出“变化幅度 × 影响用户 × 收入影响 × 置信度”排序</p></div><span>12 组维度</span></div>
+                  <div className="subsection-head"><div><h3>V1.8 可下钻诊断维度</h3><p>任何指标变差先自动跑这些切片，输出“变化幅度 × 影响用户 × 收入影响 × 置信度”排序</p></div><span>12 组维度</span></div>
                   <div className="dimension-chip-grid">{v17DiagnosisDimensions.map(([name, fields, status]) => <button key={name} className={status === "需扩展" ? "needs-extension" : ""} onClick={() => notify(`${name}维度已加入当前诊断`)}><span>{name}</span><p>{fields}</p><small>{status}</small></button>)}</div>
                 </div>
                 <div className="version-learning-loop">
@@ -1498,7 +1506,7 @@ export default function Home() {
                   <div className="formula-list compact"><div><strong>广告浏览者比例</strong><code>AV / DAU</code><p>AV 为 Impression 独立用户，不是展示次数。</p></div><div><strong>人均展示次数</strong><code>Impression / AV</code><p>衡量展示是否集中在少数用户。</p></div><div><strong>原因分类质量</strong><code>coverage ≥99% · unknown &lt;1%</code><p>未达标时不能直接给出高可信根因。</p></div><div><strong>Request UV</strong><code>preload UV ∪ realtime UV</code><p>非严格观察节点，不替代机会履约率。</p></div></div>
                 </div>
                 <aside className="surface">
-                  <div className="surface-title"><div><h2>技术落地检查</h2><p>研发可直接按证据字段定位</p></div><Badge tone="blue">V1.7</Badge></div>
+                  <div className="surface-title"><div><h2>技术落地检查</h2><p>研发可直接按证据字段定位</p></div><Badge tone="blue">V1.8</Badge></div>
                   <div className="id-chain-list"><div><code>decision_id</code><span>资格检查与阻止原因</span><strong>P0</strong></div><div><code>opportunity_id</code><span>一次真实业务广告机会</span><strong>P0</strong></div><div><code>request_id</code><span>每次真实 load；重试必须新建</span><strong>P0</strong></div><div><code>ad_instance_id</code><span>加载成功后绑定缓存对象到终态</span><strong>P0</strong></div></div>
                   <div className="technical-actions"><button onClick={() => go("evidence")}><strong>上下文关联</strong><span>检查缓存对象是否保存 instanceContext</span></button><button onClick={() => openModule("tracking")}><strong>打点完整性</strong><span>P0 事件、参数与关联链必须 100%</span></button><button onClick={() => openModule("reconcile")}><strong>分源对账</strong><span>Firebase T+0 与 AdMob T+3 分开判断</span></button><button onClick={() => setDialog("diagnosis")}><strong>修复闭环</strong><span>带证据创建任务并回归验证</span></button></div>
                 </aside>
@@ -1593,8 +1601,9 @@ export default function Home() {
               <section className="two-column wide-left evidence-layout">
                 <div className="surface">
                   <div className="surface-title"><div><h2>{evidenceMode === "ad" ? "预加载库存 → 当前机会 → Paid 关联链" : "用户会话完整时间线"}</h2><p>event_id 去重 · event_time 排序 · 预加载不要求 opportunity_id</p></div><div><Badge tone="bad">1 个链路异常</Badge> <Badge tone="warn">1 个P1缺失</Badge></div></div>
-                  <div className="evidence-controls"><label>事件/ID<input placeholder="搜索 event_name 或 request_id" /></label><label>来源<select><option>全部来源</option><option>Firebase</option><option>质量引擎</option></select></label><button className={onlyErrors ? "active" : ""} onClick={() => setOnlyErrors(!onlyErrors)}>{onlyErrors ? "显示全部事件" : "仅看异常 3"}</button></div>
+                  <div className="evidence-controls"><label>事件/ID<input value={evidenceKeyword} onChange={(event) => setEvidenceKeyword(event.target.value)} placeholder="搜索 event_name、event_id 或 request_id" /></label><label>来源<select value={evidenceSource} onChange={(event) => setEvidenceSource(event.target.value)}><option>全部来源</option><option>Firebase</option><option>质量引擎</option></select></label><button className={onlyErrors ? "active" : ""} onClick={() => setOnlyErrors(!onlyErrors)}>{onlyErrors ? "显示全部事件" : "仅看异常 3"}</button></div>
                   <div className="event-timeline">{visibleEvents.map(({ event, index }) => <button key={`${event.time}-${event.name}`} className={`${selectedEvent === index ? "selected" : ""} ${event.result === "缺失" || event.result === "链路异常" ? "event-bad" : ""}`} onClick={() => setSelectedEvent(index)}><span className="event-time">{event.time}</span><span className="event-dot" /><div><strong>{event.name}</strong><p>{event.detail}</p><small>{event.id} · {event.source}</small></div><Badge tone={event.result === "有效" ? "good" : event.result === "P1缺失" ? "warn" : "bad"}>{event.result}</Badge></button>)}</div>
+                  {visibleEvents.length === 0 && <div className="evidence-empty"><strong>没有匹配事件</strong><p>请调整事件/ID、来源或异常筛选条件。</p><button onClick={() => { setEvidenceKeyword(""); setEvidenceSource("全部来源"); setOnlyErrors(false); }}>清空筛选</button></div>}
                 </div>
                 <aside className="surface event-detail">
                   <div className="surface-title"><div><h2>事件详情</h2><p>{eventRows[selectedEvent].name}</p></div></div>
@@ -1602,7 +1611,7 @@ export default function Home() {
                   <dl><div><dt>event_id</dt><dd>{eventRows[selectedEvent].id}</dd></div><div><dt>opportunity_id</dt><dd className={eventRows[selectedEvent].name === "jk_ad_impression" ? "negative" : ""}>{eventRows[selectedEvent].name === "jk_ad_impression" ? "缺失" : selectedEvent < 3 ? "—（预加载不传）" : "opp_82c"}</dd></div><div><dt>request_id</dt><dd>{selectedEvent < 3 ? "req_pre_91a" : "—（缓存命中无新请求）"}</dd></div><div><dt>request_type</dt><dd>{eventRows[selectedEvent].requestType}</dd></div><div><dt>is_preload</dt><dd>{eventRows[selectedEvent].requestType === "preload" ? "1" : "0 / 不适用"}</dd></div><div><dt>cache_status</dt><dd>{eventRows[selectedEvent].cacheStatus}</dd></div><div><dt>ad_instance_id</dt><dd>{selectedEvent > 0 ? "ins_671" : "—"}</dd></div><div><dt>placement</dt><dd>vpn_connect_success</dd></div><div><dt>数据来源</dt><dd>{eventRows[selectedEvent].source}</dd></div></dl>
                   {eventRows[selectedEvent].name === "jk_ad_impression" && <div className="conclusion-block bad"><strong>CHAIN_INVALID</strong><p>缓存广告对象取出时没有绑定当前 opportunity_id；预加载 request_id 和 ad_instance_id 正常。</p></div>}
                   <div className="detail-actions"><button onClick={() => { setRawOpen(!rawOpen); }}>{rawOpen ? "收起原始参数" : "查看原始参数"}</button><button onClick={() => notify("事件证据链接已复制")}>复制证据链接</button></div>
-                  {rawOpen && <pre className="raw-payload">{`{\n  "event_name": "${eventRows[selectedEvent].name}",\n  "event_id": "${eventRows[selectedEvent].id}",\n  "request_type": "${eventRows[selectedEvent].requestType}",\n  "is_preload": ${eventRows[selectedEvent].requestType === "preload" ? 1 : 0},\n  "cache_status": "${eventRows[selectedEvent].cacheStatus}",\n  "request_id": ${selectedEvent < 3 ? "\"req_pre_91a\"" : "null"},\n  "opportunity_id": ${eventRows[selectedEvent].name === "jk_ad_impression" ? "null" : selectedEvent < 3 ? "null" : "\"opp_82c\""},\n  "schema_version": "1.7"\n}`}</pre>}
+                  {rawOpen && <pre className="raw-payload">{`{\n  "event_name": "${eventRows[selectedEvent].name}",\n  "event_id": "${eventRows[selectedEvent].id}",\n  "request_type": "${eventRows[selectedEvent].requestType}",\n  "is_preload": ${eventRows[selectedEvent].requestType === "preload" ? 1 : 0},\n  "cache_status": "${eventRows[selectedEvent].cacheStatus}",\n  "request_id": ${selectedEvent < 3 ? "\"req_pre_91a\"" : "null"},\n  "opportunity_id": ${eventRows[selectedEvent].name === "jk_ad_impression" ? "null" : selectedEvent < 3 ? "null" : "\"opp_82c\""},\n  "schema_version": "1.8"\n}`}</pre>}
                   <button className="primary-button full" onClick={() => { go("issues"); notify("事件证据已加入问题单"); }}>将证据加入问题单</button>
                 </aside>
               </section>
@@ -1637,8 +1646,8 @@ export default function Home() {
 
           {module === "funnel" && page === "snapshot" && (
             <div className="page-stack">
-              <section className="snapshot-head surface"><div><div className="eyebrow">只读执行快照</div><h2>IRAN-VPN-01 · 漏斗口径 V1.7</h2><p>生效于 2026-08-01 · 套利 VPN v1.7 ＋ 广告 v1.7 ＋ VPN v1.7</p></div><div><Badge tone="good">已发布</Badge> <button className="secondary-button" onClick={() => notify("已定位到项目类型设置中的 V1.7 配置")}>前往项目类型设置</button></div></section>
-              <section className="metric-grid five"><Metric label="产品漏斗" value="6 步" note="严格顺序" /><Metric label="变现用户观察链" value="8 节点" note="Request UV 为非严格观察节点" /><Metric label="变现事件效率链" value="10 步" note="含 Request Accepted 派生检查点" /><Metric label="履约与库存" value="3 条路径" note="缓存/实时请求/预加载" /><Metric label="规范版本" value="V1.7" note="schema_version 1.7" /></section>
+              <section className="snapshot-head surface"><div><div className="eyebrow">只读执行快照</div><h2>IRAN-VPN-01 · 漏斗口径 V1.8</h2><p>生效于 2026-08-18 · 套利 VPN V1.8 ＋ 广告 V1.8 ＋ VPN 弱网专项 V1.8</p></div><div><Badge tone="good">已发布</Badge> <button className="secondary-button" onClick={() => notify("已定位到项目类型设置中的 V1.8 配置")}>前往项目类型设置</button></div></section>
+              <section className="metric-grid five"><Metric label="产品漏斗" value="6 步" note="严格顺序" /><Metric label="变现用户观察链" value="8 节点" note="Request UV 为非严格观察节点" /><Metric label="变现事件效率链" value="10 步" note="含 Request Accepted 派生检查点" /><Metric label="履约与库存" value="3 条路径" note="缓存/实时请求/预加载" /><Metric label="规范版本" value="V1.8" note="schema_version 1.8" /></section>
               <section className="surface">
                 <div className="surface-title"><div><h2>变现用户漏斗定义</h2><p>Firebase 实时口径；AdMob 数据仅用于结算对账</p></div><Badge tone="blue">User Funnel</Badge></div>
                 <div className="table-wrap"><table><thead><tr><th>步骤</th><th>事件</th><th>用户判定</th><th>条件/窗口</th><th>关键关联字段</th><th>优先级</th><th>数据源</th></tr></thead><tbody>{[
@@ -1662,7 +1671,7 @@ export default function Home() {
               </section>
               <section className="two-column">
                 <div className="surface"><div className="surface-title"><div><h2>核心指标公式</h2><p>页面、导出和告警统一引用；总 Request 不可作为机会主漏斗分母</p></div></div><div className="formula-list"><div><strong>广告展示独立用户（AV）</strong><code>COUNT_DISTINCT(user_pseudo_id WHERE event_name='jk_ad_impression')</code><p>至少产生过一次广告展示事件的独立用户数，不是展示总次数。</p></div><div><strong>广告展示独立用户比例</strong><code>AV / DAU</code><p>回答有多少活跃用户真正看到了广告。</p></div><div><strong>请求用户覆盖率</strong><code>Request UV / DAU</code><p>Request UV 合并预加载与实时请求用户，仅衡量请求覆盖，不作为 Opportunity 的严格下一步。</p></div><div><strong>人均请求次数</strong><code>request_count / Request UV</code><p>识别重复请求、过度预加载或重试异常。</p></div><div><strong>Opportunity覆盖率</strong><code>COUNT_DISTINCT(opportunity_user) / DAU</code><p>定位真实广告机会覆盖问题。</p></div><div><strong>机会履约率</strong><code>COUNT_DISTINCT(opportunity_id with show_attempt) / COUNT_DISTINCT(opportunity_id)</code><p>缓存与实时请求两条路径在 Show Attempt 汇合后判断。</p></div><div><strong>Miss 后实时请求率</strong><code>realtime_request_opportunity / cache_miss_opportunity</code><p>定位缓存未命中后没有真正发起请求的问题。</p></div><div><strong>加载成功率</strong><code>load_success / accepted_request</code><p>按 request_type、error_code、adapter 和国家拆解。</p></div><div><strong>缓存命中率</strong><code>cache_hit / (cache_hit + cache_miss)</code><p>判断现有库存能否满足真实机会。</p></div><div><strong>预加载成功率</strong><code>preload_load_success / preload_request</code><p>仅评估预加载库存生产效率。</p></div><div><strong>缓存浪费率</strong><code>(cache_expired + cache_evicted) / cache_store</code><p>定位 TTL、缓存容量和触发策略问题。</p></div><div><strong>展示尝试成功率</strong><code>impression_count / show_attempt_count</code><p>定位真实调用 Show 后的展示失败。</p></div><div><strong>Paid 回调完整率</strong><code>paid_event_count / impression_count</code><p>定位 Paid 回调延迟、丢失或重复。</p></div><div><strong>人均展示次数</strong><code>COUNT(jk_ad_impression) / AV</code><p>展示总次数除以广告展示独立用户数，判断展示是否集中。</p></div></div></div>
-                <aside className="surface"><div className="surface-title"><div><h2>版本变更</h2><p>当前口径相对 V1.6</p></div><Badge tone="blue">V1.7</Badge></div><div className="version-diff"><div><span>新增</span><p>ip_before_connect / ip_after_connect 诊断字段</p></div><div><span>调整</span><p>ip_after_connect 在广告拉取事件中传输派生信息</p></div><div><span>明确</span><p>完整 IP 不进入 Firebase，且不作为漏斗步骤</p></div><button onClick={() => setDialog("version-diff-report")}>导出版本差异</button></div></aside>
+                <aside className="surface"><div className="surface-title"><div><h2>版本变更</h2><p>当前口径相对 V1.7</p></div><Badge tone="blue">V1.8</Badge></div><div className="version-diff"><div><span>新增</span><p>VPN 弱网阶段、协议回退、切网重连与连接质量指标</p></div><div><span>加强</span><p>连接后广告必须按 vpn_session_id / connection_id 严格关联</p></div><div><span>明确</span><p>未来时间与非法事件进入质量诊断，不参与默认业务漏斗</p></div><button onClick={() => setDialog("version-diff-report")}>导出版本差异</button></div></aside>
               </section>
             </div>
           )}
