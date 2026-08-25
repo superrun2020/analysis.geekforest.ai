@@ -20,8 +20,8 @@ type Props = {
 type AnyRow = Record<string, any>;
 type FunnelUnit = "users" | "sessions" | "events";
 type PackageData = Record<string, AnyRow>;
-type QueryProgressStatus = "pending" | "loading" | "done" | "error";
-type QueryProgressItem = { key: string; label: string; status: QueryProgressStatus; finishedAt?: string; error?: string };
+type QueryProgressStatus = "pending" | "loading" | "retrying" | "done" | "error";
+type QueryProgressItem = { key: string; label: string; status: QueryProgressStatus; finishedAt?: string; error?: string; attempt?: number; maxAttempts?: number };
 type DropoffSelection = { fromIndex: number; toIndex: number };
 const number = (value: unknown) => value === null || value === undefined ? "—" : Number(value).toLocaleString("zh-CN", { maximumFractionDigits: 2 });
 const percent = (value: unknown) => value === null || value === undefined ? "—" : `${number(value)}%`;
@@ -130,10 +130,10 @@ function QueryProgressPanel({ items, compact = false }: { items: QueryProgressIt
   if (!items.length) return null;
   const doneCount = items.filter((item) => item.status === "done").length;
   const failedCount = items.filter((item) => item.status === "error").length;
-  const loading = items.find((item) => item.status === "loading");
+  const loading = items.find((item) => item.status === "loading" || item.status === "retrying");
   return <section className={`query-progress-panel ${compact ? "compact" : ""}`}>
-    <div className="query-progress-title"><div><strong>查询进度</strong><small>{loading ? `正在查询：${loading.label}` : doneCount === items.length ? "全部数据查询完成" : "等待后台补齐剩余数据"}</small></div><span>{doneCount}/{items.length} 完成{failedCount ? ` · ${failedCount} 失败` : ""}</span></div>
-    <div className="query-progress-list">{items.map((item) => <div key={item.key} className={item.status}><i>{item.status === "done" ? "✓" : item.status === "error" ? "!" : item.status === "loading" ? "…" : "○"}</i><span>{item.label}</span><small>{item.status === "done" ? `${item.finishedAt || "刚刚"} 完成` : item.status === "error" ? item.error || "查询失败" : item.status === "loading" ? "查询中" : "待查询"}</small></div>)}</div>
+    <div className="query-progress-title"><div><strong>查询进度</strong><small>{loading ? `${loading.status === "retrying" ? "自动重拉" : "正在查询"}：${loading.label}` : doneCount === items.length ? "全部数据查询完成" : "等待后台补齐剩余数据"}</small></div><span>{doneCount}/{items.length} 完成{failedCount ? ` · ${failedCount} 失败` : ""}</span></div>
+    <div className="query-progress-list">{items.map((item) => <div key={item.key} className={item.status}><i>{item.status === "done" ? "✓" : item.status === "error" ? "!" : item.status === "loading" || item.status === "retrying" ? "…" : "○"}</i><span>{item.label}</span><small>{item.status === "done" ? `${item.finishedAt || "刚刚"} 完成` : item.status === "error" ? item.error || "查询失败" : item.status === "retrying" ? `自动重拉中，第 ${item.attempt || 2}/${item.maxAttempts || 3} 次` : item.status === "loading" ? `查询中，第 ${item.attempt || 1}/${item.maxAttempts || 3} 次` : "待查询"}</small></div>)}</div>
   </section>;
 }
 
@@ -226,8 +226,8 @@ function DropoffAnalysisPanel({ rows, selection, onSelectionChange, pageData, di
     </section>
     <div className="dropoff-conclusion"><strong>当前判断</strong><p>{isFirstCheck ? "DAU 到广告资格检查断层，说明用户已经活跃，但没有进入广告资格判断。优先排查：哪些页面没有触发广告入口/按钮点击，广告资格检查调用时机是否过晚，入口曝光后是否被条件拦截，以及 app_foreground 与 ad_eligibility_check 是否存在打点缺失。" : loss > 0 ? `主要流失发生在 ${rowName(from)} 到 ${rowName(to)}。优先看该步骤的触发条件、页面入口、SDK 回调是否完整，以及上一环节 ID 是否能串到下一环节。` : "当前环节没有明显流失，可优先分析后续转化更低的断点。"}</p></div>
     <section className="two-column wide-left">
-      <div className="surface nested"><div className="surface-title"><div><h2>页面点击 / 未点击分析</h2><p>按页面 UV 对比进入下一广告动作的用户，定位漏在哪些页面。</p></div><span>{pageProgress?.status === "done" ? "页面路径已完成" : pageProgress?.status === "loading" ? "页面路径查询中" : "等待页面路径"}</span></div>{topMissingPages.length ? <div className="table-wrap"><table><thead><tr><th>页面</th><th>页面UV</th><th>进入下一步</th><th>未进入</th><th>漏失率</th></tr></thead><tbody>{topMissingPages.map((page) => <tr key={page.screenName ?? page.label}><td><strong>{text(page.screenName ?? page.label)}</strong><small>{text(page.entrySource ?? page.pathType)}</small></td><td>{number(page.pageUsers)}</td><td>{number(page.reached)}</td><td>{number(page.missing)}</td><td>{page.missingRate === null ? "—" : percent(page.missingRate)}</td></tr>)}</tbody></table></div> : <div className="inline-empty">{pageProgress?.status === "loading" || pageProgress?.status === "pending" ? "页面路径数据还在查询，完成后这里会自动显示每个页面的点击/未点击情况。" : "当前页面路径数据没有下一步用户字段，建议后端补充 page × step 的到达人数。"}</div>}</div>
-      <aside className="surface nested"><div className="surface-title"><div><h2>快速结论</h2><p>运营优先看这两类页面</p></div></div><dl className="operational-kv"><div><dt>有进入下一步的页面</dt><dd>{activePages.length ? activePages.map((page) => text(page.screenName ?? page.label)).join("、") : "暂无"}</dd></div><div><dt>完全未进入下一步的页面</dt><dd>{inactivePages.length ? inactivePages.map((page) => text(page.screenName ?? page.label)).join("、") : "暂无"}</dd></div><div><dt>原因数据状态</dt><dd>{diagnosisProgress?.status === "done" ? "已完成" : diagnosisProgress?.status === "loading" ? "查询中" : "等待查询"}</dd></div></dl>{reasons.length > 0 && <div className="dropoff-reasons">{reasons.slice(0, 4).map((reason) => <div key={reason.code ?? reason.reason}><strong>{text(reason.label ?? reason.code ?? reason.reason)}</strong><small>{number(reason.count ?? reason.users)} · {percent(reason.share ?? reason.rate)}</small></div>)}</div>}</aside>
+      <div className="surface nested"><div className="surface-title"><div><h2>页面点击 / 未点击分析</h2><p>按页面 UV 对比进入下一广告动作的用户，定位漏在哪些页面。</p></div><span>{pageProgress?.status === "done" ? "页面路径已完成" : pageProgress?.status === "retrying" ? "页面路径自动重拉中" : pageProgress?.status === "loading" ? "页面路径查询中" : "等待页面路径"}</span></div>{topMissingPages.length ? <div className="table-wrap"><table><thead><tr><th>页面</th><th>页面UV</th><th>进入下一步</th><th>未进入</th><th>漏失率</th></tr></thead><tbody>{topMissingPages.map((page) => <tr key={page.screenName ?? page.label}><td><strong>{text(page.screenName ?? page.label)}</strong><small>{text(page.entrySource ?? page.pathType)}</small></td><td>{number(page.pageUsers)}</td><td>{number(page.reached)}</td><td>{number(page.missing)}</td><td>{page.missingRate === null ? "—" : percent(page.missingRate)}</td></tr>)}</tbody></table></div> : <div className="inline-empty">{pageProgress?.status === "loading" || pageProgress?.status === "pending" || pageProgress?.status === "retrying" ? "页面路径数据还在查询或自动重拉，完成后这里会自动显示每个页面的点击/未点击情况。" : "当前页面路径数据没有下一步用户字段，建议后端补充 page × step 的到达人数。"}</div>}</div>
+      <aside className="surface nested"><div className="surface-title"><div><h2>快速结论</h2><p>运营优先看这两类页面</p></div></div><dl className="operational-kv"><div><dt>有进入下一步的页面</dt><dd>{activePages.length ? activePages.map((page) => text(page.screenName ?? page.label)).join("、") : "暂无"}</dd></div><div><dt>完全未进入下一步的页面</dt><dd>{inactivePages.length ? inactivePages.map((page) => text(page.screenName ?? page.label)).join("、") : "暂无"}</dd></div><div><dt>原因数据状态</dt><dd>{diagnosisProgress?.status === "done" ? "已完成" : diagnosisProgress?.status === "retrying" ? "自动重拉中" : diagnosisProgress?.status === "loading" ? "查询中" : "等待查询"}</dd></div></dl>{reasons.length > 0 && <div className="dropoff-reasons">{reasons.slice(0, 4).map((reason) => <div key={reason.code ?? reason.reason}><strong>{text(reason.label ?? reason.code ?? reason.reason)}</strong><small>{number(reason.count ?? reason.users)} · {percent(reason.share ?? reason.rate)}</small></div>)}</div>}</aside>
     </section>
   </section>;
 }
@@ -310,37 +310,58 @@ export function OperationalFunnel(props: Props) {
     const markProgress = (key: string, patch: Partial<QueryProgressItem>) => {
       setProgressItems((current) => current.map((item) => item.key === key ? { ...item, ...patch } : item));
     };
+    const waitRetryDelay = (attempt: number) => new Promise<void>((resolve) => {
+      window.setTimeout(resolve, attempt === 1 ? 1200 : 3200);
+    });
     const runItem = async (item: FunnelQueryPackageItem, primary = false) => {
-      markProgress(item.key, { status: "loading", error: undefined });
-      const itemController = new AbortController();
-      let itemTimedOut = false;
-      const itemTimeout = window.setTimeout(() => {
-        itemTimedOut = true;
-        itemController.abort();
-      }, primary ? 45000 : 120000);
-      controllers.push(itemController);
-      try {
-        const result = await queryFunnel<AnyRow>(item.query, itemController.signal);
-        if (!active) return;
-        const now = new Date().toLocaleTimeString("zh-CN", { hour12: false });
-        setDataPackage((current) => ({ ...current, [item.key]: result }));
-        markProgress(item.key, { status: "done", finishedAt: now });
-        if (primary) {
-          setLoadedAt(now);
-          setLoading(false);
+      const maxAttempts = primary ? 2 : 3;
+      for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        markProgress(item.key, { status: attempt === 1 ? "loading" : "retrying", error: undefined, attempt, maxAttempts });
+        setPackageErrors((current) => {
+          const next = { ...current };
+          delete next[item.key];
+          return next;
+        });
+        const itemController = new AbortController();
+        let itemTimedOut = false;
+        const itemTimeout = window.setTimeout(() => {
+          itemTimedOut = true;
+          itemController.abort();
+        }, primary ? 45000 : 120000);
+        controllers.push(itemController);
+        try {
+          const result = await queryFunnel<AnyRow>(item.query, itemController.signal);
+          if (!active) return;
+          const now = new Date().toLocaleTimeString("zh-CN", { hour12: false });
+          setDataPackage((current) => ({ ...current, [item.key]: result }));
+          markProgress(item.key, { status: "done", finishedAt: now, attempt, maxAttempts, error: undefined });
+          if (primary) {
+            setLoadedAt(now);
+            setLoading(false);
+          }
+          return;
+        } catch (reason) {
+          if (!active) return;
+          const rawMessage = reason instanceof Error ? reason.message : "未知错误";
+          const message = itemTimedOut ? `${queryItemLabel(item)}读取超时` : rawMessage.toLowerCase().includes("abort") ? `${queryItemLabel(item)}查询被中断` : rawMessage;
+          window.clearTimeout(itemTimeout);
+          if (attempt < maxAttempts) {
+            markProgress(item.key, { status: "retrying", error: `${message}，正在自动重拉`, attempt: attempt + 1, maxAttempts });
+            await waitRetryDelay(attempt);
+            if (!active) return;
+            continue;
+          }
+          const finalMessage = `${message}，已自动重拉 ${maxAttempts} 次仍失败，请缩小筛选范围或稍后再试`;
+          setPackageErrors((current) => ({ ...current, [item.key]: finalMessage }));
+          markProgress(item.key, { status: "error", error: finalMessage, attempt, maxAttempts });
+          if (primary) {
+            setError(finalMessage);
+            setLoading(false);
+          }
+          return;
+        } finally {
+          window.clearTimeout(itemTimeout);
         }
-      } catch (reason) {
-        if (!active) return;
-        const rawMessage = reason instanceof Error ? reason.message : "未知错误";
-        const message = itemTimedOut ? `${queryItemLabel(item)}读取超时，请重试或缩小筛选范围` : rawMessage.toLowerCase().includes("abort") ? `${queryItemLabel(item)}查询被中断，请点击重新加载` : rawMessage;
-        setPackageErrors((current) => ({ ...current, [item.key]: message }));
-        markProgress(item.key, { status: "error", error: message });
-        if (primary) {
-          setError(message);
-          setLoading(false);
-        }
-      } finally {
-        window.clearTimeout(itemTimeout);
       }
     };
 
@@ -356,7 +377,7 @@ export function OperationalFunnel(props: Props) {
   if (loading) return <StatePanel kind="loading" message={`正在优先加载当前页面：${packageLabel}。核心页完成后立即展示，其他数据后台继续查询。`}><QueryProgressPanel items={progressItems} compact /></StatePanel>;
   if (error) return <StatePanel kind="error" message={error} retry={() => setRetryKey((value) => value + 1)} />;
   const activeProgress = progressItems.find((item) => item.key === activeKey);
-  if (!data && (activeProgress?.status === "pending" || activeProgress?.status === "loading")) return <div className="page-stack"><QueryProgressPanel items={progressItems} /><StatePanel kind="loading" message={`${activeProgress.label} 还在后台查询，完成后会自动展示。`} /></div>;
+  if (!data && (activeProgress?.status === "pending" || activeProgress?.status === "loading" || activeProgress?.status === "retrying")) return <div className="page-stack"><QueryProgressPanel items={progressItems} /><StatePanel kind="loading" message={`${activeProgress.label} ${activeProgress.status === "retrying" ? "正在自动重拉" : "还在后台查询"}，完成后会自动展示。`} /></div>;
   if (!data) return <StatePanel kind={packageErrors[activeKey] ? "error" : "empty"} message={packageErrors[activeKey] || "请调整项目、日期、平台或版本后重新查询。"} retry={packageErrors[activeKey] ? () => setRetryKey((value) => value + 1) : undefined} />;
   const hasRows = props.page === "overview" ? (data.projects?.length ?? 0) > 0 : activePage === "workbench" ? (data.metrics?.length ?? data.funnel?.length ?? 0) > 0 : true;
   const status = <PackageStatusBanner projectCode={props.page === "overview" ? "全部项目" : props.projectCode} range={props.range} dates={dates} loadedAt={loadedAt} partialErrors={packageErrors} progressItems={progressItems} />;
