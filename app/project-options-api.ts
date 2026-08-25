@@ -22,7 +22,7 @@ export async function fetchOnlineProjects(signal?: AbortSignal): Promise<OnlineP
   const token = getCompanyAuthToken();
   if (!token) throw new Error("登录已失效，请重新登录");
 
-  const response = await fetch(`${baseUrl}/api/v3/jkcl-funnel/options`, {
+  const response = await fetch(`${baseUrl}/api/v3/jkcl-funnel/projects`, {
     headers: { Accept: "application/json", Authorization: `Bearer ${token}` },
     signal,
   });

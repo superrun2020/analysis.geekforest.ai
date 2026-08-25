@@ -4,14 +4,23 @@ import { useEffect, useState } from "react";
 
 const oaBaseUrl = (process.env.NEXT_PUBLIC_OA_API_BASE_URL ?? "https://oa.geekforest.ai").replace(/\/$/, "");
 export const companyAuthTokenKey = "jkcl_funnel_oa_token";
+const companyAuthExpiresAtKey = "jkcl_funnel_oa_expires_at";
 
-/** Return the current tab-scoped OA token for calls to the protected funnel API. */
+/** Return the device-scoped OA token while its server-issued expiry remains valid. */
 export function getCompanyAuthToken() {
-  return typeof window === "undefined" ? "" : sessionStorage.getItem(companyAuthTokenKey) ?? "";
+  if (typeof window === "undefined") return "";
+  const token = localStorage.getItem(companyAuthTokenKey) ?? "";
+  const expiresAt = Date.parse(localStorage.getItem(companyAuthExpiresAtKey) ?? "");
+  if (!token || !Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
+    localStorage.removeItem(companyAuthTokenKey);
+    localStorage.removeItem(companyAuthExpiresAtKey);
+    return "";
+  }
+  return token;
 }
 
 type AuthUser = { email: string; employee?: { name?: string; status?: string } };
-type AuthResult = { token?: string; user?: AuthUser; error?: string };
+type AuthResult = { token?: string; user?: AuthUser; expiresAt?: string; trustedDevice?: boolean; error?: string };
 
 const errorMessages: Record<string, string> = {
   jkcl_company_email_required: "仅支持 @geekforest.ai 企业邮箱。",
@@ -39,14 +48,17 @@ export function useCompanyAuth() {
   const [checking, setChecking] = useState(true);
 
   useEffect(() => {
-    const token = sessionStorage.getItem(companyAuthTokenKey);
+    const token = getCompanyAuthToken();
     if (!token) {
       setChecking(false);
       return;
     }
     authRequest("/api/auth/me", undefined, token)
       .then((result) => setUser(result.user ?? null))
-      .catch(() => sessionStorage.removeItem(companyAuthTokenKey))
+      .catch(() => {
+        localStorage.removeItem(companyAuthTokenKey);
+        localStorage.removeItem(companyAuthExpiresAtKey);
+      })
       .finally(() => setChecking(false));
   }, []);
 
@@ -55,12 +67,15 @@ export function useCompanyAuth() {
     checking,
     signIn(result: AuthResult) {
       if (!result.token || !result.user) throw new Error("登录结果不完整");
-      sessionStorage.setItem(companyAuthTokenKey, result.token);
+      if (!result.expiresAt || !Number.isFinite(Date.parse(result.expiresAt))) throw new Error("登录有效期缺失");
+      localStorage.setItem(companyAuthTokenKey, result.token);
+      localStorage.setItem(companyAuthExpiresAtKey, result.expiresAt);
       setUser(result.user);
     },
     async signOut() {
-      const token = sessionStorage.getItem(companyAuthTokenKey) ?? "";
-      sessionStorage.removeItem(companyAuthTokenKey);
+      const token = localStorage.getItem(companyAuthTokenKey) ?? "";
+      localStorage.removeItem(companyAuthTokenKey);
+      localStorage.removeItem(companyAuthExpiresAtKey);
       setUser(null);
       if (token) await authRequest("/api/auth/logout", {}, token).catch(() => undefined);
     },
@@ -104,7 +119,7 @@ export function CompanyLogin({ onSignedIn }: { onSignedIn: (result: AuthResult) 
     setLoading(true);
     setMessage("");
     try {
-      const result = await authRequest("/api/auth/login-code", { email, code, audience: "jkcl_funnel" });
+      const result = await authRequest("/api/auth/login-code", { email, code, audience: "jkcl_funnel", trustedDevice: true });
       onSignedIn(result);
     } catch (error) {
       const codeValue = error instanceof Error ? error.message : "unknown";
@@ -119,6 +134,6 @@ export function CompanyLogin({ onSignedIn }: { onSignedIn: (result: AuthResult) 
     <div className="company-login-copy"><h1>{step === "email" ? "使用企业邮箱登录" : "输入邮箱验证码"}</h1><p>{step === "email" ? "系统将通过 OA/HRBP 核验极客主体在职员工身份。" : `验证码已发送至 ${email}`}</p></div>
     {step === "email" ? <form onSubmit={submitEmail}><label>企业邮箱<input autoFocus type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="name@geekforest.ai" required /></label><button disabled={loading}>{loading ? "正在验证…" : "获取登录验证码"}</button></form> : <form onSubmit={submitCode}><label>6 位验证码<input autoFocus inputMode="numeric" maxLength={6} value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, ""))} placeholder="000000" required /></label><button disabled={loading}>{loading ? "正在登录…" : "登录漏斗分析中心"}</button><button type="button" className="login-back" onClick={() => { setStep("email"); setCode(""); setMessage(""); }}>更换邮箱</button></form>}
     {message && <div className="company-login-error" role="alert">{message}</div>}
-    <div className="company-login-policy"><strong>身份验证规则</strong><span>@geekforest.ai 企业邮箱</span><span>极客主体员工</span><span>当前在职</span></div>
+    <div className="company-login-policy"><strong>身份验证规则</strong><span>@geekforest.ai 企业邮箱</span><span>极客主体员工</span><span>当前在职</span><span>本设备 30 天免登录</span></div>
   </section></main>;
 }
