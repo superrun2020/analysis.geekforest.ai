@@ -12,7 +12,7 @@ type ProjectOptionsResponse = {
   projects?: OnlineProject[];
 };
 
-const baseUrl = (process.env.NEXT_PUBLIC_TRACKING_API_BASE_URL ?? "").replace(/\/$/, "");
+const baseUrl = (process.env.NEXT_PUBLIC_TRACKING_API_BASE_URL ?? "https://pupu.apptilaus.com").replace(/\/$/, "");
 
 /** Read the canonical project list exposed by the funnel analysis backend. */
 export async function fetchOnlineProjects(signal?: AbortSignal): Promise<OnlineProject[]> {

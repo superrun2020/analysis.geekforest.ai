@@ -27,7 +27,7 @@ export type FunnelQuery = {
 
 export type FunnelApiEnvelope<T = Record<string, unknown>> = { code?: number; msg?: string; data?: T; error?: string };
 
-const baseUrl = (process.env.NEXT_PUBLIC_TRACKING_API_BASE_URL ?? "").replace(/\/$/, "");
+const baseUrl = (process.env.NEXT_PUBLIC_TRACKING_API_BASE_URL ?? "https://pupu.apptilaus.com").replace(/\/$/, "");
 
 /** Call the OA-protected operational API and preserve actionable failure states. */
 export async function queryFunnel<T = Record<string, unknown>>(query: FunnelQuery, signal?: AbortSignal): Promise<T> {
@@ -49,4 +49,3 @@ export async function queryFunnel<T = Record<string, unknown>>(query: FunnelQuer
   if (!payload.data) throw new Error("漏斗接口未返回数据");
   return payload.data;
 }
-
