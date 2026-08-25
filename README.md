@@ -1,241 +1,261 @@
-# JKCL Funnel Analysis
+# analysis.geekforest.ai
 
-JKCL Funnel Analysis 是面向产品、投放和数据团队的项目分析与数据质量工作台。它把项目经营分析、Firebase/AdMob 数据诊断、数据对账、打点验收和数据任务告警放在同一个操作界面中。
+JKCL 漏斗分析中心前端。系统面向运营、产品、广告变现和数据团队，用来查看多项目概览、单项目工作台、广告变现漏斗、VPN 功能漏斗、Firebase 数据质量、AdMob 收入效率和打点验收。
 
-## 前后端分离
+线上地址：
 
-- 前端：当前 Sites 项目，只负责页面、筛选、操作指引和结果展示。
-- 后端：`nxpanel-tracking-config-api`，负责配置快照、验收 Run、事件接收、参数/关联链校验和审计。
-- 前端环境变量：`NEXT_PUBLIC_TRACKING_API_BASE_URL`、`NEXT_PUBLIC_TRACKING_API_SECURE_PATH`。
-- 企业登录复用 OA/HRBP 邮箱验证码：`NEXT_PUBLIC_OA_API_BASE_URL`，默认 `https://oa.geekforest.ai`。请求携带 `audience=jkcl_funnel`，由 OA 校验 `@geekforest.ai`、极客主体和在职状态；前端不保存员工主数据。
-- 线上项目下拉框读取 `GET /api/v3/{securePath}/funnel-analysis/options`，不再使用演示项目作为失败兜底；接口不可用时页面明确显示错误。
-- 前端管理请求携带现有 NxPanel 登录 Cookie；事件采集使用后端 `TRACKING_ACCEPTANCE_INGEST_KEY`，密钥不得放入前端。
+- <https://analysis.geekforest.ai>
 
-当前阶段已完成“规范与项目配置”以及独立“Firebase 对接”控制面。页面已经按 V1.7 数据结构改成从 repository 读取，Firebase 页当前展示演示数据；数据库连接信息、密钥引用和真实表结构待提供后接入，不会访问或修改线上数据库。
+## 当前能力
+
+- 多项目概览：按 Firebase 已配置项目展示项目列表，不再展示没有 Firebase 配置的数据外项目。
+- 单项目工作台：展示核心指标、漏斗、流失诊断、证据链和修复闭环。
+- VPN 功能分析：围绕 V1.8 VPN 打点分析连接尝试、连接成功、连接阶段、协议回退、节点质量、IP 变化等问题。
+- AdMob 分析：展示 AdMob 收入、eCPM、请求、匹配率、展示率，并和 Firebase/ADB 漏斗做诊断联动。
+- Firebase 数据：展示 Firebase 配置、同步水位、任务日志和数据质量。
+- 漏斗分析：支持产品/VPN 漏斗、广告变现漏斗，支持用户、session、事件等口径。
+- 打点验收中心：按项目类型和配置版本选择需要验证的事件，检查已收到/未收到打点。
+
+## 架构说明
+
+本仓库只包含前端代码。
+
+```text
+浏览器
+  ↓
+analysis.geekforest.ai 前端
+  ↓ 同源 /api/v3/jkcl-funnel/*
+jkcl-funnel-api 后端
+  ↓
+ADB / Firebase 配置库 / AdMob 收入库 / OA 身份校验
+```
+
+前端默认使用当前访问域名作为 API Base。例如部署在 `analysis.geekforest.ai` 时，请求会自动打到：
+
+```text
+https://analysis.geekforest.ai/api/v3/jkcl-funnel/projects
+https://analysis.geekforest.ai/api/v3/jkcl-funnel/query
+```
+
+如需本地调试或部署到其他域名，可通过环境变量覆盖 API 地址。
 
 ## 环境要求
 
-- Node.js `>=22.13.0`
-- npm
+- Node.js >= 22.13.0
+- pnpm 11+
 
-## 本地运行
-
-```bash
-npm install
-npm run dev
-```
-
-开发服务器启动后，打开终端输出的本地地址。直接查看配置页面可以使用：
-
-```text
-/?module=config
-```
-
-## 功能范围
-
-### 经营分析
-
-- 全局项目总览：查看项目用户、投放、收入、利润和数据健康度。
-- 单项目诊断：围绕单项目串联用户增长、产品漏斗、广告变现和数据质量。
-- 漏斗分析中心：从异常项目发现、步骤诊断、分群/路径分析到事件证据和效果验证。
-- AdMob 分析：按广告格式、广告位和国家查看请求、匹配、展示、eCPM 与收入。
-- Firebase 分析：查看活跃用户、事件覆盖、参数质量、版本分布和实时延迟。
-- 数据对账：对比 Firebase、AdMob、中台和 ADB 的用户、展示与收入口径。
-
-### 质量治理
-
-- 打点验收中心：按项目和已发布配置快照执行操作任务，核对事件、参数和关联链。
-- 规范与项目配置：从标准事件主库选择事件，生成项目配置草稿，发布不可变快照供验收 Run 引用。
-- Firebase 对接：独立管理凭证连接、一个或多个 Firebase Project、其下多个 App、`project_projects` 项目绑定、同步水位与接口健康。
-- 数据任务与告警：查看采集、同步、聚合、对账任务和活动告警。
-
-## Firebase 对接
-
-Firebase 对接和项目打点配置已经解耦。一个认证连接可以发现一个或多个 Firebase Project，每个 Project 可以包含多个 Android、iOS 或 Web App；Firebase App 通过独立绑定表与现有 `project_projects.project_code` 显式关联，包名只用于校验，真正的远端绑定键为 `firebase_app_id`。
-
-页面入口：
-
-```text
-/?module=firebaseSetup
-```
-
-页面包含接入总览、连接与资源、项目绑定、同步任务、最新数据、接口健康和接口说明。真实数据链路为：
-
-```text
-密钥托管引用 → Firebase资源发现 → BigQuery Export → OSS Raw → ADB firebase_event_fact → 分析/验收
-```
-
-控制面使用 MySQL 保存连接、远端资源、绑定、同步策略、运行、水位和接口检查日志；原始事件保存至 OSS，标准化强类型事件保存至 ADB。当天数据读取 `events_intraday_*`，历史读取 `events_*`；GA4 Realtime 仅用于健康检查和汇总对照。
-
-凭证只允许提交密钥系统引用 `credential_secret_ref`，严禁在页面、数据库、日志、聊天或代码仓库中粘贴服务账号 JSON 私钥或 OAuth Refresh Token。真实接入前还需核对线上 `project_projects` 的完整 DDL。
-
-## 规范与项目配置
-
-配置页面的核心流程是：
-
-```text
-事件主库 → 按模块选择/单事件筛选 → 保存草稿 → 校验 → 发布配置快照 → 验收 Run 引用
-```
-
-页面支持：
-
-- 选择配置名称、版本、品类、平台和关联项目。
-- 按模块全选/取消，也可以按标准事件逐项选择。
-- 在事件汇总和字段明细之间切换。
-- 按模块、标准事件名、显示名、优先级和关键词筛选。
-- 查看事件字段数量、字段类型、入库方式、字段说明、触发时机和指标用途。
-- 草稿可继续编辑；已发布版本复制为新版本，发布后形成不可变 `snapshot_id`。
-- 配置页展示当前事件数、字段数、Schema 版本、事件表、字段表和数据源状态。
-
-## 数据模型与接库规范
-
-页面当前使用 `/app/tracking-config-repository.ts` 作为唯一数据读取边界。它提供稳定的页面模型，后续接数据库只替换该文件中的数据 provider，不改动配置选择和验收页面。
-
-### 事件主表模型
-
-事件记录至少需要提供：
-
-| 字段 | 用途 |
-| --- | --- |
-| `eventId` | 事件主键，关联字段明细 |
-| `schemaVersion` | 规范版本，例如 `V1.7` |
-| `module` | 事件模块/业务阶段 |
-| `standardEventName` | 标准事件名 |
-| `displayName` | 事件显示名 |
-| `analysisGoal` | 分析目标 |
-| `platforms` | 适用端 |
-| `trackingLocation` | 具体打点位置 |
-| `triggerTiming` | 触发时机 |
-| `metricPurpose` | 中台指标和用途 |
-| `sourceAlias` | 来源规范或历史事件别名 |
-| `provider` | 字段生产 Provider |
-
-### 字段明细表模型
-
-字段记录至少需要提供：
-
-| 字段 | 用途 |
-| --- | --- |
-| `eventId` | 关联事件主表 |
-| `fieldOrder` | 同一事件内的展示顺序 |
-| `fieldName` | 标准属性名 |
-| `displayName` | 属性显示名 |
-| `dataType` | 数据类型 |
-| `reportingMode` | 上报方式/频率 |
-| `description` | 字段说明和枚举约束 |
-
-接入真实数据库时需要确认：数据库名、事件主表名、字段明细表名、主键关系、Schema 版本字段、排序字段和时区。数据库账号、密码和连接串只能放在服务端环境变量或托管密钥中，不能写入页面代码、README 或 Git。
-
-### 当前数据源状态
-
-当前页面使用 V1.7 本地镜像，来源是已有的 `app/v17-event-catalog.ts`，用于验证页面结构和交互。页面会明确显示“本地镜像预览”和“待接数据库”，不会把本地镜像标记为线上数据库，也不会执行数据库写入。
-
-收到数据库信息后，接入顺序为：
-
-1. 根据实际表结构完成 repository 查询映射。
-2. 使用参数化查询读取事件主表和字段明细表。
-3. 按 `eventId` 关联、按 `fieldOrder` 排序。
-4. 读取后回填事件数、字段数、版本和最近读取时间。
-5. 读回验证配置页、验收中心和事件/字段/Provider 三个数据视图。
-6. 确认只读查询无误后，再讨论是否需要配置写入接口。
-
-## 代码结构
-
-- `app/page.tsx`：主工作台、模块导航和配置页容器。
-- `app/tracking-config-repository.ts`：事件/字段数据访问边界，当前为 V1.7 本地镜像。
-- `app/tracking-config-data.ts`：从 repository 派生事件目录和配置记录。
-- `app/tracking-config-workspace.tsx`：新建/编辑配置和事件字段选择页面。
-- `app/v17-event-catalog.ts`：V1.7 本地预览数据，不作为未来数据库连接配置。
-- `app/firebase-configuration.tsx`：Firebase 数据源和绑定配置界面。
-- `app/globals.css`：工作台和配置页样式。
-
-## 验证命令
+## 本地开发
 
 ```bash
-npm run build
-npm test
-npm run lint
-git diff --check
+pnpm install
+pnpm run dev
 ```
 
-构建、测试和 lint 只验证本地代码；在数据库信息提供前，不进行线上部署，也不修改线上数据库。
+本地调试时可创建 `.env.local`：
 
-## 发布说明
+```env
+NEXT_PUBLIC_TRACKING_API_BASE_URL=https://analysis.geekforest.ai
+NEXT_PUBLIC_OA_API_BASE_URL=https://oa.geekforest.ai
+NEXT_PUBLIC_TRACKING_API_SECURE_PATH=
+```
 
-每次功能更新都要同步维护本 README，至少说明：功能目标、页面入口、数据来源、数据模型变化、配置/权限要求、验证命令和部署限制。Firebase V13 页面当前使用演示数据；真实后端、凭证权限和数据落库尚未接入，不能把演示状态解释为线上连通结果。
+说明：
 
-## Starter 说明
+- `NEXT_PUBLIC_TRACKING_API_BASE_URL` 为空时，前端默认使用当前页面域名。
+- `NEXT_PUBLIC_OA_API_BASE_URL` 默认是 `https://oa.geekforest.ai`。
+- 不要把数据库密码、Firebase JSON、OAuth Token、SSH 密码写入 `.env`、README 或前端代码。
 
-项目基于 [vinext](https://github.com/cloudflare/vinext) 运行，可选 Cloudflare D1 与 Drizzle 支持。`.openai/hosting.json` 用于 Sites 的可选绑定，`drizzle.config.ts` 用于需要时生成 Drizzle migration。
+## 构建
 
-## Workspace Auth Headers
+```bash
+pnpm run build
+```
 
-Signed-in visitors receive both `oai-authenticated-user-id` and `oai-authenticated-user-email`. Private Sites require every visitor to sign in; public Sites may also have anonymous visitors, for whom neither header is present.
+构建产物在：
 
-The user ID is stable for the same user on the same Site and different across Sites. Email and name are intended for display or contact purposes.
+```text
+dist/
+```
 
-SIWC-authenticated workspace sites may also receive
-`oai-authenticated-user-full-name` when the user's SIWC profile has a non-empty
-`name` claim. The full-name value is percent-encoded UTF-8 and is accompanied by
-`oai-authenticated-user-full-name-encoding: percent-encoded-utf-8`.
+## 生产部署
 
-Treat the full name as optional and fall back to email when it is absent:
+当前生产部署在服务器：
 
-```tsx
-import { headers } from "next/headers";
+```text
+/opt/jkcl-analysis/current
+```
 
-export default async function Home() {
-  const requestHeaders = await headers();
-  const userId = requestHeaders.get("oai-authenticated-user-id");
-  const email = requestHeaders.get("oai-authenticated-user-email");
-  const encodedFullName = requestHeaders.get("oai-authenticated-user-full-name");
-  const fullName =
-    encodedFullName &&
-    requestHeaders.get("oai-authenticated-user-full-name-encoding") ===
-      "percent-encoded-utf-8"
-      ? decodeURIComponent(encodedFullName)
-      : null;
+服务名：
 
-  const displayName = fullName ?? email;
-  // ...
+```text
+jkcl-analysis
+```
+
+端口：
+
+```text
+127.0.0.1:3020
+```
+
+推荐发布流程：
+
+```bash
+pnpm install
+pnpm run build
+
+# 在服务器上新建 release
+/opt/jkcl-analysis/releases/YYYYMMDD-HHMM-description
+
+# 切换软链
+ln -sfnT /opt/jkcl-analysis/releases/YYYYMMDD-HHMM-description /opt/jkcl-analysis/current
+
+# 重启服务
+systemctl restart jkcl-analysis
+systemctl is-active jkcl-analysis
+```
+
+健康检查：
+
+```bash
+curl -I http://127.0.0.1:3020/
+curl -i https://analysis.geekforest.ai/api/v3/jkcl-funnel/projects
+```
+
+未登录时 `/api/v3/jkcl-funnel/projects` 返回 `401 unauthenticated` 属于正常现象，说明路由存在且已到达后端。
+
+## 后端接口
+
+### 项目列表
+
+```http
+GET /api/v3/jkcl-funnel/projects
+Authorization: Bearer <company_login_token>
+```
+
+项目列表来源：
+
+- Firebase 配置库中的 `firebase_project_bindings`
+- 关联 `firebase_remote_apps`
+- 关联 `firebase_remote_projects`
+- 关联 `firebase_connections`
+- 使用 `project_projects` 补充 App 名、包名、平台、负责人等展示字段
+
+只展示已配置 Firebase 且未禁用的项目。
+
+### 漏斗查询
+
+```http
+POST /api/v3/jkcl-funnel/query
+Authorization: Bearer <company_login_token>
+Content-Type: application/json
+```
+
+常用请求：
+
+```json
+{
+  "page": "workbench",
+  "dateFrom": "2026-08-25",
+  "dateTo": "2026-08-25",
+  "projectCode": "A003",
+  "domain": "ads",
+  "unit": "sessions"
 }
 ```
 
-## Optional Dispatch-Owned ChatGPT Sign-In
+`domain`：
 
-Import the ready-to-use helpers from `app/chatgpt-auth.ts` when the site needs
-optional or required ChatGPT sign-in:
+- `ads`：广告变现
+- `vpn`：VPN 功能
+- `quality`：数据质量
 
-- Use `getChatGPTUser()` for optional signed-in UI.
-- Use `requireChatGPTUser(returnTo)` for server-rendered pages that should send
-  anonymous visitors through Sign in with ChatGPT.
-- Use `chatGPTSignInPath(returnTo)` and `chatGPTSignOutPath(returnTo)` for
-  browser links or actions.
-- Pass a same-origin relative `returnTo` path for the destination after sign-in
-  or sign-out. The helper validates and safely encodes it.
-- Mark protected pages with `export const dynamic = "force-dynamic"` because
-  they depend on per-request identity headers.
+`unit`：
 
-Dispatch owns `/signin-with-chatgpt`, `/signout-with-chatgpt`, `/callback`, the
-OAuth cookies, and identity header injection. Do not implement app routes for
-those reserved paths. Routes that do not import and call the helper remain
-anonymous-compatible.
+- `users`：用户 UV 口径
+- `sessions`：session / vpn_session 口径
+- `events`：事件次数口径
 
-SIWC establishes identity only; it does not prove workspace membership. Use the
-Sites hosting platform's access policy controls for workspace-wide restrictions,
-or enforce explicit server-side membership or allowlist checks.
+## 数据口径
 
-Use SIWC for account pages, user-specific dashboards, saved records, and write
-actions tied to the current ChatGPT user. Leave public content anonymous.
+### 广告链路
 
-## Useful Commands
+- 用户口径：按 `my_user_id`
+- Session 口径：按 `session_id`
+- 事件口径：按事件次数
+- 关键事件：`ad_eligibility_check`、`ad_opportunity`、`ad_request`、`ad_load_success`、`ad_show_attempt`、`ad_impression`、`ad_paid_event`
 
-- `npm run dev`: start local development
-- `npm run build`: verify the vinext build output
-- `npm test`: build the starter and verify its rendered loading skeleton
-- `npm run db:generate`: generate Drizzle migrations after schema changes
+### VPN 链路
 
-## Learn More
+- 用户口径：按 `my_user_id`
+- VPN Session 口径：按 `vpn_session_id`
+- 连接尝试：`vpn_connection_start`
+- 连接结果：`vpn_connection_result`
+- 阶段分析：`vpn_connection_phase`
+- 质量分析：`vpn_quality_sample`、`vpn_session_summary`
+- IP 变化：`ip_before_connect`、`ip_after_connect`
 
-- [vinext Documentation](https://github.com/cloudflare/vinext)
-- [Drizzle D1 Guide](https://orm.drizzle.team/docs/get-started/d1-new)
+### DWS / DWM 要求
+
+后端支持读取以下聚合口径：
+
+- `dwm_funnel_subject_stage_daily.subject_type = user`
+- `dwm_funnel_subject_stage_daily.subject_type = session`
+- `dwm_funnel_subject_stage_daily.subject_type = vpn_session`
+- `dws_app_funnel_stage_daily.scope_type = users`
+- `dws_app_funnel_stage_daily.scope_type = sessions`
+- `dws_app_funnel_stage_hourly.scope_type = sessions`
+
+如果 `scope_type=sessions` 没有数据，前端 session 口径会缺少完整聚合能力。
+
+## 身份登录
+
+前端使用公司邮箱登录。
+
+准入规则：
+
+- 邮箱必须属于 `geekforest.ai`
+- OA/HRBP 系统校验员工属于极客主体
+- 员工必须是在职状态
+- 验证后的设备默认 1 个月免登录
+
+权限必须由后端强校验，前端只负责展示登录状态和携带 token。
+
+## 代码结构
+
+```text
+app/
+  api-base-url.ts                 API Base 解析
+  company-auth.tsx                公司登录和设备信任
+  funnel-analysis-api.ts          漏斗查询接口
+  project-options-api.ts          线上项目列表接口
+  operational-funnel.tsx          后端数据驱动的漏斗分析页面
+  page.tsx                        主页面和模块路由
+  firebase-configuration.tsx      Firebase 数据页
+  tracking-acceptance-center.tsx  打点验收中心
+  tracking-config-workspace.tsx   打点配置页面
+  tracking-config-repository.ts   事件/字段字典数据边界
+  v18-event-catalog.ts            V1.8 事件字典镜像
+```
+
+## 常用命令
+
+```bash
+pnpm run dev
+pnpm run build
+pnpm run lint
+git diff --check
+```
+
+## 安全注意事项
+
+- 不允许提交 `.env`、数据库密码、SSH 密码、Firebase service account JSON、OAuth Token。
+- Firebase 凭证只能保存密钥引用或服务端加密后的记录。
+- README 只写变量名和部署方式，不写真实密钥。
+- 项目权限、数据权限、OA 身份校验必须在后端执行。
+
+## 最近关键变更
+
+- 项目列表改为从 Firebase 配置库拉取，不再展示无 Firebase 配置项目。
+- 前端 API Base 改为默认同源，修复部署在 `analysis.geekforest.ai` 时仍请求旧域名导致项目列表 HTTP 404 的问题。
+- 增加 V1.8 VPN 功能分析菜单和 VPN 弱网专项指标。
+- 广告和 VPN 链路支持 session 口径展示，ETL 需要补齐 `scope_type=sessions` 聚合行。
