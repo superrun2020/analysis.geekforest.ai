@@ -1250,6 +1250,7 @@ export default function Home() {
           {module !== "funnel" && <ModulePage module={module as Exclude<ModuleKey, "funnel">} project={project} configs={configRecords} onProjectChange={setProject} openModule={openModule} openDialog={setDialog} openConfigEditor={openConfigEditor} notify={notify} />}
 
           {module === "funnel" && <OperationalFunnel
+            enabled={!projectLoading && onlineProjects.length > 0}
             page={page}
             projectCode={project}
             appIdentifier={onlineProjects.find((item) => item.projectCode === project)?.appIdentifier}

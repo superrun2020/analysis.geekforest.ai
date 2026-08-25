@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { queryFunnel, type FunnelPageKey } from "./funnel-analysis-api";
 
 type Props = {
+  enabled: boolean;
   page: FunnelPageKey;
   projectCode: string;
   appIdentifier?: string;
@@ -92,13 +93,17 @@ export function OperationalFunnel(props: Props) {
   const effectivePage: FunnelPageKey = props.page === "workbench" ? workbenchSection : props.page;
 
   useEffect(() => {
+    if (!props.enabled) {
+      setLoading(true);
+      return;
+    }
     if (!props.projectCode && props.page !== "overview") return;
     const controller = new AbortController();
     setLoading(true); setError("");
     queryFunnel({ page: effectivePage, ...dates, projectCode: props.page === "overview" ? undefined : props.projectCode, appIdentifier: props.page === "overview" ? undefined : props.appIdentifier, platform: props.platform === "全部" ? undefined : props.platform.toLowerCase() as "android" | "ios", country: props.country === "全部国家" ? undefined : props.country, appVersion: props.appVersion === "全部版本" ? undefined : props.appVersion.split(" ")[0], domain, unit: "users", evidenceMode: "ad", pageSize: 100 }, controller.signal)
       .then(setData).catch((reason) => { if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : "未知错误"); }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
-  }, [props.page, props.projectCode, props.appIdentifier, props.range, props.platform, props.country, props.appVersion, props.refreshKey, dates, domain, effectivePage, retryKey]);
+  }, [props.enabled, props.page, props.projectCode, props.appIdentifier, props.range, props.platform, props.country, props.appVersion, props.refreshKey, dates, domain, effectivePage, retryKey]);
 
   if (loading) return <StatePanel kind="loading" message="正在从 ADB/Firebase 标准事件和问题控制表聚合当前筛选范围。" />;
   if (error) return <StatePanel kind="error" message={error} retry={() => setRetryKey((value) => value + 1)} />;
