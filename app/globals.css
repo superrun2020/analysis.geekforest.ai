@@ -977,6 +977,37 @@ td small { margin-top: 3px; color: var(--soft-muted); font-size: 7px; }
 .page-check-table code { color: #34599d; font-size: 7px; white-space: nowrap; }
 .page-check-table small { display: block; margin-top: 4px; color: var(--soft-muted); font-size: 6.5px; line-height: 1.4; }
 .page-acceptance-actions { display: flex; justify-content: flex-end; gap: 7px; flex-wrap: wrap; }
+.field-coverage-lookup { display: grid; gap: 10px; padding: 12px; border: 1px solid #dbe5ff; border-radius: 8px; background: #fff; }
+.field-lookup-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+.field-lookup-head strong,.field-lookup-head span { display: block; }
+.field-lookup-head strong { color: #23395f; font-size: 10px; }
+.field-lookup-head span { margin-top: 3px; color: var(--muted); font-size: 7px; line-height: 1.45; }
+.field-lookup-head code { padding: 5px 7px; border-radius: 6px; background: #f3f6ff; color: #4967a5; font-size: 6.5px; white-space: nowrap; }
+.field-lookup-form { display: grid; grid-template-columns: minmax(190px, .9fr) minmax(220px, 1fr) auto; gap: 9px; align-items: end; }
+.field-lookup-form label { display: grid; gap: 5px; color: var(--muted); font-size: 7px; font-weight: 800; }
+.field-lookup-form select,.field-lookup-form input { width: 100%; min-height: 34px; padding: 7px 9px; border: 1px solid #ccd5e2; border-radius: 6px; background: white; color: var(--ink); font-size: 8px; }
+.field-lookup-quick { display: flex; flex-wrap: wrap; gap: 5px; }
+.field-lookup-quick button { padding: 4px 7px; border: 1px solid #d6e0ef; border-radius: 12px; background: #fbfcfe; color: #49627f; font-size: 6.5px; cursor: pointer; }
+.field-lookup-quick button:hover { border-color: #8daaf0; background: #f3f7ff; color: var(--blue); }
+.field-lookup-result { display: grid; grid-template-columns: minmax(220px, .85fr) minmax(240px, 1fr) minmax(320px, 1.2fr); gap: 8px; }
+.field-lookup-result > div { min-width: 0; padding: 10px; border: 1px solid var(--line-soft); border-radius: 7px; background: #fbfcfe; }
+.field-lookup-result span,.field-lookup-result strong,.field-lookup-result small,.field-lookup-result em { display: block; overflow-wrap: anywhere; }
+.field-lookup-result span { color: var(--muted); font-size: 6.5px; font-weight: 800; }
+.field-lookup-result strong { margin-top: 4px; color: #26364f; font-size: 9px; }
+.field-lookup-result small { margin-top: 4px; color: #6f7d91; font-size: 7px; line-height: 1.45; }
+.field-lookup-result em { margin-top: 5px; color: #7e8ba0; font-size: 6.5px; font-style: normal; line-height: 1.5; }
+.field-result-card.good { border-color: #b9dfc7; background: #f5fcf8; }
+.field-result-card.warn { border-color: #ead19a; background: #fffaf0; }
+.field-result-card.bad { border-color: #efc1c6; background: #fff7f8; }
+.field-result-card.good strong { color: var(--green); }
+.field-result-card.warn strong { color: #9b6818; }
+.field-result-card.bad strong { color: var(--red); }
+.field-count-grid { display: grid !important; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; padding: 0 !important; border: 0 !important; background: transparent !important; }
+.field-count-grid div { min-width: 0; padding: 8px; border: 1px solid var(--line-soft); border-radius: 6px; background: #fff; }
+.field-count-grid strong { font-size: 8px; }
+.field-samples { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 8px 10px; border-radius: 7px; background: #f7f9fd; }
+.field-samples span { color: var(--muted); font-size: 7px; font-weight: 800; }
+.field-samples code { padding: 3px 6px; border-radius: 5px; background: white; color: #34599d; font-size: 6.5px; }
 .tracking-product-selector h2 { margin: 4px 0; font-size: 15px; }
 .tracking-product-selector p { margin: 0; color: var(--muted); font-size: 8px; line-height: 1.5; }
 .tracking-product-selector label { display: grid; gap: 5px; color: var(--muted); font-size: 7px; font-weight: 800; }
@@ -1358,6 +1389,9 @@ td small { margin-top: 3px; color: var(--soft-muted); font-size: 7px; }
   .page-acceptance-summary > div:nth-child(2) { border-right: 0; }
   .page-acceptance-summary > div { border-bottom: 1px solid #e3eaff; }
   .page-acceptance-summary > div:nth-last-child(-n + 2) { border-bottom: 0; }
+  .field-lookup-form { grid-template-columns: 1fr 1fr; }
+  .field-lookup-form button { grid-column: 1 / -1; justify-self: end; }
+  .field-lookup-result { grid-template-columns: 1fr; }
   .capability-selector { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .run-config-strip,.selected-config-summary { grid-template-columns: 1fr 1fr; }
   .connection-checks, .binding-quality, .api-principles { grid-template-columns: repeat(2, 1fr); }
@@ -1536,6 +1570,11 @@ td small { margin-top: 3px; color: var(--soft-muted); font-size: 7px; }
   .page-acceptance-callout strong { white-space: normal; }
   .page-acceptance-actions { justify-content: stretch; }
   .page-acceptance-actions button { flex: 1 1 100%; }
+  .field-lookup-head { flex-direction: column; }
+  .field-lookup-head code { white-space: normal; }
+  .field-lookup-form { grid-template-columns: 1fr; }
+  .field-lookup-form button { grid-column: auto; justify-self: stretch; }
+  .field-count-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .capability-selector { grid-template-columns: 1fr 1fr; }
   .test-task-card dl,.failure-guidance dl { grid-template-columns: 1fr; }
   .test-task-card dl > div,.failure-guidance dl > div { border-right: 0; }

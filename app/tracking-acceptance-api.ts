@@ -11,6 +11,21 @@ export type AcceptanceEvent = {
   missingParams: string[]; invalidParams: string[]; chainErrors: string[]; lastReceivedAt?: string;
 };
 export type AcceptanceDetail = { run: AcceptanceRun; events: AcceptanceEvent[] };
+export type AcceptanceFieldCoverage = {
+  runId: string;
+  eventName: string;
+  fieldName: string;
+  configured?: boolean;
+  eventReceivedCount?: number;
+  presentCount?: number;
+  missingCount?: number;
+  invalidCount?: number;
+  coverageRate?: number;
+  lastReceivedAt?: string;
+  sampleValues?: string[];
+  status?: "REPORTED" | "MISSING" | "INVALID" | "EVENT_NOT_RECEIVED" | "NOT_CONFIGURED" | "UNKNOWN";
+  message?: string;
+};
 
 const baseUrl = (process.env.NEXT_PUBLIC_TRACKING_API_BASE_URL ?? "").replace(/\/$/, "");
 const securePath = (process.env.NEXT_PUBLIC_TRACKING_API_SECURE_PATH ?? "").replace(/^\//, "").replace(/\/$/, "");
@@ -30,4 +45,6 @@ export const acceptanceApi = {
   create: (payload: { projectCode: string; configRevisionId: string; appIdentifier: string; appVersion: string; buildNumber?: string; platform: "Android" | "iOS"; environment?: string; testerName?: string; deviceIdHash?: string }) =>
     request<AcceptanceDetail>("/runs/create", { method: "POST", body: JSON.stringify(payload) }),
   markScene: (runId: string, eventNames: string[], executed = true) => request<AcceptanceDetail>("/runs/mark-scene", { method: "POST", body: JSON.stringify({ runId, eventNames, executed }) }),
+  fieldCoverage: (runId: string, eventName: string, fieldName: string) =>
+    request<AcceptanceFieldCoverage>(`/runs/field-coverage?runId=${encodeURIComponent(runId)}&eventName=${encodeURIComponent(eventName)}&fieldName=${encodeURIComponent(fieldName)}`),
 };
