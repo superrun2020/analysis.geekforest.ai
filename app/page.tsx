@@ -15,6 +15,7 @@ import {
 } from "./metric-dictionary";
 import { fetchOnlineProjects, type OnlineProject } from "./project-options-api";
 import { CompanyLogin, useCompanyAuth } from "./company-auth";
+import { OperationalFunnel } from "./operational-funnel";
 
 type PageKey =
   | "overview"
@@ -883,7 +884,7 @@ export default function Home() {
   const [range, setRange] = useState("今天");
   const [platform, setPlatform] = useState("Android");
   const [country, setCountry] = useState("全部国家");
-  const [appVersion, setAppVersion] = useState("1.8.0 (108)");
+  const [appVersion, setAppVersion] = useState("全部版本");
   const [funnelMode, setFunnelMode] = useState<FunnelMode>("monetization");
   const [unitMode, setUnitMode] = useState<UnitMode>("users");
   const [dimension, setDimension] = useState("国家");
@@ -1031,7 +1032,7 @@ export default function Home() {
   const sourceStatus: Record<ModuleKey, { title: string; detail: string; note: string }> = {
     global: { title: "混合时效", detail: "Firebase T+0 · AdMob T+3 · 刷新", note: "DAU和用户行为使用Firebase实时预估；收入、消耗和ROAS使用最近已结算日期，卡片必须标注数据日。" },
     project: { title: "项目诊断", detail: "Firebase延迟约8分钟 · AdMob T+3", note: "用户与产品指标可看当天；收入和AdMob效率使用已结算日期，不参与当天实时结论。" },
-    funnel: { title: "实时预估", detail: "Firebase · 延迟约8分钟", note: "用户漏斗与事件漏斗来自Firebase实时数据；收入影响为模型估算，最终以AdMob结算为准。" },
+    funnel: { title: "线上标准事件", detail: "ADB实时聚合 · Firebase分源校准", note: "漏斗只读取ADB标准事件和后端可证明口径；不可计算指标显示暂无数据，收入最终以AdMob结算为准。" },
     vpn: { title: "V1.8 弱网专项", detail: "Firebase T+0 · 会话/连接/阶段关联", note: "本页以 vpn_session_id 串联用户会话，以 connection_id 区分每次真实连接尝试；俄罗斯/伊朗须按 ASN、网络、协议、端口和限制信号联合判断。" },
     admob: { title: "结算数据", detail: "AdMob已结算至8月8日", note: "本页默认只展示AdMob已结算日期；Firebase AV仅作为覆盖诊断对照，并明确标记来源。" },
     firebase: { title: "实时数据", detail: "BigQuery intraday · 延迟约8分钟", note: "本页展示Firebase实时预估、事件质量与同步水位；中台数字仅用于差异诊断。" },
@@ -1146,7 +1147,7 @@ export default function Home() {
     setRange("今天");
     setPlatform("Android");
     setCountry("全部国家");
-    setAppVersion("1.8.0 (108)");
+    setAppVersion("全部版本");
     setFiltersApplied((value) => value + 1);
     notify("筛选条件已恢复默认");
   }
@@ -1201,7 +1202,7 @@ export default function Home() {
         {moduleMenus.filter((item) => item.group === "经营分析").map((item) => <button key={item.key} className={`main-nav-item ${module === item.key ? "active" : ""}`} onClick={() => openModule(item.key)}><span>{item.index}</span>{item.label}</button>)}
         <div className="nav-group-label">质量治理</div>
         {moduleMenus.filter((item) => item.group === "质量治理").map((item) => <button key={item.key} className={`main-nav-item ${module === item.key ? "active" : ""}`} onClick={() => openModule(item.key)}><span>{item.index}</span>{item.label}</button>)}
-        <div className="sidebar-foot"><span className="status-dot warn" />Firebase 待正式接入<small>当前页面使用演示数据</small></div>
+        <div className="sidebar-foot"><span className="status-dot warn" />分模块接入中<small>漏斗分析使用真实接口；其他菜单仍需逐项接入</small></div>
       </aside>
 
       <div className="workspace">
@@ -1235,7 +1236,7 @@ export default function Home() {
             <label>日期<select value={range} onChange={(event) => setRange(event.target.value)}><option>今天</option><option>昨天</option><option>近7天</option><option>近30天</option></select></label>
             <label>平台<select value={platform} onChange={(event)=>setPlatform(event.target.value)}><option>Android</option><option>iOS</option><option>全部</option></select></label>
             <label>国家<select value={country} onChange={(event)=>setCountry(event.target.value)}><option>全部国家</option><option>伊朗</option><option>埃及</option><option>土耳其</option></select></label>
-            <label>App版本<select value={appVersion} onChange={(event)=>setAppVersion(event.target.value)}><option>1.8.0 (108)</option><option>1.7.4 (104)</option><option>全部版本</option></select></label>
+            <label>App版本<select value={appVersion} onChange={(event)=>setAppVersion(event.target.value)}><option>全部版本</option><option>1.8.0 (108)</option><option>1.7.4 (104)</option></select></label>
             <div className="filter-actions"><button onClick={resetFilters}>重置</button><button onClick={() => { setFiltersApplied((value) => value + 1); notify(`${project} · ${range} 筛选已应用`); }}>应用筛选</button></div>
             <div className="data-state"><span className="status-dot" /><strong>{sourceStatus[module].title}</strong><small>{sourceStatus[module].detail} · 刷新#{filtersApplied}</small></div>
           </section>}
@@ -1248,7 +1249,19 @@ export default function Home() {
 
           {module !== "funnel" && <ModulePage module={module as Exclude<ModuleKey, "funnel">} project={project} configs={configRecords} onProjectChange={setProject} openModule={openModule} openDialog={setDialog} openConfigEditor={openConfigEditor} notify={notify} />}
 
-          {module === "funnel" && page === "overview" && (
+          {module === "funnel" && <OperationalFunnel
+            page={page}
+            projectCode={project}
+            appIdentifier={onlineProjects.find((item) => item.projectCode === project)?.appIdentifier}
+            range={range}
+            platform={platform}
+            country={country}
+            appVersion={appVersion}
+            refreshKey={filtersApplied}
+            onPageChange={go}
+          />}
+
+          {false && module === "funnel" && page === "overview" && (
             <div className="page-stack">
               <section className="metric-grid six">
                 <Metric label="全项目 DAU" value="397,380" note="较昨日 +3.2%" />
@@ -1298,7 +1311,7 @@ export default function Home() {
             </div>
           )}
 
-          {module === "funnel" && page === "workbench" && (
+          {false && module === "funnel" && page === "workbench" && (
             <div className="page-stack">
               <nav className="workbench-jumpbar" aria-label="单项目工作台区块导航">
                 <div className="workbench-primary-tabs">
@@ -1630,7 +1643,7 @@ export default function Home() {
             </div>
           )}
 
-          {module === "funnel" && page === "evidence" && (
+          {false && module === "funnel" && page === "evidence" && (
             <div className="page-stack">
               <section className="evidence-head surface"><div><div className="eyebrow">样本 user_pseudo_id · u_8f1a***92</div><h2>{transition.from} → {transition.to} 事件证据</h2><p>{project} · Android 1.8.0 · Iran · session=s_728c</p></div><Segmented label="证据模式" active={evidenceMode} onChange={setEvidenceMode} items={[{ key: "user", label: "用户事件链" }, { key: "ad", label: "广告关联链" }]} /></section>
               <section className="two-column wide-left evidence-layout">
@@ -1653,7 +1666,7 @@ export default function Home() {
             </div>
           )}
 
-          {module === "funnel" && page === "issues" && (
+          {false && module === "funnel" && page === "issues" && (
             <div className="page-stack">
               <section className="surface">
                 <div className="surface-title"><div><h2>ISSUE-20260811-024 · {transition.from} → {transition.to} 异常</h2><p>{project} · P0 · 负责人：客户端增长组 / Oliver · SLA 剩余 18 小时</p></div><Badge tone={issueStatus === "重测中" ? "blue" : "warn"}>{issueStatus}</Badge></div>
@@ -1679,7 +1692,7 @@ export default function Home() {
             </div>
           )}
 
-          {module === "funnel" && page === "snapshot" && (
+          {false && module === "funnel" && page === "snapshot" && (
             <div className="page-stack">
               <section className="snapshot-head surface"><div><div className="eyebrow">只读执行快照</div><h2>IRAN-VPN-01 · 漏斗口径 V1.8</h2><p>生效于 2026-08-18 · 套利 VPN V1.8 ＋ 广告 V1.8 ＋ VPN 弱网专项 V1.8</p></div><div><Badge tone="good">已发布</Badge> <button className="secondary-button" onClick={() => notify("已定位到项目类型设置中的 V1.8 配置")}>前往项目类型设置</button></div></section>
               <section className="metric-grid five"><Metric label="产品漏斗" value="6 步" note="严格顺序" /><Metric label="变现用户观察链" value="8 节点" note="Request UV 为非严格观察节点" /><Metric label="变现事件效率链" value="10 步" note="含 Request Accepted 派生检查点" /><Metric label="履约与库存" value="3 条路径" note="缓存/实时请求/预加载" /><Metric label="规范版本" value="V1.8" note="schema_version 1.8" /></section>
