@@ -22,10 +22,14 @@ type FunnelUnit = "users" | "sessions" | "events";
 type PackageData = Record<string, AnyRow>;
 type QueryProgressStatus = "pending" | "loading" | "done" | "error";
 type QueryProgressItem = { key: string; label: string; status: QueryProgressStatus; finishedAt?: string; error?: string };
+type DropoffSelection = { fromIndex: number; toIndex: number };
 const number = (value: unknown) => value === null || value === undefined ? "—" : Number(value).toLocaleString("zh-CN", { maximumFractionDigits: 2 });
 const percent = (value: unknown) => value === null || value === undefined ? "—" : `${number(value)}%`;
 const money = (value: unknown) => value === null || value === undefined ? "—" : `$${number(value)}`;
 const text = (value: unknown) => value === null || value === undefined || value === "" ? "—" : String(value);
+const rowCount = (row: AnyRow) => Number(row?.count ?? row?.value ?? row?.users ?? 0);
+const rowName = (row: AnyRow) => text(row?.name ?? row?.stepName ?? row?.label);
+const rowEvent = (row: AnyRow) => text(row?.eventName ?? row?.event);
 
 function dateRange(range: string) {
   const end = new Date();
@@ -138,14 +142,94 @@ function MetricCard({ label, value, note, status }: { label: string; value: stri
   return <article className={`operational-metric ${tone}`}><span>{label}</span><strong>{value}</strong><small>{note || "当前筛选口径"}</small></article>;
 }
 
-function Funnel({ rows = [] }: { rows?: AnyRow[] }) {
+function Funnel({ rows = [], selectedTransition, onSelectTransition }: { rows?: AnyRow[]; selectedTransition?: DropoffSelection; onSelectTransition?: (selection: DropoffSelection) => void }) {
   if (!rows.length) return <div className="inline-empty">当前范围没有可用漏斗步骤</div>;
-  const max = Math.max(...rows.map((row) => Number(row.count ?? row.value ?? 0)), 1);
+  const max = Math.max(...rows.map((row) => rowCount(row)), 1);
   return <div className="operational-funnel-list">{rows.map((row, index) => {
-    const value = Number(row.count ?? row.value ?? 0);
+    const value = rowCount(row);
     const available = row.available !== false;
-    return <button key={row.stepCode ?? row.code ?? row.name ?? index} disabled={!available}><span>{index + 1}</span><div><strong>{text(row.name ?? row.stepName ?? row.label)}</strong><small>{text(row.eventName ?? row.event)}</small></div><em>{available ? number(value) : "暂无数据"}</em><b>{row.conversionRate === null || row.conversionRate === undefined ? "—" : percent(row.conversionRate)}</b><i style={{ width: `${available ? Math.max(4, value / max * 100) : 0}%` }} /></button>;
+    const transition = index === 0 ? { fromIndex: 0, toIndex: Math.min(1, rows.length - 1) } : { fromIndex: index - 1, toIndex: index };
+    const selected = selectedTransition?.fromIndex === transition.fromIndex && selectedTransition?.toIndex === transition.toIndex;
+    return <button key={row.stepCode ?? row.code ?? row.name ?? index} className={selected ? "selected" : ""} disabled={!available} onClick={() => onSelectTransition?.(transition)} title={index === 0 ? "分析第 1 步到第 2 步的流失" : `分析 ${rowName(rows[index - 1])} → ${rowName(row)} 的流失`}><span>{index + 1}</span><div><strong>{rowName(row)}</strong><small>{rowEvent(row)}</small>{onSelectTransition && <small className="funnel-analysis-hint">{index === 0 ? "点击分析下一步流失" : "点击分析上一步流失"}</small>}</div><em>{available ? number(value) : "暂无数据"}</em><b>{row.conversionRate === null || row.conversionRate === undefined ? "—" : percent(row.conversionRate)}</b><i style={{ width: `${available ? Math.max(4, value / max * 100) : 0}%` }} /></button>;
   })}</div>;
+}
+
+function bestDropoffSelection(rows: AnyRow[]): DropoffSelection {
+  if (rows.length < 2) return { fromIndex: 0, toIndex: 0 };
+  let best = { fromIndex: 0, toIndex: 1 };
+  let bestLoss = -Infinity;
+  for (let index = 1; index < rows.length; index += 1) {
+    const loss = rowCount(rows[index - 1]) - rowCount(rows[index]);
+    if (loss > bestLoss) {
+      bestLoss = loss;
+      best = { fromIndex: index - 1, toIndex: index };
+    }
+  }
+  return best;
+}
+
+function pageMetricKeysForStep(step: AnyRow) {
+  const raw = `${rowName(step)} ${rowEvent(step)}`.toLowerCase();
+  if (raw.includes("eligibility") || raw.includes("资格") || raw.includes("check")) return ["eligibilityCheckUsers", "adCheckUsers", "checkUsers", "adEligibilityUsers", "opportunityUsers"];
+  if (raw.includes("opportunity") || raw.includes("机会")) return ["opportunityUsers"];
+  if (raw.includes("request") || raw.includes("请求")) return ["requestUsers", "adRequestUsers", "opportunityUsers"];
+  if (raw.includes("show") || raw.includes("展示尝试")) return ["showAttemptUsers", "adShowAttemptUsers", "opportunityUsers"];
+  if (raw.includes("impression") || raw.includes("展示")) return ["impressionUsers", "avUsers", "opportunityUsers"];
+  return ["opportunityUsers", "impressionUsers"];
+}
+
+function pageStepUsers(row: AnyRow, step: AnyRow) {
+  for (const key of pageMetricKeysForStep(step)) {
+    const value = row?.[key];
+    if (value !== null && value !== undefined && value !== "") return Number(value);
+  }
+  return null;
+}
+
+function DropoffAnalysisPanel({ rows, selection, onSelectionChange, pageData, diagnosisData, pageProgress, diagnosisProgress }: { rows: AnyRow[]; selection: DropoffSelection; onSelectionChange: (selection: DropoffSelection) => void; pageData?: AnyRow | null; diagnosisData?: AnyRow | null; pageProgress?: QueryProgressItem; diagnosisProgress?: QueryProgressItem }) {
+  if (rows.length < 2) return null;
+  const safeFrom = Math.max(0, Math.min(selection.fromIndex, rows.length - 2));
+  const safeTo = Math.max(safeFrom + 1, Math.min(selection.toIndex, rows.length - 1));
+  const from = rows[safeFrom];
+  const to = rows[safeTo];
+  const fromValue = rowCount(from);
+  const toValue = rowCount(to);
+  const loss = Math.max(0, fromValue - toValue);
+  const passRate = fromValue > 0 ? toValue / fromValue * 100 : null;
+  const lossRate = fromValue > 0 ? loss / fromValue * 100 : null;
+  const pageRows: AnyRow[] = pageData?.pages ?? [];
+  const analyzedPages = pageRows.map((page) => {
+    const pageUsers = Number(page.pageUsers ?? page.users ?? page.viewUsers ?? 0);
+    const reached = pageStepUsers(page, to);
+    const missing = reached === null ? null : Math.max(0, pageUsers - reached);
+    const missingRate = reached === null || pageUsers <= 0 ? null : missing! / pageUsers * 100;
+    return { ...page, pageUsers, reached, missing, missingRate };
+  }).sort((a, b) => Number(b.missing ?? -1) - Number(a.missing ?? -1));
+  const topMissingPages = analyzedPages.filter((page) => page.missing !== null).slice(0, 8);
+  const activePages = analyzedPages.filter((page) => Number(page.reached ?? 0) > 0).slice(0, 5);
+  const inactivePages = analyzedPages.filter((page) => page.reached !== null && Number(page.reached) === 0 && page.pageUsers > 0).slice(0, 5);
+  const reasons: AnyRow[] = diagnosisData?.reasons ?? [];
+  const isFirstCheck = safeFrom === 0 && (`${rowName(to)} ${rowEvent(to)}`.toLowerCase().includes("check") || rowName(to).includes("资格"));
+  return <section className="surface dropoff-analysis-panel">
+    <div className="surface-title"><div><h2>漏斗断点分析：{rowName(from)} → {rowName(to)}</h2><p>点击漏斗步骤切换分析区间；当前重点判断这批用户为什么没有进入下一步事件。</p></div><span>{loss > 0 ? `流失 ${number(loss)}` : "无明显流失"}</span></div>
+    <div className="dropoff-step-tabs">{rows.slice(1).map((step, index) => {
+      const item = { fromIndex: index, toIndex: index + 1 };
+      const active = safeFrom === item.fromIndex && safeTo === item.toIndex;
+      const itemLoss = rowCount(rows[index]) - rowCount(step);
+      return <button key={`${rowName(rows[index])}-${rowName(step)}`} className={active ? "active" : ""} onClick={() => onSelectionChange(item)}><strong>{rowName(rows[index])} → {rowName(step)}</strong><small>流失 {number(Math.max(0, itemLoss))}</small></button>;
+    })}</div>
+    <section className="operational-metric-grid dropoff-metrics">
+      <MetricCard label="起点用户" value={number(fromValue)} note={rowEvent(from)} />
+      <MetricCard label="到达用户" value={number(toValue)} note={rowEvent(to)} status={passRate !== null && passRate < 70 ? "warning" : "good"} />
+      <MetricCard label="流失用户" value={number(loss)} note={`${rowName(from)} 未进入 ${rowName(to)}`} status={lossRate !== null && lossRate > 30 ? "bad" : "warn"} />
+      <MetricCard label="流失率" value={lossRate === null ? "—" : percent(lossRate)} note={`通过率 ${passRate === null ? "—" : percent(passRate)}`} status={lossRate !== null && lossRate > 30 ? "bad" : "warn"} />
+    </section>
+    <div className="dropoff-conclusion"><strong>当前判断</strong><p>{isFirstCheck ? "DAU 到广告资格检查断层，说明用户已经活跃，但没有进入广告资格判断。优先排查：哪些页面没有触发广告入口/按钮点击，广告资格检查调用时机是否过晚，入口曝光后是否被条件拦截，以及 app_foreground 与 ad_eligibility_check 是否存在打点缺失。" : loss > 0 ? `主要流失发生在 ${rowName(from)} 到 ${rowName(to)}。优先看该步骤的触发条件、页面入口、SDK 回调是否完整，以及上一环节 ID 是否能串到下一环节。` : "当前环节没有明显流失，可优先分析后续转化更低的断点。"}</p></div>
+    <section className="two-column wide-left">
+      <div className="surface nested"><div className="surface-title"><div><h2>页面点击 / 未点击分析</h2><p>按页面 UV 对比进入下一广告动作的用户，定位漏在哪些页面。</p></div><span>{pageProgress?.status === "done" ? "页面路径已完成" : pageProgress?.status === "loading" ? "页面路径查询中" : "等待页面路径"}</span></div>{topMissingPages.length ? <div className="table-wrap"><table><thead><tr><th>页面</th><th>页面UV</th><th>进入下一步</th><th>未进入</th><th>漏失率</th></tr></thead><tbody>{topMissingPages.map((page) => <tr key={page.screenName ?? page.label}><td><strong>{text(page.screenName ?? page.label)}</strong><small>{text(page.entrySource ?? page.pathType)}</small></td><td>{number(page.pageUsers)}</td><td>{number(page.reached)}</td><td>{number(page.missing)}</td><td>{page.missingRate === null ? "—" : percent(page.missingRate)}</td></tr>)}</tbody></table></div> : <div className="inline-empty">{pageProgress?.status === "loading" || pageProgress?.status === "pending" ? "页面路径数据还在查询，完成后这里会自动显示每个页面的点击/未点击情况。" : "当前页面路径数据没有下一步用户字段，建议后端补充 page × step 的到达人数。"}</div>}</div>
+      <aside className="surface nested"><div className="surface-title"><div><h2>快速结论</h2><p>运营优先看这两类页面</p></div></div><dl className="operational-kv"><div><dt>有进入下一步的页面</dt><dd>{activePages.length ? activePages.map((page) => text(page.screenName ?? page.label)).join("、") : "暂无"}</dd></div><div><dt>完全未进入下一步的页面</dt><dd>{inactivePages.length ? inactivePages.map((page) => text(page.screenName ?? page.label)).join("、") : "暂无"}</dd></div><div><dt>原因数据状态</dt><dd>{diagnosisProgress?.status === "done" ? "已完成" : diagnosisProgress?.status === "loading" ? "查询中" : "等待查询"}</dd></div></dl>{reasons.length > 0 && <div className="dropoff-reasons">{reasons.slice(0, 4).map((reason) => <div key={reason.code ?? reason.reason}><strong>{text(reason.label ?? reason.code ?? reason.reason)}</strong><small>{number(reason.count ?? reason.users)} · {percent(reason.share ?? reason.rate)}</small></div>)}</div>}</aside>
+    </section>
+  </section>;
 }
 
 function AvailabilityBanner({ data }: { data: AnyRow }) {
@@ -172,9 +256,12 @@ function Overview({ data, onPageChange, context }: { data: AnyRow; onPageChange:
   </div>;
 }
 
-function Workbench({ data, domain, setDomain, unit, setUnit }: { data: AnyRow; domain: string; setDomain: (domain: "ads" | "vpn" | "quality") => void; unit: FunnelUnit; setUnit: (unit: FunnelUnit) => void }) {
+function Workbench({ data, domain, setDomain, unit, setUnit, pageData, diagnosisData, pageProgress, diagnosisProgress }: { data: AnyRow; domain: string; setDomain: (domain: "ads" | "vpn" | "quality") => void; unit: FunnelUnit; setUnit: (unit: FunnelUnit) => void; pageData?: AnyRow | null; diagnosisData?: AnyRow | null; pageProgress?: QueryProgressItem; diagnosisProgress?: QueryProgressItem }) {
   const metrics: AnyRow[] = data.metrics ?? [];
-  return <div className="page-stack"><nav className="operational-tabs"><button className={domain === "ads" ? "active" : ""} onClick={() => setDomain("ads")}>广告变现</button><button className={domain === "vpn" ? "active" : ""} onClick={() => setDomain("vpn")}>VPN 功能</button><button className={domain === "quality" ? "active" : ""} onClick={() => setDomain("quality")}>数据质量</button></nav>{domain === "ads" && <nav className="operational-tabs unit-tabs"><button className={unit === "sessions" ? "active" : ""} onClick={() => setUnit("sessions")}>Session 漏斗</button><button className={unit === "users" ? "active" : ""} onClick={() => setUnit("users")}>用户 UV</button><button className={unit === "events" ? "active" : ""} onClick={() => setUnit("events")}>事件次数</button></nav>}<AvailabilityBanner data={data} /><section className="operational-metric-grid">{metrics.map((row) => <MetricCard key={row.metricKey ?? row.name} label={text(row.name)} value={row.displayValue ?? (row.unit === "ratio" ? percent(row.value) : number(row.value))} note={row.detail ?? row.formula} status={row.status} />)}</section><section className="surface"><div className="surface-title"><div><h2>{domain === "vpn" ? "VPN 核心漏斗" : domain === "quality" ? "数据质量门禁" : "广告核心漏斗"}</h2><p>{domain === "vpn" ? "主漏斗按 vpn_session_id 串联；连接尝试细节按 connection_id 下钻" : domain === "ads" ? (unit === "sessions" ? "主漏斗按 session_id 串联，decision/opportunity/request/instance 作为二级诊断键" : unit === "events" ? "按事件 ID 和广告链路 ID 统计次数，用于检查履约链断点" : "按 my_user_id 去重，用于观察用户覆盖") : "不可计算的指标明确显示暂无数据，不补零"}</p></div></div><Funnel rows={data.funnel} /></section>{data.vpnStageHealth?.stages?.length > 0 && <section className="surface"><div className="surface-title"><div><h2>连接阶段成功率与 P95</h2><p>按 connection_id 关联真实连接阶段</p></div></div><div className="table-wrap"><table><thead><tr><th>阶段</th><th>样本</th><th>成功率</th><th>P95</th><th>状态</th></tr></thead><tbody>{data.vpnStageHealth.stages.map((row: AnyRow) => <tr key={row.stageKey}><td>{text(row.stageName)}</td><td>{number(row.totalCount)}</td><td>{percent(row.successRate)}</td><td>{text(row.displayP95 ?? row.p95Ms)}</td><td>{row.available === false ? "暂无数据" : text(row.status)}</td></tr>)}</tbody></table></div></section>}</div>;
+  const funnelRows: AnyRow[] = data.funnel ?? [];
+  const [dropoffSelection, setDropoffSelection] = useState<DropoffSelection>(() => bestDropoffSelection(funnelRows));
+  useEffect(() => { setDropoffSelection(bestDropoffSelection(funnelRows)); }, [data]);
+  return <div className="page-stack"><nav className="operational-tabs"><button className={domain === "ads" ? "active" : ""} onClick={() => setDomain("ads")}>广告变现</button><button className={domain === "vpn" ? "active" : ""} onClick={() => setDomain("vpn")}>VPN 功能</button><button className={domain === "quality" ? "active" : ""} onClick={() => setDomain("quality")}>数据质量</button></nav>{domain === "ads" && <nav className="operational-tabs unit-tabs"><button className={unit === "sessions" ? "active" : ""} onClick={() => setUnit("sessions")}>Session 漏斗</button><button className={unit === "users" ? "active" : ""} onClick={() => setUnit("users")}>用户 UV</button><button className={unit === "events" ? "active" : ""} onClick={() => setUnit("events")}>事件次数</button></nav>}<AvailabilityBanner data={data} /><section className="operational-metric-grid">{metrics.map((row) => <MetricCard key={row.metricKey ?? row.name} label={text(row.name)} value={row.displayValue ?? (row.unit === "ratio" ? percent(row.value) : number(row.value))} note={row.detail ?? row.formula} status={row.status} />)}</section><section className="surface"><div className="surface-title"><div><h2>{domain === "vpn" ? "VPN 核心漏斗" : domain === "quality" ? "数据质量门禁" : "广告核心漏斗"}</h2><p>{domain === "vpn" ? "主漏斗按 vpn_session_id 串联；连接尝试细节按 connection_id 下钻" : domain === "ads" ? (unit === "sessions" ? "主漏斗按 session_id 串联，decision/opportunity/request/instance 作为二级诊断键；点击步骤可分析上一环节流失" : unit === "events" ? "按事件 ID 和广告链路 ID 统计次数，用于检查履约链断点；点击步骤可分析上一环节流失" : "按 my_user_id 去重，用于观察用户覆盖；点击步骤可分析上一环节流失") : "不可计算的指标明确显示暂无数据，不补零"}</p></div><span>点击步骤分析流失</span></div><Funnel rows={funnelRows} selectedTransition={dropoffSelection} onSelectTransition={setDropoffSelection} /></section><DropoffAnalysisPanel rows={funnelRows} selection={dropoffSelection} onSelectionChange={setDropoffSelection} pageData={pageData} diagnosisData={diagnosisData} pageProgress={pageProgress} diagnosisProgress={diagnosisProgress} />{data.vpnStageHealth?.stages?.length > 0 && <section className="surface"><div className="surface-title"><div><h2>连接阶段成功率与 P95</h2><p>按 connection_id 关联真实连接阶段</p></div></div><div className="table-wrap"><table><thead><tr><th>阶段</th><th>样本</th><th>成功率</th><th>P95</th><th>状态</th></tr></thead><tbody>{data.vpnStageHealth.stages.map((row: AnyRow) => <tr key={row.stageKey}><td>{text(row.stageName)}</td><td>{number(row.totalCount)}</td><td>{percent(row.successRate)}</td><td>{text(row.displayP95 ?? row.p95Ms)}</td><td>{row.available === false ? "暂无数据" : text(row.status)}</td></tr>)}</tbody></table></div></section>}</div>;
 }
 
 function GenericPage({ page, data }: { page: FunnelPageKey; data: AnyRow }) {
@@ -212,12 +299,7 @@ export function OperationalFunnel(props: Props) {
     }
     if (!props.projectCode && scope !== "overview") return;
     let active = true;
-    let timedOut = false;
-    const controller = new AbortController();
-    const timeout = window.setTimeout(() => {
-      timedOut = true;
-      controller.abort();
-    }, 45000);
+    const controllers: AbortController[] = [];
     setLoading(true); setError(""); setDataPackage({}); setPackageErrors({}); setLoadedAt("");
     const baseQuery = { ...dates, projectCode: scope === "overview" ? undefined : props.projectCode, appIdentifier: scope === "overview" ? undefined : props.appIdentifier, platform: props.platform === "全部" ? undefined : props.platform.toLowerCase() as "android" | "ios", country: props.country === "全部国家" ? undefined : props.country, appVersion: props.appVersion === "全部版本" ? undefined : props.appVersion.split(" ")[0] };
     const items = buildPackageItems(baseQuery, scope, domain, unit);
@@ -230,8 +312,15 @@ export function OperationalFunnel(props: Props) {
     };
     const runItem = async (item: FunnelQueryPackageItem, primary = false) => {
       markProgress(item.key, { status: "loading", error: undefined });
+      const itemController = new AbortController();
+      let itemTimedOut = false;
+      const itemTimeout = window.setTimeout(() => {
+        itemTimedOut = true;
+        itemController.abort();
+      }, primary ? 45000 : 120000);
+      controllers.push(itemController);
       try {
-        const result = await queryFunnel<AnyRow>(item.query, controller.signal);
+        const result = await queryFunnel<AnyRow>(item.query, itemController.signal);
         if (!active) return;
         const now = new Date().toLocaleTimeString("zh-CN", { hour12: false });
         setDataPackage((current) => ({ ...current, [item.key]: result }));
@@ -242,13 +331,16 @@ export function OperationalFunnel(props: Props) {
         }
       } catch (reason) {
         if (!active) return;
-        const message = timedOut ? "读取超时，请重试或缩小筛选范围" : reason instanceof Error ? reason.message : "未知错误";
+        const rawMessage = reason instanceof Error ? reason.message : "未知错误";
+        const message = itemTimedOut ? `${queryItemLabel(item)}读取超时，请重试或缩小筛选范围` : rawMessage.toLowerCase().includes("abort") ? `${queryItemLabel(item)}查询被中断，请点击重新加载` : rawMessage;
         setPackageErrors((current) => ({ ...current, [item.key]: message }));
         markProgress(item.key, { status: "error", error: message });
         if (primary) {
           setError(message);
           setLoading(false);
         }
+      } finally {
+        window.clearTimeout(itemTimeout);
       }
     };
 
@@ -258,7 +350,7 @@ export function OperationalFunnel(props: Props) {
         restItems.forEach((item) => void runItem(item));
       });
     }
-    return () => { active = false; window.clearTimeout(timeout); controller.abort(); };
+    return () => { active = false; controllers.forEach((controller) => controller.abort()); };
   }, [props.enabled, scope, props.projectCode, props.appIdentifier, props.range, props.platform, props.country, props.appVersion, props.refreshKey, dates, domain, unit, retryKey]);
 
   if (loading) return <StatePanel kind="loading" message={`正在优先加载当前页面：${packageLabel}。核心页完成后立即展示，其他数据后台继续查询。`}><QueryProgressPanel items={progressItems} compact /></StatePanel>;
@@ -269,8 +361,14 @@ export function OperationalFunnel(props: Props) {
   const hasRows = props.page === "overview" ? (data.projects?.length ?? 0) > 0 : activePage === "workbench" ? (data.metrics?.length ?? data.funnel?.length ?? 0) > 0 : true;
   const status = <PackageStatusBanner projectCode={props.page === "overview" ? "全部项目" : props.projectCode} range={props.range} dates={dates} loadedAt={loadedAt} partialErrors={packageErrors} progressItems={progressItems} />;
   const progress = <QueryProgressPanel items={progressItems} />;
+  const pathKey = packageKey("path", scope === "overview" ? "ads" : domain, scope === "overview" ? "users" : queryUnit);
+  const diagnosisKey = packageKey("diagnosis", scope === "overview" ? "ads" : domain, scope === "overview" ? "users" : queryUnit);
+  const pageData = dataPackage[pathKey] ?? null;
+  const diagnosisData = dataPackage[diagnosisKey] ?? null;
+  const pageProgress = progressItems.find((item) => item.key === pathKey);
+  const diagnosisProgress = progressItems.find((item) => item.key === diagnosisKey);
   if (!hasRows) return <div className="page-stack">{status}{progress}<StatePanel kind="empty" message="数据包已加载，但当前筛选范围没有可计算的标准事件。" /></div>;
   if (props.page === "overview") return <div className="page-stack">{status}{progress}<Overview data={data} onPageChange={props.onPageChange} context={{ projectCode: "全部项目", range: props.range, dates, loadedAt }} /></div>;
-  if (props.page === "workbench") return <div className="page-stack">{status}{progress}<nav className="operational-tabs workbench-tabs"><button className={workbenchSection === "workbench" ? "active" : ""} onClick={() => setWorkbenchSection("workbench")}>核心漏斗</button><button className={workbenchSection === "diagnosis" ? "active" : ""} onClick={() => setWorkbenchSection("diagnosis")}>流失诊断</button><button className={workbenchSection === "path" ? "active" : ""} onClick={() => setWorkbenchSection("path")}>页面路径</button></nav>{workbenchSection === "workbench" ? <Workbench data={data} domain={domain} setDomain={setDomain} unit={unit} setUnit={setUnit} /> : <GenericPage page={workbenchSection} data={data} />}</div>;
+  if (props.page === "workbench") return <div className="page-stack">{status}{progress}<nav className="operational-tabs workbench-tabs"><button className={workbenchSection === "workbench" ? "active" : ""} onClick={() => setWorkbenchSection("workbench")}>核心漏斗</button><button className={workbenchSection === "diagnosis" ? "active" : ""} onClick={() => setWorkbenchSection("diagnosis")}>流失诊断</button><button className={workbenchSection === "path" ? "active" : ""} onClick={() => setWorkbenchSection("path")}>页面路径</button></nav>{workbenchSection === "workbench" ? <Workbench data={data} domain={domain} setDomain={setDomain} unit={unit} setUnit={setUnit} pageData={pageData} diagnosisData={diagnosisData} pageProgress={pageProgress} diagnosisProgress={diagnosisProgress} /> : <GenericPage page={workbenchSection} data={data} />}</div>;
   return <div className="page-stack">{status}{progress}<GenericPage page={props.page} data={data} /></div>;
 }
