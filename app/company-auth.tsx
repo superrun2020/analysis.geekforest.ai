@@ -3,7 +3,12 @@
 import { useEffect, useState } from "react";
 
 const oaBaseUrl = (process.env.NEXT_PUBLIC_OA_API_BASE_URL ?? "https://oa.geekforest.ai").replace(/\/$/, "");
-const tokenKey = "jkcl_funnel_oa_token";
+export const companyAuthTokenKey = "jkcl_funnel_oa_token";
+
+/** Return the current tab-scoped OA token for calls to the protected funnel API. */
+export function getCompanyAuthToken() {
+  return typeof window === "undefined" ? "" : sessionStorage.getItem(companyAuthTokenKey) ?? "";
+}
 
 type AuthUser = { email: string; employee?: { name?: string; status?: string } };
 type AuthResult = { token?: string; user?: AuthUser; error?: string };
@@ -34,14 +39,14 @@ export function useCompanyAuth() {
   const [checking, setChecking] = useState(true);
 
   useEffect(() => {
-    const token = sessionStorage.getItem(tokenKey);
+    const token = sessionStorage.getItem(companyAuthTokenKey);
     if (!token) {
       setChecking(false);
       return;
     }
     authRequest("/api/auth/me", undefined, token)
       .then((result) => setUser(result.user ?? null))
-      .catch(() => sessionStorage.removeItem(tokenKey))
+      .catch(() => sessionStorage.removeItem(companyAuthTokenKey))
       .finally(() => setChecking(false));
   }, []);
 
@@ -50,12 +55,12 @@ export function useCompanyAuth() {
     checking,
     signIn(result: AuthResult) {
       if (!result.token || !result.user) throw new Error("登录结果不完整");
-      sessionStorage.setItem(tokenKey, result.token);
+      sessionStorage.setItem(companyAuthTokenKey, result.token);
       setUser(result.user);
     },
     async signOut() {
-      const token = sessionStorage.getItem(tokenKey) ?? "";
-      sessionStorage.removeItem(tokenKey);
+      const token = sessionStorage.getItem(companyAuthTokenKey) ?? "";
+      sessionStorage.removeItem(companyAuthTokenKey);
       setUser(null);
       if (token) await authRequest("/api/auth/logout", {}, token).catch(() => undefined);
     },

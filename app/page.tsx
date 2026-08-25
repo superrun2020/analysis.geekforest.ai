@@ -946,6 +946,10 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    if (companyAuth.checking || !companyAuth.user) {
+      setProjectLoading(companyAuth.checking);
+      return;
+    }
     const controller = new AbortController();
     setProjectLoading(true);
     fetchOnlineProjects(controller.signal)
@@ -965,7 +969,7 @@ export default function Home() {
         if (!controller.signal.aborted) setProjectLoading(false);
       });
     return () => controller.abort();
-  }, []);
+  }, [companyAuth.checking, companyAuth.user]);
 
   useEffect(() => {
     const url = new URL(window.location.href);
