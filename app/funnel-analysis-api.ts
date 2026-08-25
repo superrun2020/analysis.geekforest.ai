@@ -27,6 +27,14 @@ export type FunnelQuery = {
 };
 
 export type FunnelApiEnvelope<T = Record<string, unknown>> = { code?: number; msg?: string; data?: T; error?: string };
+export type FunnelQueryPackageItem = {
+  key: string;
+  query: FunnelQuery;
+};
+export type FunnelQueryPackage<T = Record<string, unknown>> = {
+  items: Record<string, T>;
+  errors: Record<string, string>;
+};
 
 /** Call the OA-protected operational API and preserve actionable failure states. */
 export async function queryFunnel<T = Record<string, unknown>>(query: FunnelQuery, signal?: AbortSignal): Promise<T> {
@@ -48,4 +56,34 @@ export async function queryFunnel<T = Record<string, unknown>>(query: FunnelQuer
   if (!response.ok || (payload.code !== undefined && payload.code !== 0)) throw new Error(payload.msg || payload.error || `漏斗接口返回 HTTP ${response.status}`);
   if (!payload.data) throw new Error("漏斗接口未返回数据");
   return payload.data;
+}
+
+/**
+ * Load a complete UI package for one filter snapshot.
+ *
+ * The production API currently exposes one query endpoint. This wrapper keeps
+ * the UX contract we want: one visible loading operation, then local tab
+ * switching without additional requests. When the backend exposes a physical
+ * package endpoint, only this function needs to change.
+ */
+export async function queryFunnelPackage<T = Record<string, unknown>>(items: FunnelQueryPackageItem[], signal?: AbortSignal): Promise<FunnelQueryPackage<T>> {
+  const settled = await Promise.allSettled(items.map((item) => queryFunnel<T>(item.query, signal)));
+  const data: Record<string, T> = {};
+  const errors: Record<string, string> = {};
+
+  settled.forEach((result, index) => {
+    const key = items[index]?.key;
+    if (!key) return;
+    if (result.status === "fulfilled") {
+      data[key] = result.value;
+    } else {
+      errors[key] = result.reason instanceof Error ? result.reason.message : "未知错误";
+    }
+  });
+
+  if (Object.keys(data).length === 0) {
+    throw new Error(Object.values(errors)[0] || "筛选包没有返回可用数据");
+  }
+
+  return { items: data, errors };
 }

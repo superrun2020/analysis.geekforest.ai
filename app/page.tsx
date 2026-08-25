@@ -13,9 +13,10 @@ import {
   MetricInspectContext,
   MetricLabel,
 } from "./metric-dictionary";
-import { fetchOnlineProjects, type OnlineProject } from "./project-options-api";
+import { fetchFunnelFilterOptions, type FunnelFilterOptions, type OnlineProject } from "./project-options-api";
 import { CompanyLogin, useCompanyAuth } from "./company-auth";
 import { OperationalFunnel } from "./operational-funnel";
+import { OnlineModulePage } from "./online-module-page";
 
 type PageKey =
   | "overview"
@@ -49,6 +50,23 @@ type ModuleKey = "global" | "project" | "funnel" | "vpn" | "admob" | "firebase" 
 const moduleKeys = new Set<ModuleKey>(["global", "project", "funnel", "vpn", "admob", "firebase", "reconcile", "tracking", "config", "firebaseSetup", "tasks"]);
 const pageKeys = new Set<PageKey>(["overview", "workbench", "diagnosis", "cohort", "path", "evidence", "issues", "snapshot"]);
 const legacyWorkbenchPages = new Set<PageKey>(["diagnosis", "cohort", "path", "snapshot"]);
+const emptyFilterOptions: FunnelFilterOptions = { projects: [], platforms: [], countries: [], appVersions: [], buildNumbers: [], versions: [] };
+
+function uniqueOptionValues(values: string[]) {
+  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
+}
+
+function displayPlatform(value: string) {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "android") return "Android";
+  if (normalized === "ios") return "iOS";
+  return value.trim();
+}
+
+function pickDefaultPlatform(options: string[]) {
+  if (options.includes("Android")) return "Android";
+  return options.find((item) => item !== "全部") ?? "全部";
+}
 
 const funnelStageDisplayNames: Record<string, string> = {
   DAU: "日活跃用户（DAU）",
@@ -575,7 +593,7 @@ function Segmented({ items, active, onChange, label }: { items: Array<{ key: str
   );
 }
 
-function ModulePage({ module, project, configs, onProjectChange, openModule, openDialog, openConfigEditor, notify }: { module: Exclude<ModuleKey, "funnel">; project: string; configs: TrackingConfigRecord[]; onProjectChange: (project: string) => void; openModule: (next: ModuleKey) => void; openDialog: (dialog: DialogKey) => void; openConfigEditor: (config: TrackingConfigRecord | null) => void; notify: (message: string) => void }) {
+function ModulePage({ module, project, projectMeta, onlineProjects, range, platform, country, appVersion, refreshKey, configs, onProjectChange, openModule, openDialog, openConfigEditor, notify }: { module: Exclude<ModuleKey, "funnel">; project: string; projectMeta?: OnlineProject; onlineProjects: OnlineProject[]; range: string; platform: string; country: string; appVersion: string; refreshKey: number; configs: TrackingConfigRecord[]; onProjectChange: (project: string) => void; openModule: (next: ModuleKey) => void; openDialog: (dialog: DialogKey) => void; openConfigEditor: (config: TrackingConfigRecord | null) => void; notify: (message: string) => void }) {
   const [admobDimension, setAdmobDimension] = useState<AdMobDimension>("format");
   const [trackingResultFilter, setTrackingResultFilter] = useState<TrackingResultFilter>("all");
   const [trackingConfigId, setTrackingConfigId] = useState("CFG-VPN-1.8-PROD");
@@ -699,7 +717,8 @@ function ModulePage({ module, project, configs, onProjectChange, openModule, ope
   const runningSyncRuns = syncRuns.filter((row) => isRunningStatus(row.status)).length;
   const failedCheckLogs = checkLogs.filter((row) => isFailedStatus(row.status)).length;
   const latestRunTime = syncRuns[0]?.startedAt || syncRuns[0]?.createdAt;
-  if (module === "global") return (
+  if (["global", "project", "vpn", "admob", "firebase", "reconcile"].includes(module)) return <OnlineModulePage module={module as "global" | "project" | "vpn" | "admob" | "firebase" | "reconcile"} project={project} projectMeta={projectMeta} range={range} platform={platform} country={country} appVersion={appVersion} refreshKey={refreshKey} onOpenModule={openModule} onOpenDialog={openDialog} />;
+  if (false && module === "global") return (
     <div className="page-stack">
       <section className="metric-grid six"><Metric label="项目数" value="28" note="在线 24 · 灰度 4" /><Metric label="总 DAU" value="1,284,630" note="较昨日 +4.1%" tone="good" /><Metric label="总收入" value="$48,921" note="较昨日 +2.7%" tone="good" /><Metric label="投放消耗" value="$31,406" note="ROAS 155.8%" /><Metric label="预估利润" value="$17,515" note="利润率 35.8%" tone="good" /><Metric label="异常项目" value="4" note="严重 2 · 预警 2" tone="bad" /></section>
       <section className="portfolio-health"><div><Badge tone="bad">2</Badge><strong>变现严重异常</strong><p>广告浏览者比例或收入连续下降</p></div><div><Badge tone="warn">2</Badge><strong>数据质量预警</strong><p>Firebase 与中台 DAU 差异超阈值</p></div><div><Badge tone="blue">3</Badge><strong>待完成验收</strong><p>新版本尚未达到 P0 100%</p></div><div><Badge tone="good">21</Badge><strong>项目运行正常</strong><p>核心指标处于历史基线范围</p></div></section>
@@ -711,7 +730,7 @@ function ModulePage({ module, project, configs, onProjectChange, openModule, ope
     </div>
   );
 
-  if (module === "project") return (
+  if (false && module === "project") return (
     <div className="page-stack">
       <section className="project-hero surface"><div><div className="eyebrow">{project} · {displayProfile.packageName}</div><h2>{displayProfile.name}</h2><p>{displayProfile.category} · Android · 负责人 {displayProfile.owner} · 当前版本 {displayProfile.version}</p></div><div className="project-health"><span>综合健康度</span><strong>{displayProfile.health}</strong><Badge tone={displayProfile.healthTone}>{displayProfile.healthTone === "good" ? "健康" : displayProfile.healthTone === "bad" ? "严重异常" : "需要关注"}</Badge></div></section>
       <section className="metric-grid six"><Metric label="DAU" value={projectItem.dau} note="模拟项目联动" tone="good" /><Metric label="新增用户" value={displayProfile.newUsers} note="按项目模拟" /><Metric label="广告浏览者比例" value={projectItem.viewer} note="目标 ≥35%" tone={projectItem.status === "正常" ? "good" : "bad"} /><Metric label="收入" value={projectItem.revenue} note={displayProfile.revenueDelta} tone={displayProfile.revenueDelta.startsWith("-") ? "bad" : "good"} /><Metric label="ARPDAU" value={displayProfile.arpDau} note="Revenue / DAU" /><Metric label="D1留存" value={displayProfile.retention} note="Firebase cohort" tone="good" /></section>
@@ -720,7 +739,7 @@ function ModulePage({ module, project, configs, onProjectChange, openModule, ope
     </div>
   );
 
-  if (module === "vpn") return (
+  if (false && module === "vpn") return (
     <div className="page-stack vpn-v18-page">
       <section className="vpn-version-banner surface"><div><div className="eyebrow">JKCL 埋点规范 V1.8 · VPN 弱网专项</div><h2>俄罗斯 / 伊朗 VPN 功能质量</h2><p>权限 → 配置 → 节点探测与选择 → 连接阶段 → 回退恢复 → 出口可用 → 会话稳定性 → 广告请求</p></div><div><Badge tone="warn">3 个重点异常</Badge><small>基线：同国家 · 同ASN · 同小时近7日</small></div></section>
       <section className="metric-grid six"><Metric label="会话最终成功率" value="74.6%" note="61,423 / 82,361 vpn_session_id" tone="bad" /><Metric label="连接尝试成功率" value="78.0%" note="connection_id 口径 · -5.9pp" tone="bad" /><Metric label="连接结果覆盖率" value="99.7%" note="result / start · 缺253条" tone="good" /><Metric label="连接后可用率" value="92.4%" note="connectivity_check / success" tone="warn" /><Metric label="异常断开率" value="8.7%" note="非用户/配置断开" tone="bad" /><Metric label="低质量会话率" value="16.8%" note="poor / unusable" tone="warn" /></section>
@@ -747,7 +766,7 @@ function ModulePage({ module, project, configs, onProjectChange, openModule, ope
     </div>
   );
 
-  if (module === "admob") return (
+  if (false && module === "admob") return (
     <div className="page-stack">
       <section className="metric-grid six"><Metric label="预估收入" value="$4,821" note="较昨日 -8.4%" tone="bad" /><Metric label="广告请求" value="201,944" note="+4.9%" /><Metric label="匹配率" value="100%" note="AdMob已结算" tone="good" /><Metric label="展示率" value="70.2%" note="目标 ≥68%" tone="good" /><Metric label="eCPM" value="$35.03" note="-3.1%" /><Metric label="广告展示独立用户 AV" value="29,671" note="人均展示 3.42 次" tone="bad" /></section>
       <section className="admob-split"><div className="surface"><div className="surface-title"><div><h2>用户覆盖</h2><p>回答有多少独立用户真正看到了广告</p></div><Badge tone="bad">异常</Badge></div><div className="big-ratio"><strong>23.1%</strong><span>广告展示独立用户比例（AV / DAU）</span><div><i style={{width:"23.1%"}} /></div></div><div className="ratio-details"><div><span>日活跃用户（DAU）</span><strong>128,430</strong></div><div><span>广告请求用户（Request UV）</span><strong>34,921</strong></div><div><span>广告展示独立用户（AV）</span><strong>29,671</strong></div><div><span>人均展示次数（Impression / AV）</span><strong>3.42</strong></div></div><button className="full-link" onClick={() => openModule("funnel")}>定位用户覆盖漏斗 →</button></div><div className="surface"><div className="surface-title"><div><h2>请求后效率</h2><p>回答广告 SDK 链路是否健康</p></div><Badge tone="good">正常</Badge></div><div className="efficiency-chain">{[["Request","201,944","100%"],["Matched","201,944","100%"],["Show","141,760","70.2%"],["Impression","137,628","97.1%"]].map(row => <div key={row[0]}><strong>{row[0]}</strong><span>{row[1]}</span><Badge tone={row[0] === "Show" ? "blue" : "good"}>{row[2]}</Badge></div>)}</div><div className="conclusion-block good"><strong>结论</strong><p>AdMob匹配和请求后展示正常，低 AV 主要不是填充问题。</p></div></div></section>
@@ -756,7 +775,7 @@ function ModulePage({ module, project, configs, onProjectChange, openModule, ope
     </div>
   );
 
-  if (module === "firebase") return (
+  if (false && module === "firebase") return (
     <div className="page-stack">
       <section className="metric-grid six"><Metric label="Firebase DAU" value="128,430" note="实时 · 延迟8分钟" /><Metric label="中台 DAU" value="124,208" note="差异 3.3%" tone="bad" /><Metric label="今日事件量" value="8.42M" note="+5.7%" /><Metric label="P0参数完整率" value="99.1%" note="目标100%" tone="bad" /><Metric label="未知事件率" value="0.18%" note="目标&lt;0.5%" tone="good" /><Metric label="隔离事件" value="2,184" note="缺ID 1,602" tone="bad" /></section>
       <section className="firebase-status"><div><span className="status-dot" /><strong>Firebase Export</strong><p>最近入库 15:31 · 正常</p></div><i /><div><span className="status-dot" /><strong>标准化任务</strong><p>批次 fb_1530 · 正常</p></div><i /><div><span className="status-dot" /><strong>ADB 聚合</strong><p>水位 15:22 · 延迟9分钟</p></div><i /><div><span className="status-dot warn" /><strong>中台接口</strong><p>成功率 96.7% · 预警</p></div></section>
@@ -768,7 +787,7 @@ function ModulePage({ module, project, configs, onProjectChange, openModule, ope
 
   if (module === "firebaseSetup") return <FirebaseConfiguration openDialog={openDialog} notify={notify} />;
 
-  if (module === "reconcile") return (
+  if (false && module === "reconcile") return (
     <div className="page-stack">
       <section className="metric-grid five"><Metric label="对账项目" value="24" note="今日完成 22" /><Metric label="正常项目" value="19" note="差异&lt;3%" tone="good" /><Metric label="预警项目" value="3" note="差异3%–5%" /><Metric label="异常项目" value="2" note="差异&gt;5%" tone="bad" /><Metric label="待结算日期" value="3 天" note="AdMob T+3" /></section>
       <section className="reconcile-flow">{[["Firebase","用户/事件","128,430 DAU"],["AdMob","请求/展示/收入","T+3 已结算"],["OSS Raw","原始事件备份","8.42M"],["ADB","标准化事实表","水位15:22"],["中台报表","统一口径","差异告警"]].map((row,index) => <div key={row[0]}><span>{index+1}</span><strong>{row[0]}</strong><p>{row[1]}</p><small>{row[2]}</small></div>)}</section>
@@ -777,7 +796,7 @@ function ModulePage({ module, project, configs, onProjectChange, openModule, ope
     </div>
   );
 
-  if (module === "tracking") return <TrackingAcceptanceCenter project={project} projects={projects} configs={configs} onProjectChange={changeTrackingProduct} openConfig={() => openModule("config")} notify={notify} />;
+  if (module === "tracking") return <TrackingAcceptanceCenter project={project} projects={onlineProjects.map((item) => ({ code: item.projectCode, name: item.appName, category: "线上项目", appIdentifier: item.appIdentifier }))} configs={configs} platform={platform} appVersion={appVersion} onProjectChange={changeTrackingProduct} openConfig={() => openModule("config")} notify={notify} />;
   /* legacy acceptance prototype retained below for reference */
   if (false) return (
     <div className="page-stack">
@@ -805,10 +824,10 @@ function ModulePage({ module, project, configs, onProjectChange, openModule, ope
   if (module === "config") return (
     <div className="page-stack">
       <section className="config-head surface"><div><div className="eyebrow">事件主库 → 分类勾选/单点剔除 → 配置 → 发布快照 → 验收Run</div><h2>打点配置管理</h2><p>按当前数据源的事件主表和字段表组装配置；可整模块选择，也可取消任一单事件。</p></div><div><Badge tone="blue">{trackingConfigDataSource.eventCount} 个事件 · {trackingConfigDataSource.fieldCount} 条字段</Badge><button className="primary-button" onClick={() => openConfigEditor(null)}>＋ 新建打点配置</button></div></section>
-      <section className="config-data-source surface"><div className="surface-title"><div><h2>数据源状态</h2><p>页面字段统一从 repository 数据模型读取；提供数据库后只替换数据加载层，配置页面结构不变。</p></div><Badge tone={trackingConfigDataSource.sourceType === "database" ? "good" : "warn"}>{trackingConfigDataSource.sourceType === "database" ? "数据库已连接" : "本地镜像预览"}</Badge></div><div className="config-source-grid"><div><span>当前数据源</span><strong>{trackingConfigDataSource.sourceLabel}</strong><small>{trackingConfigDataSource.sourceType === "database" ? "线上数据库读取" : "暂未连接数据库"}</small></div><div><span>Schema 版本</span><strong>{trackingConfigDataSource.schemaVersion}</strong><small>事件 {trackingConfigDataSource.eventCount} 条 · 字段 {trackingConfigDataSource.fieldCount} 条</small></div><div><span>事件主表</span><strong>{trackingConfigDataSource.eventTable}</strong><small>事件主键用于关联字段明细</small></div><div><span>字段明细表</span><strong>{trackingConfigDataSource.fieldTable}</strong><small>按 field_order 保持展示顺序</small></div><div><span>最近读取</span><strong>{trackingConfigDataSource.fetchedAt}</strong><small>接库后改为数据库读取时间</small></div><div><span>接入位置</span><strong>tracking-config-repository.ts</strong><small>数据库信息待提供后替换 provider</small></div></div><div className={`config-source-note ${trackingConfigDataSource.sourceType === "database" ? "connected" : "pending"}`}><strong>{trackingConfigDataSource.sourceType === "database" ? "当前页面已使用数据库字段" : "当前仅用于页面预览"}</strong><span>{trackingConfigDataSource.sourceType === "database" ? "事件、字段、Provider 和配置统计均来自数据库快照。" : "V1.7 本地镜像只用于确认页面结构和交互，不代表已经连接线上数据库，也不会写入线上数据。"}</span></div></section>
+      <section className="config-data-source surface"><div className="surface-title"><div><h2>数据源状态</h2><p>页面字段统一从 repository 数据模型读取；提供数据库后只替换数据加载层，配置页面结构不变。</p></div><Badge tone={trackingConfigDataSource.sourceType === "database" ? "good" : "warn"}>{trackingConfigDataSource.sourceType === "database" ? "数据库已连接" : "本地镜像预览"}</Badge></div><div className="config-source-grid"><div><span>当前数据源</span><strong>{trackingConfigDataSource.sourceLabel}</strong><small>{trackingConfigDataSource.sourceType === "database" ? "线上数据库读取" : "暂未连接数据库"}</small></div><div><span>Schema 版本</span><strong>{trackingConfigDataSource.schemaVersion}</strong><small>事件 {trackingConfigDataSource.eventCount} 条 · 字段 {trackingConfigDataSource.fieldCount} 条</small></div><div><span>事件主表</span><strong>{trackingConfigDataSource.eventTable}</strong><small>事件主键用于关联字段明细</small></div><div><span>字段明细表</span><strong>{trackingConfigDataSource.fieldTable}</strong><small>按 field_order 保持展示顺序</small></div><div><span>最近读取</span><strong>{trackingConfigDataSource.fetchedAt}</strong><small>接库后改为数据库读取时间</small></div><div><span>接入位置</span><strong>tracking-config-repository.ts</strong><small>数据库信息待提供后替换 provider</small></div></div><div className={`config-source-note ${trackingConfigDataSource.sourceType === "database" ? "connected" : "pending"}`}><strong>{trackingConfigDataSource.sourceType === "database" ? "当前页面已使用数据库字段" : "当前仅用于页面预览"}</strong><span>{trackingConfigDataSource.sourceType === "database" ? "事件、字段、Provider 和配置统计均来自数据库快照。" : "V1.8 本地镜像只用于确认页面结构和交互，不代表已经连接线上数据库，也不会写入线上数据。"}</span></div></section>
       <section className="surface"><div className="surface-title"><div><h2>配置版本</h2><p>草稿可原地编辑；发布后生成不可变 snapshot_id，修改已发布配置时会复制为新版本。</p></div><Badge tone="neutral">共 {configs.length} 个版本</Badge></div><div className="table-wrap"><table><thead><tr><th>配置名称 / ID</th><th>版本</th><th>品类</th><th>关联项目</th><th>已选 / 全量</th><th>P0 / P1 / P2</th><th>场景</th><th>状态</th><th>快照</th><th>操作</th></tr></thead><tbody>{configs.map((config) => <tr key={config.id} className={`clickable-row ${selectedConfigRecord.id === config.id ? "row-selected" : ""}`} onClick={() => setSelectedConfigId(config.id)}><td><strong>{config.name}</strong><small>{config.id}</small></td><td>{config.version}</td><td>{config.category}</td><td>{config.projects.join("、")}</td><td><strong>{config.selectedCount} / {config.totalCount}</strong><small>配置覆盖 {((config.selectedCount / Math.max(config.totalCount, 1)) * 100).toFixed(1)}%</small></td><td>{config.p0Count} / {config.p1Count} / {config.p2Count}</td><td>{config.sceneCount}</td><td><Badge tone={config.status === "PUBLISHED" ? "good" : config.status === "REVIEWING" ? "blue" : "warn"}>{config.status === "PUBLISHED" ? "已发布" : config.status === "REVIEWING" ? "评审中" : "草稿"}</Badge></td><td>{config.snapshotId ? <strong>{config.snapshotId}</strong> : "—"}</td><td><div className="row-actions"><button onClick={(event) => { event.stopPropagation(); openConfigEditor(config); }}>{config.status === "PUBLISHED" ? "复制为新版本" : "编辑草稿"}</button>{config.status === "DRAFT" && <button onClick={(event) => { event.stopPropagation(); openConfigEditor(config); }}>编辑并发布</button>}<button onClick={(event) => { event.stopPropagation(); notify(`${config.id} 详情已展开`); }}>详情</button></div></td></tr>)}</tbody></table></div></section>
       <section className="selected-config-summary surface"><div><span>当前查看</span><strong>{selectedConfigRecord.name} {selectedConfigRecord.version}</strong><small>{selectedConfigRecord.id}</small></div><div><span>事件范围</span><strong>{selectedConfigRecord.selectedCount}/{selectedConfigRecord.totalCount}</strong><small>仅这 {selectedConfigRecord.selectedCount} 个进入验收分母</small></div><div><span>优先级</span><strong>P0 {selectedConfigRecord.p0Count} · P1 {selectedConfigRecord.p1Count} · P2 {selectedConfigRecord.p2Count}</strong><small>P0必须100%</small></div><div><span>发布引用</span><strong>{selectedConfigRecord.snapshotId ?? "尚未生成"}</strong><small>{selectedConfigRecord.status === "PUBLISHED" ? "可用于新建验收Run" : "发布后才可用于测试"}</small></div></section>
-      <section className="config-layout"><div className="surface"><div className="surface-title"><div><h2>项目主品类</h2><p>作为配置筛选模板，不直接决定验收分母</p></div><button className="text-button" onClick={() => openDialog("project-category")}>＋新增</button></div><div className="category-list">{[["套利 VPN","v1.7 · 14项目","连接、权限、服务器、协议、连接广告"],["清理","v1.5 · 8项目","扫描、清理、结果、大小、清理广告"],["Launcher","v1.3 · 6项目","引导、默认桌面、主题、桌面交互"]].map((row)=><button key={row[0]} className={selectedCategory===row[0]?"selected":""} onClick={()=>setSelectedCategory(row[0])}><strong>{row[0]}</strong><span>{row[1]}</span><small>{row[2]}</small></button>)}</div></div><div className="surface"><div className="surface-title"><div><h2>{selectedConfigRecord.name} · 范围组成</h2><p>配置最终范围来自人工选择，并保留能力包来源</p></div><Badge tone="blue">{selectedConfigRecord.selectedCount}事件</Badge></div><div className="resolution-list"><div><span>标准事件总表</span><strong>V1.7 全量可选事件</strong><em>{selectedConfigRecord.totalCount}</em></div><div><span>当前已选</span><strong>{selectedConfigRecord.category} 当前版本</strong><em>{selectedConfigRecord.selectedCount}</em></div><div><span>当前未选</span><strong>本版本不适用事件</strong><em>{selectedConfigRecord.totalCount - selectedConfigRecord.selectedCount}</em></div><div><span>事件字段</span><strong>随所选事件自动纳入</strong><em>{trackingEventCatalog.filter((event) => selectedConfigRecord.selectedEventIds?.includes(event.id)).reduce((sum, event) => sum + event.parameterCount, 0)}</em></div></div><div className="conclusion-block good"><strong>最终选择 {selectedConfigRecord.selectedCount}/{selectedConfigRecord.totalCount}</strong><p>品类只提供推荐；最终以配置中逐项勾选并发布的事件快照为准。</p></div></div><aside className="surface"><div className="surface-title"><div><h2>发布检查</h2><p>规则完整性</p></div></div><div className="publish-checks"><div><span>✓</span><p>已选择{selectedConfigRecord.selectedCount}个事件并完成优先级</p></div><div><span>✓</span><p>{selectedConfigRecord.sceneCount}个场景均绑定应测事件</p></div><div><span>✓</span><p>P0参数和关联链已配置</p></div><div><span>{selectedConfigRecord.status === "PUBLISHED" ? "✓" : "!"}</span><p>{selectedConfigRecord.status === "PUBLISHED" ? `已生成快照 ${selectedConfigRecord.snapshotId}` : "尚未发布，不能创建验收Run"}</p></div></div><button className="primary-button full" onClick={() => selectedConfigRecord.status === "PUBLISHED" ? notify(`${selectedConfigRecord.snapshotId} 为只读快照`) : openConfigEditor(selectedConfigRecord)}>{selectedConfigRecord.status === "PUBLISHED" ? "查看发布快照" : "继续编辑并发布"}</button></aside></section>
+      <section className="config-layout"><div className="surface"><div className="surface-title"><div><h2>项目主品类</h2><p>作为配置筛选模板，不直接决定验收分母</p></div><button className="text-button" onClick={() => openDialog("project-category")}>＋新增</button></div><div className="category-list">{[["套利 VPN","v1.8 · 14项目","连接、权限、服务器、协议、连接广告"],["清理","v1.8 · 8项目","扫描、清理、结果、大小、清理广告"],["Launcher","v1.8 · 6项目","引导、默认桌面、主题、桌面交互"]].map((row)=><button key={row[0]} className={selectedCategory===row[0]?"selected":""} onClick={()=>setSelectedCategory(row[0])}><strong>{row[0]}</strong><span>{row[1]}</span><small>{row[2]}</small></button>)}</div></div><div className="surface"><div className="surface-title"><div><h2>{selectedConfigRecord.name} · 范围组成</h2><p>配置最终范围来自人工选择，并保留能力包来源</p></div><Badge tone="blue">{selectedConfigRecord.selectedCount}事件</Badge></div><div className="resolution-list"><div><span>标准事件总表</span><strong>V1.8 全量可选事件</strong><em>{selectedConfigRecord.totalCount}</em></div><div><span>当前已选</span><strong>{selectedConfigRecord.category} 当前版本</strong><em>{selectedConfigRecord.selectedCount}</em></div><div><span>当前未选</span><strong>本版本不适用事件</strong><em>{selectedConfigRecord.totalCount - selectedConfigRecord.selectedCount}</em></div><div><span>事件字段</span><strong>随所选事件自动纳入</strong><em>{trackingEventCatalog.filter((event) => selectedConfigRecord.selectedEventIds?.includes(event.id)).reduce((sum, event) => sum + event.parameterCount, 0)}</em></div></div><div className="conclusion-block good"><strong>最终选择 {selectedConfigRecord.selectedCount}/{selectedConfigRecord.totalCount}</strong><p>品类只提供推荐；最终以配置中逐项勾选并发布的事件快照为准。</p></div></div><aside className="surface"><div className="surface-title"><div><h2>发布检查</h2><p>规则完整性</p></div></div><div className="publish-checks"><div><span>✓</span><p>已选择{selectedConfigRecord.selectedCount}个事件并完成优先级</p></div><div><span>✓</span><p>{selectedConfigRecord.sceneCount}个场景均绑定应测事件</p></div><div><span>✓</span><p>P0参数和关联链已配置</p></div><div><span>{selectedConfigRecord.status === "PUBLISHED" ? "✓" : "!"}</span><p>{selectedConfigRecord.status === "PUBLISHED" ? `已生成快照 ${selectedConfigRecord.snapshotId}` : "尚未发布，不能创建验收Run"}</p></div></div><button className="primary-button full" onClick={() => selectedConfigRecord.status === "PUBLISHED" ? notify(`${selectedConfigRecord.snapshotId} 为只读快照`) : openConfigEditor(selectedConfigRecord)}>{selectedConfigRecord.status === "PUBLISHED" ? "查看发布快照" : "继续编辑并发布"}</button></aside></section>
       <section className="surface"><div className="surface-title"><div><h2>事件与字段包</h2><p>切换查看事件、字段、枚举和Provider，不再使用静态页签</p></div><div className="dimension-tabs">{[["events","事件"],["fields","公共字段"],["enums","枚举"],["providers","Provider"]].map(([key,label])=><button key={key} className={configPackageTab===key?"active":""} onClick={()=>setConfigPackageTab(key as ConfigPackageTab)}>{label}</button>)}</div></div><div className="table-wrap"><table><thead><tr>{configTables[configPackageTab].headers.map(header=><th key={header}>{header}</th>)}</tr></thead><tbody>{configTables[configPackageTab].rows.map(row => <tr key={row[0]}>{row.map((cell,index)=><td key={index}>{(cell==="P0"||cell==="条件P0")?<Badge tone="bad">{cell}</Badge>:(["已发布","正常"].includes(cell))?<Badge tone="good">{cell}</Badge>:cell==="预警"?<Badge tone="warn">{cell}</Badge>:cell}</td>)}</tr>)}</tbody></table></div></section>
     </div>
   );
@@ -816,7 +835,8 @@ function ModulePage({ module, project, configs, onProjectChange, openModule, ope
   return (
     <div className="page-stack">
       <section className="metric-grid six"><Metric label="运行日志" value={String(syncRuns.length)} note={taskLogLoading ? "正在读取" : "Firebase同步任务"} /><Metric label="运行中" value={String(runningSyncRuns)} note="QUEUED/RUNNING/VERIFYING" tone={runningSyncRuns ? "good" : undefined} /><Metric label="失败运行" value={String(failedSyncRuns)} note="需排查或重试" tone={failedSyncRuns ? "bad" : undefined} /><Metric label="错误日志" value={String(failedCheckLogs)} note="Firebase预检失败" tone={failedCheckLogs ? "bad" : "good"} /><Metric label="检查记录" value={String(checkLogs.length)} note="服务账号/Firebase/BigQuery" /><Metric label="最近运行" value={formatLogTime(latestRunTime).slice(11) || "—"} note={latestRunTime ? formatLogTime(latestRunTime).slice(0, 10) : "等待同步"} /></section>
-      <section className="surface firebase-task-console"><div className="surface-title"><div><h2>Firebase 数据任务日志</h2><p>统一展示 Firebase 资源检查、同步运行和错误日志，数据来自 ADB 控制表。</p></div><div className="dimension-tabs"><button className={taskFilter==="all"?"active":""} onClick={()=>setTaskFilter("all")}>全部</button><button className={taskFilter==="failed"?"active":""} onClick={()=>setTaskFilter("failed")}>失败</button><button className={taskFilter==="running"?"active":""} onClick={()=>setTaskFilter("running")}>运行中</button></div></div><div className="firebase-task-toolbar"><input value={taskKeyword} onChange={(event)=>setTaskKeyword(event.target.value)} onKeyDown={(event)=>{ if (event.key === "Enter") void loadFirebaseTaskLogs(); }} placeholder="搜索项目、包名、Firebase Project/App、错误信息" /><button className="secondary-button" onClick={() => { setTaskKeyword(""); setTaskFilter("all"); }}>重置</button><button className="primary-button" onClick={() => void loadFirebaseTaskLogs()}>{taskLogLoading ? "刷新中..." : "刷新日志"}</button></div>{taskLogError && <div className="firebase-log-state warn"><strong>日志接口待接入</strong><p>{taskLogError}。请在 Sites 环境变量配置 NEXT_PUBLIC_TRACKING_API_BASE_URL 和 NEXT_PUBLIC_TRACKING_API_SECURE_PATH，并确认后端已合并日志接口。</p></div>}</section>
+      <section className="surface firebase-task-console"><div className="surface-title"><div><h2>Firebase 数据任务日志</h2><p>统一展示 Firebase 资源检查、同步运行和错误日志，数据来自 ADB 控制表。</p></div><div className="dimension-tabs"><button className={taskFilter==="all"?"active":""} onClick={()=>setTaskFilter("all")}>全部</button><button className={taskFilter==="failed"?"active":""} onClick={()=>setTaskFilter("failed")}>失败</button><button className={taskFilter==="running"?"active":""} onClick={()=>setTaskFilter("running")}>运行中</button></div></div><div className="firebase-task-toolbar"><input value={taskKeyword} onChange={(event)=>setTaskKeyword(event.target.value)} onKeyDown={(event)=>{ if (event.key === "Enter") void loadFirebaseTaskLogs(); }} placeholder="搜索项目、包名、Firebase Project/App、错误信息" /><button className="secondary-button" onClick={() => { setTaskKeyword(""); setTaskFilter("all"); }}>重置</button><button className="primary-button" onClick={() => void loadFirebaseTaskLogs()}>{taskLogLoading ? "刷新中..." : "刷新日志"}</button></div>{taskLogError && <div className="firebase-log-state warn"><strong>日志接口待接入</strong><p>{taskLogError}。请在部署环境变量配置 NEXT_PUBLIC_TRACKING_API_BASE_URL 和 NEXT_PUBLIC_TRACKING_API_SECURE_PATH，并确认后端已合并日志接口。</p></div>}</section>
+      <section className="surface task-interface-map"><div className="surface-title"><div><h2>任务页接入边界</h2><p>没有真实接口时不展示模拟任务；只展示接口状态、应接表和排查入口。</p></div><Badge tone={taskLogError ? "warn" : "good"}>{taskLogError ? "待配置" : "已连接"}</Badge></div><div>{[["同步运行","/firebase-integration/sync-runs","firebase_sync_runs","看BigQuery读取、OSS归档、ADB写入水位"],["资源检查","/firebase-integration/check-logs","firebase_api_check_logs","看服务账号、Firebase App、Dataset、events表权限"],["打点验收","/tracking-acceptance/runs","tracking_acceptance_runs","看新产品配置快照对应事件是否收到"],["告警规则","/alert-rules","metric_alert_rules","看阈值、冷却、通知和恢复状态"]].map((row)=><article key={row[0]}><span>{row[0]}</span><code>{row[1]}</code><strong>{row[2]}</strong><small>{row[3]}</small></article>)}</div></section>
       <section className="surface"><div className="surface-title"><div><h2>运行日志</h2><p>对应 ADB 表 <code>firebase_sync_runs</code>，用于查看 Firebase 绑定同步任务的水位、处理量和失败原因。</p></div><Badge tone={failedSyncRuns ? "bad" : "blue"}>{visibleSyncRuns.length} 条</Badge></div><div className="table-wrap"><table><thead><tr><th>任务 / 运行ID</th><th>项目</th><th>Firebase资源</th><th>时间范围</th><th>开始 / 结束</th><th>处理量</th><th>耗时</th><th>状态</th><th>错误</th></tr></thead><tbody>{visibleSyncRuns.length ? visibleSyncRuns.map((row) => <tr key={row.runId} className={isFailedStatus(row.status) ? "row-warn" : ""}><td><strong>{row.runType || "SYNC"}</strong><small>Run #{row.runId}{row.externalJobId ? ` · ${row.externalJobId}` : ""}</small></td><td><strong>{logProjectLabel(row)}</strong><small>{row.projectName || row.packageName || row.connectionName || "—"}</small></td><td><strong>{row.firebaseProjectId || "—"}</strong><small>{row.firebaseAppId || row.firebaseAppIdentifier || "—"}</small></td><td><strong>{formatLogTime(row.rangeStart)}</strong><small>{formatLogTime(row.rangeEnd)}</small></td><td><strong>{formatLogTime(row.startedAt)}</strong><small>{formatLogTime(row.finishedAt)}</small></td><td><strong>{formatLogRows(row.adbRows)} ADB</strong><small>{formatLogRows(row.sourceRows)} source</small></td><td>{formatLogDuration(row.durationMs)}</td><td><Badge tone={statusTone(row.status)}>{row.status || "UNKNOWN"}</Badge></td><td>{row.errorMessage || "—"}</td></tr>) : <tr><td colSpan={9}><div className="empty-table-state"><strong>{taskLogLoading ? "正在读取运行日志" : "暂无运行日志"}</strong><span>{taskLogError ? "后端接入后会显示真实 Firebase 同步运行记录。" : "当前筛选条件下没有记录。"}</span></div></td></tr>}</tbody></table></div></section>
       <section className="surface"><div className="surface-title"><div><h2>错误日志 / 接口检查</h2><p>对应 ADB 表 <code>firebase_api_check_logs</code>，覆盖服务账号、Firebase Project/App、BigQuery Dataset 和 events 表检查。</p></div><Badge tone={failedCheckLogs ? "bad" : "good"}>{failedCheckLogs} 个失败</Badge></div><div className="table-wrap"><table><thead><tr><th>检查项 / 日志ID</th><th>项目</th><th>Firebase资源</th><th>检查时间</th><th>耗时</th><th>结果</th><th>错误码</th><th>详情</th></tr></thead><tbody>{visibleCheckLogs.length ? visibleCheckLogs.map((row) => <tr key={row.logId} className={isFailedStatus(row.status) ? "row-warn" : ""}><td><strong>{row.checkType || "CHECK"}</strong><small>Log #{row.logId}</small></td><td><strong>{logProjectLabel(row)}</strong><small>{row.projectName || row.packageName || row.connectionName || "—"}</small></td><td><strong>{row.firebaseProjectId || "—"}</strong><small>{row.firebaseAppId || row.firebaseAppIdentifier || "—"}</small></td><td>{formatLogTime(row.checkedAt || row.createdAt)}</td><td>{formatLogDuration(row.durationMs)}</td><td><Badge tone={statusTone(row.status)}>{row.status || "UNKNOWN"}</Badge></td><td>{row.errorCode || "—"}</td><td>{row.message || "—"}</td></tr>) : <tr><td colSpan={8}><div className="empty-table-state"><strong>{taskLogLoading ? "正在读取错误日志" : "暂无错误日志"}</strong><span>{taskLogError ? "后端接入后会显示 Firebase 绑定预检错误和检查详情。" : "当前筛选条件下没有失败或检查记录。"}</span></div></td></tr>}</tbody></table></div></section>
       <section className="two-column wide-left"><div className="surface"><div className="surface-title"><div><h2>处理建议</h2><p>根据 Firebase 数据任务日志快速定位负责人和下一步动作。</p></div><button className="text-button" onClick={() => openModule("firebase")}>去 Firebase 数据源</button></div><div className="alert-list">{[["P0","SERVICE_ACCOUNT / OAuth 失败","检查 secret:// 引用、服务账号邮箱和 JSON 文件权限","数据平台"],["P0","BIGQUERY_DATASET 或 EVENTS_TABLES 失败","确认 Firebase BigQuery Export 已开启且 Dataset 区域一致","数据平台"],["P1","FIREBASE_APP 包名不一致","回到 Firebase 数据源设置核对 App ID 与 project_projects.package_name","产品/客户端"],["P1","同步运行失败或处理量为 0","查看 run error_message，修复后由任务系统重试","数据平台"]].map(row => <button key={row[1]} onClick={() => notify(`${row[1]}：${row[2]}`)}><Badge tone={row[0]==="P0"?"bad":"warn"}>{row[0]}</Badge><div><strong>{row[1]}</strong><p>{row[2]}</p><small>负责人：{row[3]}</small></div><span>→</span></button>)}</div></div><aside className="surface"><div className="surface-title"><div><h2>告警通知</h2><p>当前值班策略</p></div></div><div className="notification-rules"><div><span>P0</span><strong>资源校验失败</strong><p>服务账号、Firebase App、BigQuery 不可读立即通知</p></div><div><span>P1</span><strong>同步任务失败</strong><p>连续失败或超过 SLA 通知数据平台</p></div><div><span>P2</span><strong>NO_DATA</strong><p>每日汇总未发现 events 表或数据水位为空</p></div></div><button className="primary-button full" onClick={() => openDialog("alert-rule")}>＋ 新建告警规则</button></aside></section>
@@ -879,12 +899,18 @@ export default function Home() {
   const [embedded, setEmbedded] = useState(false);
   const [project, setProject] = useState("IRAN-VPN-01");
   const [onlineProjects, setOnlineProjects] = useState<OnlineProject[]>([]);
+  const [filterOptions, setFilterOptions] = useState<FunnelFilterOptions>(emptyFilterOptions);
   const [projectLoading, setProjectLoading] = useState(true);
   const [projectLoadError, setProjectLoadError] = useState("");
-  const [range, setRange] = useState("今天");
+  const [range, setRange] = useState("昨天");
   const [platform, setPlatform] = useState("Android");
   const [country, setCountry] = useState("全部国家");
   const [appVersion, setAppVersion] = useState("全部版本");
+  const [draftProject, setDraftProject] = useState("IRAN-VPN-01");
+  const [draftRange, setDraftRange] = useState("昨天");
+  const [draftPlatform, setDraftPlatform] = useState("Android");
+  const [draftCountry, setDraftCountry] = useState("全部国家");
+  const [draftAppVersion, setDraftAppVersion] = useState("全部版本");
   const [funnelMode, setFunnelMode] = useState<FunnelMode>("monetization");
   const [unitMode, setUnitMode] = useState<UnitMode>("users");
   const [dimension, setDimension] = useState("国家");
@@ -926,6 +952,24 @@ export default function Home() {
       ? [country, diagnosticAsn, diagnosticNetwork, diagnosticProtocol, diagnosticNode, appVersion]
       : [diagnosticQualitySource, diagnosticQualityStatus, platform, appVersion];
   const diagnosticSlice = diagnosticSliceValues.filter((value) => !value.startsWith("全部")).join(" · ") || "全部维度";
+  const platformOptions = useMemo(() => {
+    const onlineValues = uniqueOptionValues(filterOptions.platforms.map(displayPlatform));
+    const orderedValues = [
+      ...["Android", "iOS"].filter((item) => onlineValues.includes(item)),
+      ...onlineValues.filter((item) => !["Android", "iOS"].includes(item)),
+    ];
+    return ["全部", ...orderedValues];
+  }, [filterOptions.platforms]);
+  const countryOptions = useMemo(() => ["全部国家", ...uniqueOptionValues(filterOptions.countries)], [filterOptions.countries]);
+  const appVersionOptions = useMemo(() => {
+    const versionLabels = filterOptions.versions.length > 0
+      ? filterOptions.versions.map((item) => item.buildNumber ? `${item.appVersion} (${item.buildNumber})` : item.appVersion)
+      : filterOptions.appVersions;
+    return ["全部版本", ...uniqueOptionValues(versionLabels)];
+  }, [filterOptions.appVersions, filterOptions.versions]);
+  const onlineDateRange = filterOptions.dateRange?.min && filterOptions.dateRange?.max
+    ? `${filterOptions.dateRange.min} 至 ${filterOptions.dateRange.max}`
+    : "";
 
   useEffect(() => {
     if (!dialog) return;
@@ -953,18 +997,44 @@ export default function Home() {
     }
     const controller = new AbortController();
     setProjectLoading(true);
-    fetchOnlineProjects(controller.signal)
-      .then((items) => {
-        setOnlineProjects(items);
-        setProjectLoadError(items.length === 0 ? "线上数据库暂无可用项目" : "");
-        if (items.length > 0 && !items.some((item) => item.projectCode === project)) {
-          setProject(items[0].projectCode);
+    fetchFunnelFilterOptions(controller.signal)
+      .then((options) => {
+        setFilterOptions(options);
+        setOnlineProjects(options.projects);
+        setProjectLoadError(options.projects.length === 0 ? "线上数据库暂无可用项目" : "");
+        const nextPlatformOptions = [
+          "全部",
+          ...uniqueOptionValues(options.platforms.map(displayPlatform)),
+        ];
+        const nextDefaultPlatform = pickDefaultPlatform(nextPlatformOptions);
+        const nextCountries = ["全部国家", ...uniqueOptionValues(options.countries)];
+        const nextVersions = options.versions.length > 0
+          ? options.versions.map((item) => item.buildNumber ? `${item.appVersion} (${item.buildNumber})` : item.appVersion)
+          : options.appVersions;
+        const nextAppVersions = ["全部版本", ...uniqueOptionValues(nextVersions)];
+
+        if (options.projects.length > 0 && !options.projects.some((item) => item.projectCode === project)) {
+          setProject(options.projects[0].projectCode);
+          setDraftProject(options.projects[0].projectCode);
+        }
+        if (!nextPlatformOptions.includes(platform)) {
+          setPlatform(nextDefaultPlatform);
+          setDraftPlatform(nextDefaultPlatform);
+        }
+        if (!nextCountries.includes(country)) {
+          setCountry("全部国家");
+          setDraftCountry("全部国家");
+        }
+        if (!nextAppVersions.includes(appVersion)) {
+          setAppVersion("全部版本");
+          setDraftAppVersion("全部版本");
         }
       })
       .catch((error: unknown) => {
         if (controller.signal.aborted) return;
+        setFilterOptions(emptyFilterOptions);
         setOnlineProjects([]);
-        setProjectLoadError(error instanceof Error ? error.message : "线上项目读取失败");
+        setProjectLoadError(error instanceof Error ? error.message : "线上筛选项读取失败");
       })
       .finally(() => {
         if (!controller.signal.aborted) setProjectLoading(false);
@@ -1032,16 +1102,18 @@ export default function Home() {
   const sourceStatus: Record<ModuleKey, { title: string; detail: string; note: string }> = {
     global: { title: "混合时效", detail: "Firebase T+0 · AdMob T+3 · 刷新", note: "DAU和用户行为使用Firebase实时预估；收入、消耗和ROAS使用最近已结算日期，卡片必须标注数据日。" },
     project: { title: "项目诊断", detail: "Firebase延迟约8分钟 · AdMob T+3", note: "用户与产品指标可看当天；收入和AdMob效率使用已结算日期，不参与当天实时结论。" },
-    funnel: { title: "线上标准事件", detail: "ADB实时聚合 · Firebase分源校准", note: "漏斗只读取ADB标准事件和后端可证明口径；不可计算指标显示暂无数据，收入最终以AdMob结算为准。" },
+    funnel: { title: "线上标准事件", detail: "默认昨日DWS汇总 · 今天实时补查", note: "漏斗默认读取前一天已完成汇总；只有筛选包含今天时才补查实时数据。不可计算指标显示暂无数据，收入最终以AdMob结算为准。" },
     vpn: { title: "V1.8 弱网专项", detail: "Firebase T+0 · 会话/连接/阶段关联", note: "本页以 vpn_session_id 串联用户会话，以 connection_id 区分每次真实连接尝试；俄罗斯/伊朗须按 ASN、网络、协议、端口和限制信号联合判断。" },
-    admob: { title: "结算数据", detail: "AdMob已结算至8月8日", note: "本页默认只展示AdMob已结算日期；Firebase AV仅作为覆盖诊断对照，并明确标记来源。" },
+    admob: { title: "AdMob+Firebase", detail: "AdMob T+3结算 · Firebase T+0 AV", note: "本页默认按AdMob结算口径展示收入、请求、匹配和展示；当天广告浏览人数AV可用Firebase jk_ad_impression先看趋势。" },
     firebase: { title: "实时数据", detail: "BigQuery intraday · 延迟约8分钟", note: "本页展示Firebase实时预估、事件质量与同步水位；中台数字仅用于差异诊断。" },
     reconcile: { title: "分源对账", detail: "今日双源 · T+3全量", note: "当天只比较Firebase与中台；含AdMob的最终对账仅在结算日期执行，避免跨时效误报。" },
-    tracking: { title: "实时采集", detail: "当前Run · 按已发布配置快照验收", note: "仅按Run引用的已发布配置快照判定；未执行场景不计为未收到，P0事件、参数与关联链必须达到100%。" },
+    tracking: { title: "线上项目验收", detail: "项目来自线上 · Run接口待配置", note: "验收只使用线上项目列表和已发布配置快照；没有配置或验收接口未接通时必须明确提示，不使用本地演示数据。" },
     config: { title: "配置数据", detail: `${trackingConfigDataSource.eventCount}个标准事件 · ${trackingConfigDataSource.fieldCount}条字段明细`, note: "品类与能力包只负责推荐候选事件；最终验收范围以配置逐项选择并发布的不可变快照为准。" },
-    firebaseSetup: { title: "对接控制面", detail: "2个连接 · 3个Project · 4个App", note: "本页管理连接、project_projects绑定、同步水位和接口健康；项目打点配置不保存Firebase凭证、Project、App或Dataset。" },
-    tasks: { title: "任务实时态", detail: "最近水位15:35 · SLA监控", note: "本页按任务状态和项目过滤，数据日期表示任务处理批次，不等同于经营报表日期。" },
+    firebaseSetup: { title: "对接控制面", detail: "Firebase连接 / Project / App / Dataset", note: "Firebase对接已合并到Firebase数据和任务日志里展示；项目打点配置不保存Firebase凭证、Project、App或Dataset。" },
+    tasks: { title: "任务实时态", detail: "同步日志 · 预检日志 · SLA告警", note: "本页按任务状态和项目过滤，数据日期表示任务处理批次，不等同于经营报表日期；接口未配置时显示待接入，不展示模拟日志。" },
   };
+  const filtersDirty = draftProject !== project || draftRange !== range || draftPlatform !== platform || draftCountry !== country || draftAppVersion !== appVersion;
+  const appliedProjectMeta = onlineProjects.find((item) => item.projectCode === project);
 
   function notify(message: string) {
     setNotice(message);
@@ -1143,13 +1215,30 @@ export default function Home() {
   }
 
   function resetFilters() {
-    setProject("IRAN-VPN-01");
-    setRange("今天");
-    setPlatform("Android");
+    const defaultProject = onlineProjects[0]?.projectCode ?? "IRAN-VPN-01";
+    const defaultPlatform = pickDefaultPlatform(platformOptions);
+    setProject(defaultProject);
+    setDraftProject(defaultProject);
+    setRange("昨天");
+    setDraftRange("昨天");
+    setPlatform(defaultPlatform);
+    setDraftPlatform(defaultPlatform);
     setCountry("全部国家");
+    setDraftCountry("全部国家");
     setAppVersion("全部版本");
+    setDraftAppVersion("全部版本");
     setFiltersApplied((value) => value + 1);
     notify("筛选条件已恢复默认");
+  }
+
+  function applyFilters() {
+    setProject(draftProject);
+    setRange(draftRange);
+    setPlatform(draftPlatform);
+    setCountry(draftCountry);
+    setAppVersion(draftAppVersion);
+    setFiltersApplied((value) => value + 1);
+    notify(`${draftProject} · ${draftRange} 已开始查询`);
   }
 
   function focusWorkbenchSection(sectionId: "diagnosis-overview" | "funnel-workbench" | "step-diagnosis" | "page-product-analysis" | "workbench-rules") {
@@ -1197,12 +1286,12 @@ export default function Home() {
     <MetricInspectContext.Provider value={openMetricDefinition}>
     <div className={`app-shell ${embedded ? "embedded" : ""}`}>
       <aside className="sidebar">
-        <div className="brand"><span className="brand-mark">JK</span><span><strong>变现与埋点</strong><small>质量分析中心 · V34</small></span></div>
+        <div className="brand"><span className="brand-mark">JK</span><span><strong>变现与埋点</strong><small>质量分析中心 · V44</small></span></div>
         <div className="nav-group-label">经营分析</div>
         {moduleMenus.filter((item) => item.group === "经营分析").map((item) => <button key={item.key} className={`main-nav-item ${module === item.key ? "active" : ""}`} onClick={() => openModule(item.key)}><span>{item.index}</span>{item.label}</button>)}
         <div className="nav-group-label">质量治理</div>
         {moduleMenus.filter((item) => item.group === "质量治理").map((item) => <button key={item.key} className={`main-nav-item ${module === item.key ? "active" : ""}`} onClick={() => openModule(item.key)}><span>{item.index}</span>{item.label}</button>)}
-        <div className="sidebar-foot"><span className="status-dot warn" />分模块接入中<small>漏斗分析使用真实接口；其他菜单仍需逐项接入</small></div>
+        <div className="sidebar-foot"><span className="status-dot" />线上数据接入<small>经营分析走线上接口；治理菜单按真实接口状态展示</small></div>
       </aside>
 
       <div className="workspace">
@@ -1232,13 +1321,13 @@ export default function Home() {
           </nav>}
 
           {module !== "firebaseSetup" && <section className="filter-bar">
-            <label>项目<select value={project} disabled={projectLoading || onlineProjects.length === 0} onChange={(event) => setProject(event.target.value)}>{projectLoading && <option>正在读取线上项目…</option>}{!projectLoading && onlineProjects.length === 0 && <option>线上项目不可用</option>}{onlineProjects.map((item) => <option key={item.projectCode} value={item.projectCode}>{item.projectCode}{item.appName ? ` · ${item.appName}` : ""}</option>)}</select>{projectLoadError && <small className="filter-error">{projectLoadError}</small>}</label>
-            <label>日期<select value={range} onChange={(event) => setRange(event.target.value)}><option>今天</option><option>昨天</option><option>近7天</option><option>近30天</option></select></label>
-            <label>平台<select value={platform} onChange={(event)=>setPlatform(event.target.value)}><option>Android</option><option>iOS</option><option>全部</option></select></label>
-            <label>国家<select value={country} onChange={(event)=>setCountry(event.target.value)}><option>全部国家</option><option>伊朗</option><option>埃及</option><option>土耳其</option></select></label>
-            <label>App版本<select value={appVersion} onChange={(event)=>setAppVersion(event.target.value)}><option>全部版本</option><option>1.8.0 (108)</option><option>1.7.4 (104)</option></select></label>
-            <div className="filter-actions"><button onClick={resetFilters}>重置</button><button onClick={() => { setFiltersApplied((value) => value + 1); notify(`${project} · ${range} 筛选已应用`); }}>应用筛选</button></div>
-            <div className="data-state"><span className="status-dot" /><strong>{sourceStatus[module].title}</strong><small>{sourceStatus[module].detail} · 刷新#{filtersApplied}</small></div>
+            <label>项目<select value={draftProject} disabled={projectLoading || onlineProjects.length === 0} onChange={(event) => setDraftProject(event.target.value)}>{projectLoading && <option>正在读取线上项目…</option>}{!projectLoading && onlineProjects.length === 0 && <option>线上项目不可用</option>}{onlineProjects.map((item) => <option key={item.projectCode} value={item.projectCode}>{item.projectCode}{item.appName ? ` · ${item.appName}` : ""}</option>)}</select>{projectLoadError && <small className="filter-error">{projectLoadError}</small>}</label>
+            <label>日期<select value={draftRange} onChange={(event) => setDraftRange(event.target.value)} title={onlineDateRange ? `线上数据日期范围：${onlineDateRange}` : undefined}><option>今天</option><option>昨天</option><option>近7天</option><option>近30天</option></select>{onlineDateRange && <small className="filter-hint">线上：{onlineDateRange}</small>}</label>
+            <label>平台<select value={draftPlatform} onChange={(event)=>setDraftPlatform(event.target.value)}>{platformOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+            <label>国家<select value={draftCountry} onChange={(event)=>setDraftCountry(event.target.value)}>{countryOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+            <label>App版本<select value={draftAppVersion} onChange={(event)=>setDraftAppVersion(event.target.value)}>{appVersionOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+            <div className="filter-actions"><button onClick={resetFilters}>重置</button><button className={filtersDirty ? "primary-button" : ""} disabled={projectLoading || onlineProjects.length === 0} onClick={applyFilters}>{filtersDirty ? "应用并查询" : "刷新数据"}</button></div>
+            <div className="data-state"><span className={`status-dot ${filtersDirty ? "warn" : ""}`} /><strong>{sourceStatus[module].title}</strong><small>{filtersDirty ? "筛选已修改，点击应用后查询" : `${sourceStatus[module].detail} · 刷新#${filtersApplied}`}</small></div>
           </section>}
 
           {module !== "firebaseSetup" && <section className="context-toolbar">
@@ -1247,13 +1336,13 @@ export default function Home() {
           </section>}
           <section className="freshness-note"><div><strong>数据使用提示：</strong>{sourceStatus[module].note}</div><button onClick={() => openMetricDefinition(module === "admob" ? "match_rate" : module === "tracking" ? "event_pass_rate" : "dau")}>查看数据口径</button></section>
 
-          {module !== "funnel" && <ModulePage module={module as Exclude<ModuleKey, "funnel">} project={project} configs={configRecords} onProjectChange={setProject} openModule={openModule} openDialog={setDialog} openConfigEditor={openConfigEditor} notify={notify} />}
+          {module !== "funnel" && <ModulePage module={module as Exclude<ModuleKey, "funnel">} project={project} projectMeta={appliedProjectMeta} onlineProjects={onlineProjects} range={range} platform={platform} country={country} appVersion={appVersion} refreshKey={filtersApplied} configs={configRecords} onProjectChange={(nextProject) => { setProject(nextProject); setDraftProject(nextProject); setFiltersApplied((value) => value + 1); }} openModule={openModule} openDialog={setDialog} openConfigEditor={openConfigEditor} notify={notify} />}
 
           {module === "funnel" && <OperationalFunnel
             enabled={!projectLoading && onlineProjects.length > 0}
             page={page}
             projectCode={project}
-            appIdentifier={onlineProjects.find((item) => item.projectCode === project)?.appIdentifier}
+            appIdentifier={appliedProjectMeta?.appIdentifier}
             range={range}
             platform={platform}
             country={country}
@@ -1284,15 +1373,15 @@ export default function Home() {
                 <div className="surface">
                   <div className="surface-title"><div><h2>项目漏斗健康度</h2><p>同时关注用户覆盖和请求后的事件转化</p></div><div className="legend"><span className="dot bad" />严重 <span className="dot warn" />预警 <span className="dot good" />正常</div></div>
                   <div className="table-wrap"><table><thead><tr><th>项目</th><th>品类</th><th>DAU</th><th>产品完成率</th><th>广告浏览者比例</th><th>Opportunity覆盖率</th><th>收入</th><th>异常步骤</th><th>状态</th></tr></thead><tbody>
-                    {projects.map((item) => <tr key={item.code} onClick={() => { setProject(item.code); go("workbench"); }} className="clickable-row"><td><strong>{item.code}</strong><small>{item.name}</small></td><td>{item.category}</td><td>{item.dau}</td><td>{item.completion}</td><td>{item.viewer}</td><td>{item.opportunity}</td><td>{item.revenue}</td><td>{item.issue}</td><td><Badge tone={item.status === "严重" ? "bad" : item.status === "预警" ? "warn" : "good"}>{item.status}</Badge></td></tr>)}
+                    {projects.map((item) => <tr key={item.code} onClick={() => { setProject(item.code); setDraftProject(item.code); setFiltersApplied((value) => value + 1); go("workbench"); }} className="clickable-row"><td><strong>{item.code}</strong><small>{item.name}</small></td><td>{item.category}</td><td>{item.dau}</td><td>{item.completion}</td><td>{item.viewer}</td><td>{item.opportunity}</td><td>{item.revenue}</td><td>{item.issue}</td><td><Badge tone={item.status === "严重" ? "bad" : item.status === "预警" ? "warn" : "good"}>{item.status}</Badge></td></tr>)}
                   </tbody></table></div>
                 </div>
                 <aside className="surface">
                   <div className="surface-title"><div><h2>优先处理</h2><p>按影响用户与收入排序</p></div></div>
                   <div className="issue-list">
-                    <button onClick={() => { setProject("IRAN-VPN-01"); openDiagnosisSelection({from:"Eligible",to:"Opportunity",rate:"43.9%",scope:"users"}); }}><span className="rank bad">1</span><div><strong>IRAN-VPN-01</strong><p>Eligible→Opportunity 下降 12.8pp</p><small>影响 46,632 用户 · 约 $2,807/日</small></div></button>
-                    <button onClick={() => { setProject("TURBO-CLEAN-05"); openDiagnosisSelection({from:"Opportunity",to:"Request",rate:"93.2%",scope:"users"}); }}><span className="rank bad">2</span><div><strong>TURBO-CLEAN-05</strong><p>广告机会 → 请求用户覆盖下降</p><small>优先排查预加载覆盖与实时请求分支</small></div></button>
-                    <button onClick={() => { setProject("CLEAN-MAX-03"); openDiagnosisSelection({from:"Opportunity",to:"Request",rate:"95.5%",scope:"users"}); }}><span className="rank warn">3</span><div><strong>CLEAN-MAX-03</strong><p>广告机会 → 请求用户（Opportunity → Request UV）下降</p><small>检查请求事件覆盖及 request_id 关联</small></div></button>
+                    <button onClick={() => { setProject("IRAN-VPN-01"); setDraftProject("IRAN-VPN-01"); setFiltersApplied((value) => value + 1); openDiagnosisSelection({from:"Eligible",to:"Opportunity",rate:"43.9%",scope:"users"}); }}><span className="rank bad">1</span><div><strong>IRAN-VPN-01</strong><p>Eligible→Opportunity 下降 12.8pp</p><small>影响 46,632 用户 · 约 $2,807/日</small></div></button>
+                    <button onClick={() => { setProject("TURBO-CLEAN-05"); setDraftProject("TURBO-CLEAN-05"); setFiltersApplied((value) => value + 1); openDiagnosisSelection({from:"Opportunity",to:"Request",rate:"93.2%",scope:"users"}); }}><span className="rank bad">2</span><div><strong>TURBO-CLEAN-05</strong><p>广告机会 → 请求用户覆盖下降</p><small>优先排查预加载覆盖与实时请求分支</small></div></button>
+                    <button onClick={() => { setProject("CLEAN-MAX-03"); setDraftProject("CLEAN-MAX-03"); setFiltersApplied((value) => value + 1); openDiagnosisSelection({from:"Opportunity",to:"Request",rate:"95.5%",scope:"users"}); }}><span className="rank warn">3</span><div><strong>CLEAN-MAX-03</strong><p>广告机会 → 请求用户（Opportunity → Request UV）下降</p><small>检查请求事件覆盖及 request_id 关联</small></div></button>
                   </div>
                   <button className="full-link" onClick={() => focusWorkbenchSection("step-diagnosis")}>进入单项目诊断工作台 →</button>
                 </aside>
@@ -1515,7 +1604,7 @@ export default function Home() {
                   <div><span>规则诊断可信度</span><strong>86%</strong><small>原因覆盖 98.0% · Unknown 2.0%</small></div>
                   <div><span>最大异常切片</span><strong>伊朗 · 1.8.0</strong><small>贡献 61.2% 指标损失</small></div>
                   <div><span>关联字段</span><p>{operationDiagnosis.fields}</p></div>
-                  <button onClick={() => { setAiDiagnosisReady(true); notify(`${operationDiagnosis.label} AI 诊断已基于当前演示数据生成`); }}>运行 AI 复核</button>
+                  <button onClick={() => { setAiDiagnosisReady(true); notify(`${operationDiagnosis.label} AI 诊断已基于当前筛选数据生成`); }}>运行 AI 复核</button>
                 </div>
                 <div className="diagnosis-engine-grid">
                   <article>

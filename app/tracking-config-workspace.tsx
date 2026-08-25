@@ -46,7 +46,7 @@ export function TrackingConfigWorkspace({ editingConfig, onCancel, onSave }: {
   const [category, setCategory] = useState(editingConfig?.category ?? "套利 VPN");
   const [selectedProjects, setSelectedProjects] = useState<string[]>(editingConfig?.projects ?? ["IRAN-VPN-01"]);
   const [platform, setPlatform] = useState(editingConfig?.platform ?? "Android+iOS");
-  const [description, setDescription] = useState(`基于 V1.7「01_事件字段总表」配置本版本需要实现和验收的标准事件。`);
+  const [description, setDescription] = useState(`基于 V1.8「01_事件字段总表」配置本版本需要实现和验收的标准事件。`);
   const [selectedIds, setSelectedIds] = useState<string[]>(editingConfig?.selectedEventIds ?? defaultSelectedEventIds);
   const [moduleFilter, setModuleFilter] = useState("all");
   const [standardNameFilter, setStandardNameFilter] = useState("");
