@@ -158,7 +158,7 @@ function makeConfig(record: Omit<TrackingConfigRecord, "selectedCount" | "totalC
 }
 
 export const trackingConfigs: TrackingConfigRecord[] = [
-  makeConfig({ id: "CFG-VPN-1.8-PROD", name: "VPN 正式版打点配置", version: "V1.8", category: "套利 VPN", projects: ["IRAN-VPN-01", "FAST-VPN-02"], platform: "Android+iOS", selectedEventIds: vpnEventIds, status: "PUBLISHED", snapshotId: "SNP-VPN-180-001", updatedBy: "Oliver", updatedAt: "2026-08-12 15:40" }),
+  makeConfig({ id: "CFG-VPN-1.8-PROD", name: "VPN 正式版打点配置", version: "V1.8", category: "套利 VPN", projects: ["IRAN-VPN-01", "FAST-VPN-02", "A054"], platform: "Android+iOS", selectedEventIds: vpnEventIds, status: "PUBLISHED", snapshotId: "SNP-VPN-180-001", updatedBy: "Oliver", updatedAt: "2026-08-12 15:40" }),
   makeConfig({ id: "CFG-CLEAN-3.2", name: "清理正式版打点配置", version: "V3.2", category: "清理", projects: ["CLEAN-MAX-03", "TURBO-CLEAN-05"], platform: "Android", selectedEventIds: cleanEventIds.slice(0, 36), status: "DRAFT", updatedBy: "Mia", updatedAt: "2026-08-12 14:18" }),
   makeConfig({ id: "CFG-CLEAN-3.1-PROD", name: "清理线上打点配置", version: "V3.1", category: "清理", projects: ["CLEAN-MAX-03", "TURBO-CLEAN-05"], platform: "Android", selectedEventIds: cleanEventIds.slice(0, 34), status: "PUBLISHED", snapshotId: "SNP-CLEAN-310-004", updatedBy: "Mia", updatedAt: "2026-08-06 11:20" }),
   makeConfig({ id: "CFG-LAUNCHER-1.4", name: "Launcher 新版打点配置", version: "V1.4", category: "Launcher", projects: ["AIVORA-LAUNCHER"], platform: "Android", selectedEventIds: launcherEventIds.slice(0, 37), status: "REVIEWING", updatedBy: "Liam", updatedAt: "2026-08-12 13:02" }),

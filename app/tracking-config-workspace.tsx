@@ -19,6 +19,7 @@ type MasterView = "fields" | "events";
 type SelectionView = "all" | "selected" | "unselected";
 
 const projects = [
+  { code: "A054", label: "A054 · VPN V1.8 项目", category: "套利 VPN" },
   { code: "IRAN-VPN-01", label: "IRAN-VPN-01 · Iran Fast VPN", category: "套利 VPN" },
   { code: "FAST-VPN-02", label: "FAST-VPN-02 · Fast VPN", category: "套利 VPN" },
   { code: "CLEAN-MAX-03", label: "CLEAN-MAX-03 · Clean Max", category: "清理" },

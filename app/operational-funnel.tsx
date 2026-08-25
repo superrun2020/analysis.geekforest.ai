@@ -21,7 +21,7 @@ type AnyRow = Record<string, any>;
 type FunnelUnit = "users" | "sessions" | "events";
 type PackageData = Record<string, AnyRow>;
 type QueryProgressStatus = "pending" | "loading" | "retrying" | "done" | "error";
-type QueryProgressItem = { key: string; label: string; status: QueryProgressStatus; finishedAt?: string; error?: string; attempt?: number; maxAttempts?: number };
+type QueryProgressItem = { key: string; label: string; status: QueryProgressStatus; finishedAt?: string; error?: string; attempt?: number; maxAttempts?: number; dataCountLabel?: string; dateLabel?: string };
 type DropoffSelection = { fromIndex: number; toIndex: number };
 const number = (value: unknown) => value === null || value === undefined ? "—" : Number(value).toLocaleString("zh-CN", { maximumFractionDigits: 2 });
 const percent = (value: unknown) => value === null || value === undefined ? "—" : `${number(value)}%`;
@@ -126,6 +126,53 @@ function queryItemLabel(item: FunnelQueryPackageItem) {
   return `${domainNames[item.query.domain || "ads"] || ""}${pageNames[item.query.page]} · ${unitNames[item.query.unit || "users"] || ""}`;
 }
 
+function compactDate(value: unknown) {
+  const raw = String(value ?? "").trim();
+  const match = raw.match(/(\d{4})-(\d{2})-(\d{2})/);
+  return match ? `${match[2]}-${match[3]}` : raw;
+}
+
+function queryDateLabel(query: FunnelQuery) {
+  return `查询范围 ${compactDate(query.dateFrom)} 至 ${compactDate(query.dateTo)}`;
+}
+
+function collectDateValues(value: unknown, output = new Set<string>(), depth = 0): Set<string> {
+  if (depth > 4 || value === null || value === undefined) return output;
+  if (typeof value === "string") {
+    const match = value.match(/\d{4}-\d{2}-\d{2}/);
+    if (match) output.add(match[0]);
+    return output;
+  }
+  if (Array.isArray(value)) {
+    value.slice(0, 80).forEach((item) => collectDateValues(item, output, depth + 1));
+    return output;
+  }
+  if (typeof value === "object") {
+    Object.entries(value as AnyRow).forEach(([key, item]) => {
+      if (/date|day|stat/i.test(key) || depth < 2) collectDateValues(item, output, depth + 1);
+    });
+  }
+  return output;
+}
+
+function resultDateLabel(result: AnyRow, query: FunnelQuery) {
+  const dates = Array.from(collectDateValues(result)).sort();
+  if (!dates.length) return `${queryDateLabel(query)} · 接口未返回分日`;
+  if (dates.length <= 7) return `数据日期 ${dates.map(compactDate).join("、")}`;
+  return `数据日期 ${compactDate(dates[0])} 至 ${compactDate(dates[dates.length - 1])} · ${dates.length} 天`;
+}
+
+function countLabel(result: AnyRow, page: FunnelPageKey) {
+  if (page === "workbench") return `指标 ${(result.metrics ?? []).length} 个 · 漏斗 ${(result.funnel ?? []).length} 步`;
+  if (page === "diagnosis") return `原因 ${(result.reasons ?? []).length} 条`;
+  if (page === "path") return `页面 ${(result.pages ?? []).length} 个`;
+  if (page === "evidence") return `证据 ${number(result.total ?? (result.items ?? []).length)} 条`;
+  if (page === "issues") return `问题 ${(result.items ?? []).length} 个`;
+  if (page === "snapshot") return `步骤 ${(result.steps ?? []).length} 个`;
+  if (page === "overview") return `项目 ${(result.projects ?? []).length} 个 · 漏斗 ${(result.funnel ?? []).length} 步`;
+  return "已返回数据";
+}
+
 function QueryProgressPanel({ items, compact = false }: { items: QueryProgressItem[]; compact?: boolean }) {
   if (!items.length) return null;
   const doneCount = items.filter((item) => item.status === "done").length;
@@ -133,7 +180,7 @@ function QueryProgressPanel({ items, compact = false }: { items: QueryProgressIt
   const loading = items.find((item) => item.status === "loading" || item.status === "retrying");
   return <section className={`query-progress-panel ${compact ? "compact" : ""}`}>
     <div className="query-progress-title"><div><strong>查询进度</strong><small>{loading ? `${loading.status === "retrying" ? "自动重拉" : "正在查询"}：${loading.label}` : doneCount === items.length ? "全部数据查询完成" : "等待后台补齐剩余数据"}</small></div><span>{doneCount}/{items.length} 完成{failedCount ? ` · ${failedCount} 失败` : ""}</span></div>
-    <div className="query-progress-list">{items.map((item) => <div key={item.key} className={item.status}><i>{item.status === "done" ? "✓" : item.status === "error" ? "!" : item.status === "loading" || item.status === "retrying" ? "…" : "○"}</i><span>{item.label}</span><small>{item.status === "done" ? `${item.finishedAt || "刚刚"} 完成` : item.status === "error" ? item.error || "查询失败" : item.status === "retrying" ? `自动重拉中，第 ${item.attempt || 2}/${item.maxAttempts || 3} 次` : item.status === "loading" ? `查询中，第 ${item.attempt || 1}/${item.maxAttempts || 3} 次` : "待查询"}</small></div>)}</div>
+    <div className="query-progress-list">{items.map((item) => <div key={item.key} className={item.status}><i>{item.status === "done" ? "✓" : item.status === "error" ? "!" : item.status === "loading" || item.status === "retrying" ? "…" : "○"}</i><span>{item.label}</span><small>{item.status === "done" ? `${item.finishedAt || "刚刚"} 完成` : item.status === "error" ? item.error || "查询失败" : item.status === "retrying" ? `自动重拉中，第 ${item.attempt || 2}/${item.maxAttempts || 3} 次` : item.status === "loading" ? `查询中，第 ${item.attempt || 1}/${item.maxAttempts || 3} 次` : "待查询"}</small><strong>{item.dataCountLabel || "数据量待返回"}</strong><em>{item.dateLabel || "日期待返回"}</em></div>)}</div>
   </section>;
 }
 
@@ -305,7 +352,13 @@ export function OperationalFunnel(props: Props) {
     const items = buildPackageItems(baseQuery, scope, domain, unit);
     const firstItem = items.find((item) => item.key === activeKey) ?? items[0];
     const restItems = items.filter((item) => item.key !== firstItem?.key);
-    setProgressItems(items.map((item) => ({ key: item.key, label: queryItemLabel(item), status: item.key === firstItem?.key ? "loading" : "pending" })));
+    setProgressItems(items.map((item) => ({
+      key: item.key,
+      label: queryItemLabel(item),
+      status: item.key === firstItem?.key ? "loading" : "pending",
+      dataCountLabel: "数据量待返回",
+      dateLabel: queryDateLabel(item.query),
+    })));
 
     const markProgress = (key: string, patch: Partial<QueryProgressItem>) => {
       setProgressItems((current) => current.map((item) => item.key === key ? { ...item, ...patch } : item));
@@ -316,7 +369,14 @@ export function OperationalFunnel(props: Props) {
     const runItem = async (item: FunnelQueryPackageItem, primary = false) => {
       const maxAttempts = primary ? 2 : 3;
       for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-        markProgress(item.key, { status: attempt === 1 ? "loading" : "retrying", error: undefined, attempt, maxAttempts });
+        markProgress(item.key, {
+          status: attempt === 1 ? "loading" : "retrying",
+          error: undefined,
+          attempt,
+          maxAttempts,
+          dataCountLabel: "数据量待返回",
+          dateLabel: queryDateLabel(item.query),
+        });
         setPackageErrors((current) => {
           const next = { ...current };
           delete next[item.key];
@@ -334,7 +394,15 @@ export function OperationalFunnel(props: Props) {
           if (!active) return;
           const now = new Date().toLocaleTimeString("zh-CN", { hour12: false });
           setDataPackage((current) => ({ ...current, [item.key]: result }));
-          markProgress(item.key, { status: "done", finishedAt: now, attempt, maxAttempts, error: undefined });
+          markProgress(item.key, {
+            status: "done",
+            finishedAt: now,
+            attempt,
+            maxAttempts,
+            error: undefined,
+            dataCountLabel: countLabel(result, item.query.page),
+            dateLabel: resultDateLabel(result, item.query),
+          });
           if (primary) {
             setLoadedAt(now);
             setLoading(false);
@@ -346,14 +414,28 @@ export function OperationalFunnel(props: Props) {
           const message = itemTimedOut ? `${queryItemLabel(item)}读取超时` : rawMessage.toLowerCase().includes("abort") ? `${queryItemLabel(item)}查询被中断` : rawMessage;
           window.clearTimeout(itemTimeout);
           if (attempt < maxAttempts) {
-            markProgress(item.key, { status: "retrying", error: `${message}，正在自动重拉`, attempt: attempt + 1, maxAttempts });
+            markProgress(item.key, {
+              status: "retrying",
+              error: `${message}，正在自动重拉`,
+              attempt: attempt + 1,
+              maxAttempts,
+              dataCountLabel: "数据量待返回",
+              dateLabel: queryDateLabel(item.query),
+            });
             await waitRetryDelay(attempt);
             if (!active) return;
             continue;
           }
           const finalMessage = `${message}，已自动重拉 ${maxAttempts} 次仍失败，请缩小筛选范围或稍后再试`;
           setPackageErrors((current) => ({ ...current, [item.key]: finalMessage }));
-          markProgress(item.key, { status: "error", error: finalMessage, attempt, maxAttempts });
+          markProgress(item.key, {
+            status: "error",
+            error: finalMessage,
+            attempt,
+            maxAttempts,
+            dataCountLabel: "查询失败",
+            dateLabel: queryDateLabel(item.query),
+          });
           if (primary) {
             setError(finalMessage);
             setLoading(false);
