@@ -13,6 +13,8 @@ import {
   MetricInspectContext,
   MetricLabel,
 } from "./metric-dictionary";
+import { fetchOnlineProjects, type OnlineProject } from "./project-options-api";
+import { CompanyLogin, useCompanyAuth } from "./company-auth";
 
 type PageKey =
   | "overview"
@@ -870,10 +872,14 @@ function LegacyActionDialog({ dialog, project, onClose, onSubmit }: { dialog: Ex
 }
 
 export default function Home() {
+  const companyAuth = useCompanyAuth();
   const [module, setModule] = useState<ModuleKey>("funnel");
   const [page, setPage] = useState<PageKey>("overview");
   const [embedded, setEmbedded] = useState(false);
   const [project, setProject] = useState("IRAN-VPN-01");
+  const [onlineProjects, setOnlineProjects] = useState<OnlineProject[]>([]);
+  const [projectLoading, setProjectLoading] = useState(true);
+  const [projectLoadError, setProjectLoadError] = useState("");
   const [range, setRange] = useState("今天");
   const [platform, setPlatform] = useState("Android");
   const [country, setCountry] = useState("全部国家");
@@ -937,6 +943,28 @@ export default function Home() {
     setModule(initialAnalysisView.module);
     setPage(initialAnalysisView.page);
     setEmbedded(initialAnalysisView.embedded);
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setProjectLoading(true);
+    fetchOnlineProjects(controller.signal)
+      .then((items) => {
+        setOnlineProjects(items);
+        setProjectLoadError(items.length === 0 ? "线上数据库暂无可用项目" : "");
+        if (items.length > 0 && !items.some((item) => item.projectCode === project)) {
+          setProject(items[0].projectCode);
+        }
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return;
+        setOnlineProjects([]);
+        setProjectLoadError(error instanceof Error ? error.message : "线上项目读取失败");
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setProjectLoading(false);
+      });
+    return () => controller.abort();
   }, []);
 
   useEffect(() => {
@@ -1157,6 +1185,9 @@ export default function Home() {
     openDiagnosisSelection({ from: from.label, to: to.label, rate: to.rate, scope: unitMode });
   }
 
+  if (companyAuth.checking) return <div className="company-auth-loading">正在验证企业登录状态…</div>;
+  if (!companyAuth.user) return <CompanyLogin onSignedIn={companyAuth.signIn} />;
+
   return (
     <MetricInspectContext.Provider value={openMetricDefinition}>
     <div className={`app-shell ${embedded ? "embedded" : ""}`}>
@@ -1172,7 +1203,7 @@ export default function Home() {
       <div className="workspace">
         <header className="topbar">
           <div className="breadcrumbs">{moduleMenus.find((item) => item.key === module)?.group} / {currentModule.title}{configWorkspaceOpen ? <> / <strong>{editingConfig ? "编辑打点配置" : "新建打点配置"}</strong></> : module === "funnel" && <> / <strong>{currentPage.label}</strong></>}</div>
-          <div className="topbar-actions"><div className="global-search">搜索项目、事件、问题单</div><button className="icon-button" aria-label="通知">3</button><div className="avatar">OL</div></div>
+          <div className="topbar-actions"><div className="global-search">搜索项目、事件、问题单</div><button className="icon-button" aria-label="通知">3</button><button className="account-chip" onClick={() => void companyAuth.signOut()} title="退出登录"><span>{companyAuth.user.employee?.name?.slice(0, 1) || companyAuth.user.email.slice(0, 1).toUpperCase()}</span><small>{companyAuth.user.employee?.name || companyAuth.user.email}</small></button></div>
         </header>
 
         <main className="main-content">
@@ -1196,7 +1227,7 @@ export default function Home() {
           </nav>}
 
           {module !== "firebaseSetup" && <section className="filter-bar">
-            <label>项目<select value={project} onChange={(event) => setProject(event.target.value)}>{projects.map((item) => <option key={item.code}>{item.code}</option>)}</select></label>
+            <label>项目<select value={project} disabled={projectLoading || onlineProjects.length === 0} onChange={(event) => setProject(event.target.value)}>{projectLoading && <option>正在读取线上项目…</option>}{!projectLoading && onlineProjects.length === 0 && <option>线上项目不可用</option>}{onlineProjects.map((item) => <option key={item.projectCode} value={item.projectCode}>{item.projectCode}{item.appName ? ` · ${item.appName}` : ""}</option>)}</select>{projectLoadError && <small className="filter-error">{projectLoadError}</small>}</label>
             <label>日期<select value={range} onChange={(event) => setRange(event.target.value)}><option>今天</option><option>昨天</option><option>近7天</option><option>近30天</option></select></label>
             <label>平台<select value={platform} onChange={(event)=>setPlatform(event.target.value)}><option>Android</option><option>iOS</option><option>全部</option></select></label>
             <label>国家<select value={country} onChange={(event)=>setCountry(event.target.value)}><option>全部国家</option><option>伊朗</option><option>埃及</option><option>土耳其</option></select></label>
