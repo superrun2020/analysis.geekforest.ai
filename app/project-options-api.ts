@@ -1,4 +1,5 @@
 import { getCompanyAuthToken } from "./company-auth";
+import { trackingApiBaseUrl } from "./api-base-url";
 
 export type OnlineProject = {
   projectCode: string;
@@ -12,10 +13,9 @@ type ProjectOptionsResponse = {
   projects?: OnlineProject[];
 };
 
-const baseUrl = (process.env.NEXT_PUBLIC_TRACKING_API_BASE_URL ?? "https://pupu.apptilaus.com").replace(/\/$/, "");
-
 /** Read the canonical project list exposed by the funnel analysis backend. */
 export async function fetchOnlineProjects(signal?: AbortSignal): Promise<OnlineProject[]> {
+  const baseUrl = trackingApiBaseUrl();
   if (!baseUrl) {
     throw new Error("未配置线上项目接口");
   }

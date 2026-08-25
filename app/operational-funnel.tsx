@@ -17,6 +17,7 @@ type Props = {
 };
 
 type AnyRow = Record<string, any>;
+type FunnelUnit = "users" | "sessions" | "events";
 const number = (value: unknown) => value === null || value === undefined ? "—" : Number(value).toLocaleString("zh-CN", { maximumFractionDigits: 2 });
 const percent = (value: unknown) => value === null || value === undefined ? "—" : `${number(value)}%`;
 const money = (value: unknown) => value === null || value === undefined ? "—" : `$${number(value)}`;
@@ -68,9 +69,9 @@ function Overview({ data, onPageChange }: { data: AnyRow; onPageChange: Props["o
   </div>;
 }
 
-function Workbench({ data, domain, setDomain }: { data: AnyRow; domain: string; setDomain: (domain: "ads" | "vpn" | "quality") => void }) {
+function Workbench({ data, domain, setDomain, unit, setUnit }: { data: AnyRow; domain: string; setDomain: (domain: "ads" | "vpn" | "quality") => void; unit: FunnelUnit; setUnit: (unit: FunnelUnit) => void }) {
   const metrics: AnyRow[] = data.metrics ?? [];
-  return <div className="page-stack"><nav className="operational-tabs"><button className={domain === "ads" ? "active" : ""} onClick={() => setDomain("ads")}>广告变现</button><button className={domain === "vpn" ? "active" : ""} onClick={() => setDomain("vpn")}>VPN 功能</button><button className={domain === "quality" ? "active" : ""} onClick={() => setDomain("quality")}>数据质量</button></nav><section className="operational-metric-grid">{metrics.map((row) => <MetricCard key={row.metricKey ?? row.name} label={text(row.name)} value={row.displayValue ?? (row.unit === "ratio" ? percent(row.value) : number(row.value))} note={row.detail ?? row.formula} status={row.status} />)}</section><section className="surface"><div className="surface-title"><div><h2>{domain === "vpn" ? "VPN 核心漏斗" : domain === "quality" ? "数据质量门禁" : "广告核心漏斗"}</h2><p>不可计算的指标明确显示暂无数据，不补零</p></div></div><Funnel rows={data.funnel} /></section>{data.vpnStageHealth?.stages?.length > 0 && <section className="surface"><div className="surface-title"><div><h2>连接阶段成功率与 P95</h2><p>按 connection_id 关联真实连接阶段</p></div></div><div className="table-wrap"><table><thead><tr><th>阶段</th><th>样本</th><th>成功率</th><th>P95</th><th>状态</th></tr></thead><tbody>{data.vpnStageHealth.stages.map((row: AnyRow) => <tr key={row.stageKey}><td>{text(row.stageName)}</td><td>{number(row.totalCount)}</td><td>{percent(row.successRate)}</td><td>{text(row.displayP95 ?? row.p95Ms)}</td><td>{row.available === false ? "暂无数据" : text(row.status)}</td></tr>)}</tbody></table></div></section>}</div>;
+  return <div className="page-stack"><nav className="operational-tabs"><button className={domain === "ads" ? "active" : ""} onClick={() => setDomain("ads")}>广告变现</button><button className={domain === "vpn" ? "active" : ""} onClick={() => setDomain("vpn")}>VPN 功能</button><button className={domain === "quality" ? "active" : ""} onClick={() => setDomain("quality")}>数据质量</button></nav>{domain === "ads" && <nav className="operational-tabs unit-tabs"><button className={unit === "sessions" ? "active" : ""} onClick={() => setUnit("sessions")}>Session 漏斗</button><button className={unit === "users" ? "active" : ""} onClick={() => setUnit("users")}>用户 UV</button><button className={unit === "events" ? "active" : ""} onClick={() => setUnit("events")}>事件次数</button></nav>}<section className="operational-metric-grid">{metrics.map((row) => <MetricCard key={row.metricKey ?? row.name} label={text(row.name)} value={row.displayValue ?? (row.unit === "ratio" ? percent(row.value) : number(row.value))} note={row.detail ?? row.formula} status={row.status} />)}</section><section className="surface"><div className="surface-title"><div><h2>{domain === "vpn" ? "VPN 核心漏斗" : domain === "quality" ? "数据质量门禁" : "广告核心漏斗"}</h2><p>{domain === "vpn" ? "主漏斗按 vpn_session_id 串联；连接尝试细节按 connection_id 下钻" : domain === "ads" ? (unit === "sessions" ? "主漏斗按 session_id 串联，decision/opportunity/request/instance 作为二级诊断键" : unit === "events" ? "按事件 ID 和广告链路 ID 统计次数，用于检查履约链断点" : "按 my_user_id 去重，用于观察用户覆盖") : "不可计算的指标明确显示暂无数据，不补零"}</p></div></div><Funnel rows={data.funnel} /></section>{data.vpnStageHealth?.stages?.length > 0 && <section className="surface"><div className="surface-title"><div><h2>连接阶段成功率与 P95</h2><p>按 connection_id 关联真实连接阶段</p></div></div><div className="table-wrap"><table><thead><tr><th>阶段</th><th>样本</th><th>成功率</th><th>P95</th><th>状态</th></tr></thead><tbody>{data.vpnStageHealth.stages.map((row: AnyRow) => <tr key={row.stageKey}><td>{text(row.stageName)}</td><td>{number(row.totalCount)}</td><td>{percent(row.successRate)}</td><td>{text(row.displayP95 ?? row.p95Ms)}</td><td>{row.available === false ? "暂无数据" : text(row.status)}</td></tr>)}</tbody></table></div></section>}</div>;
 }
 
 function GenericPage({ page, data }: { page: FunnelPageKey; data: AnyRow }) {
@@ -88,9 +89,11 @@ export function OperationalFunnel(props: Props) {
   const [error, setError] = useState("");
   const [retryKey, setRetryKey] = useState(0);
   const [domain, setDomain] = useState<"ads" | "vpn" | "quality">("ads");
+  const [unit, setUnit] = useState<FunnelUnit>("sessions");
   const [workbenchSection, setWorkbenchSection] = useState<"workbench" | "diagnosis" | "path">("workbench");
   const dates = useMemo(() => dateRange(props.range), [props.range]);
   const effectivePage: FunnelPageKey = props.page === "workbench" ? workbenchSection : props.page;
+  const queryUnit: FunnelUnit = domain === "vpn" ? "sessions" : domain === "ads" ? unit : "users";
 
   useEffect(() => {
     if (!props.enabled) {
@@ -100,10 +103,10 @@ export function OperationalFunnel(props: Props) {
     if (!props.projectCode && props.page !== "overview") return;
     const controller = new AbortController();
     setLoading(true); setError("");
-    queryFunnel({ page: effectivePage, ...dates, projectCode: props.page === "overview" ? undefined : props.projectCode, appIdentifier: props.page === "overview" ? undefined : props.appIdentifier, platform: props.platform === "全部" ? undefined : props.platform.toLowerCase() as "android" | "ios", country: props.country === "全部国家" ? undefined : props.country, appVersion: props.appVersion === "全部版本" ? undefined : props.appVersion.split(" ")[0], domain, unit: "users", evidenceMode: "ad", pageSize: 100 }, controller.signal)
+    queryFunnel({ page: effectivePage, ...dates, projectCode: props.page === "overview" ? undefined : props.projectCode, appIdentifier: props.page === "overview" ? undefined : props.appIdentifier, platform: props.platform === "全部" ? undefined : props.platform.toLowerCase() as "android" | "ios", country: props.country === "全部国家" ? undefined : props.country, appVersion: props.appVersion === "全部版本" ? undefined : props.appVersion.split(" ")[0], domain, unit: queryUnit, evidenceMode: "ad", pageSize: 100 }, controller.signal)
       .then(setData).catch((reason) => { if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : "未知错误"); }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
-  }, [props.enabled, props.page, props.projectCode, props.appIdentifier, props.range, props.platform, props.country, props.appVersion, props.refreshKey, dates, domain, effectivePage, retryKey]);
+  }, [props.enabled, props.page, props.projectCode, props.appIdentifier, props.range, props.platform, props.country, props.appVersion, props.refreshKey, dates, domain, queryUnit, effectivePage, retryKey]);
 
   if (loading) return <StatePanel kind="loading" message="正在从 ADB/Firebase 标准事件和问题控制表聚合当前筛选范围。" />;
   if (error) return <StatePanel kind="error" message={error} retry={() => setRetryKey((value) => value + 1)} />;
@@ -111,6 +114,6 @@ export function OperationalFunnel(props: Props) {
   const hasRows = props.page === "overview" ? (data.projects?.length ?? 0) > 0 : props.page === "workbench" ? (data.metrics?.length ?? data.funnel?.length ?? 0) > 0 : true;
   if (!hasRows) return <StatePanel kind="empty" message="接口连接正常，但当前筛选范围没有可计算的标准事件。" />;
   if (props.page === "overview") return <Overview data={data} onPageChange={props.onPageChange} />;
-  if (props.page === "workbench") return <div className="page-stack"><nav className="operational-tabs workbench-tabs"><button className={workbenchSection === "workbench" ? "active" : ""} onClick={() => setWorkbenchSection("workbench")}>核心漏斗</button><button className={workbenchSection === "diagnosis" ? "active" : ""} onClick={() => setWorkbenchSection("diagnosis")}>流失诊断</button><button className={workbenchSection === "path" ? "active" : ""} onClick={() => setWorkbenchSection("path")}>页面路径</button></nav>{workbenchSection === "workbench" ? <Workbench data={data} domain={domain} setDomain={setDomain} /> : <GenericPage page={workbenchSection} data={data} />}</div>;
+  if (props.page === "workbench") return <div className="page-stack"><nav className="operational-tabs workbench-tabs"><button className={workbenchSection === "workbench" ? "active" : ""} onClick={() => setWorkbenchSection("workbench")}>核心漏斗</button><button className={workbenchSection === "diagnosis" ? "active" : ""} onClick={() => setWorkbenchSection("diagnosis")}>流失诊断</button><button className={workbenchSection === "path" ? "active" : ""} onClick={() => setWorkbenchSection("path")}>页面路径</button></nav>{workbenchSection === "workbench" ? <Workbench data={data} domain={domain} setDomain={setDomain} unit={unit} setUnit={setUnit} /> : <GenericPage page={workbenchSection} data={data} />}</div>;
   return <GenericPage page={props.page} data={data} />;
 }

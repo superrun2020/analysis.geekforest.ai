@@ -1,4 +1,5 @@
 import { getCompanyAuthToken } from "./company-auth";
+import { trackingApiBaseUrl } from "./api-base-url";
 
 export type FunnelPageKey = "overview" | "workbench" | "diagnosis" | "cohort" | "path" | "evidence" | "issues" | "snapshot";
 
@@ -12,7 +13,7 @@ export type FunnelQuery = {
   country?: string;
   appVersion?: string;
   domain?: "ads" | "vpn" | "quality";
-  unit?: "users" | "events";
+  unit?: "users" | "sessions" | "events";
   dimension?: string;
   startStep?: string;
   endStep?: string;
@@ -27,10 +28,9 @@ export type FunnelQuery = {
 
 export type FunnelApiEnvelope<T = Record<string, unknown>> = { code?: number; msg?: string; data?: T; error?: string };
 
-const baseUrl = (process.env.NEXT_PUBLIC_TRACKING_API_BASE_URL ?? "https://pupu.apptilaus.com").replace(/\/$/, "");
-
 /** Call the OA-protected operational API and preserve actionable failure states. */
 export async function queryFunnel<T = Record<string, unknown>>(query: FunnelQuery, signal?: AbortSignal): Promise<T> {
+  const baseUrl = trackingApiBaseUrl();
   if (!baseUrl) throw new Error("未配置漏斗分析服务地址");
   const token = getCompanyAuthToken();
   if (!token) throw new Error("登录已失效，请重新登录");

@@ -1,4 +1,4 @@
-import type { V17EventParameter } from "./v17-event-catalog";
+import type { V18EventParameter } from "./v18-event-catalog";
 import { trackingConfigDataSource, trackingDatabaseEventRows, trackingDatabaseFieldRowsForEvent } from "./tracking-config-repository";
 
 export type TrackingPriority = "P0" | "P1" | "P2";
@@ -13,7 +13,8 @@ export type TrackingCatalogEvent = {
   capability: string;
   priority: TrackingPriority;
   parameterCount: number;
-  parameters: V17EventParameter[];
+  parameters: V18EventParameter[];
+  chainKey: "session_id" | "vpn_session_id";
   scene: string;
   provider: string;
   platform: "Android+iOS" | "Android";
@@ -115,7 +116,8 @@ export const trackingEventCatalog: TrackingCatalogEvent[] = trackingDatabaseEven
     sourceAlias: row.sourceAlias,
     stage: row.module,
     capability: capabilityByModule[row.module] ?? row.module,
-    priority: p0Events.has(row.standardEventName) ? "P0" : p1Events.has(row.standardEventName) ? "P1" : "P2",
+    priority: row.priority,
+    chainKey: row.chainKey,
     parameterCount: parameters.length,
     parameters,
     scene: row.module,

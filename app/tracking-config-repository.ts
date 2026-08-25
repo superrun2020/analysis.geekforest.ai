@@ -1,4 +1,4 @@
-import { v17StandardEvents, v17EventSource, type V17EventParameter, type V17StandardEvent } from "./v17-event-catalog";
+import { v18StandardEvents, v18EventSource, type V18EventParameter, type V18StandardEvent } from "./v18-event-catalog";
 
 export type TrackingDatabaseEventRow = {
   eventId: string;
@@ -13,6 +13,8 @@ export type TrackingDatabaseEventRow = {
   metricPurpose: string;
   sourceAlias: string;
   provider: string;
+  priority: "P0" | "P1" | "P2";
+  chainKey: "session_id" | "vpn_session_id";
 };
 
 export type TrackingDatabaseFieldRow = {
@@ -26,7 +28,7 @@ export type TrackingDatabaseFieldRow = {
 };
 
 export type TrackingDatabaseSnapshot = {
-  sourceType: "database" | "local-v17-preview";
+  sourceType: "database" | "local-v18-preview";
   sourceLabel: string;
   schemaVersion: string;
   databaseName: string;
@@ -63,9 +65,9 @@ const providerByModule: Record<string, string> = {
   "上报健康": "TelemetryHealthProvider",
 };
 
-const toEventRow = (event: V17StandardEvent): TrackingDatabaseEventRow => ({
+const toEventRow = (event: V18StandardEvent): TrackingDatabaseEventRow => ({
   eventId: event.id,
-  schemaVersion: "V1.7",
+  schemaVersion: "V1.8",
   module: event.module,
   standardEventName: event.standardEventName,
   displayName: event.displayName,
@@ -76,10 +78,12 @@ const toEventRow = (event: V17StandardEvent): TrackingDatabaseEventRow => ({
   metricPurpose: event.metricPurpose,
   sourceAlias: event.sourceAlias,
   provider: providerByModule[event.module] ?? "BusinessProvider",
+  priority: event.priority,
+  chainKey: event.chainKey,
 });
 
-const toFieldRows = (event: V17StandardEvent): TrackingDatabaseFieldRow[] =>
-  event.parameters.map((parameter: V17EventParameter, index) => ({
+const toFieldRows = (event: V18StandardEvent): TrackingDatabaseFieldRow[] =>
+  event.parameters.map((parameter: V18EventParameter, index) => ({
     eventId: event.id,
     fieldOrder: index + 1,
     fieldName: parameter.name,
@@ -91,37 +95,37 @@ const toFieldRows = (event: V17StandardEvent): TrackingDatabaseFieldRow[] =>
 
 // This is deliberately shaped like the future database response. When the database
 // is supplied, replace this provider with an API/server loader and keep the page model stable.
-export const localV17DatabaseSnapshot: TrackingDatabaseSnapshot = {
-  sourceType: "local-v17-preview",
-  sourceLabel: "本地 V1.7 字段镜像（待接数据库）",
-  schemaVersion: "V1.7",
+export const localV18DatabaseSnapshot: TrackingDatabaseSnapshot = {
+  sourceType: "local-v18-preview",
+  sourceLabel: "V1.8 广告与 VPN 资格检查更新版",
+  schemaVersion: "V1.8",
   databaseName: "待提供",
   eventTable: "tracking_event_specs（待确认）",
   fieldTable: "tracking_event_fields（待确认）",
   fetchedAt: "构建时生成",
-  events: v17StandardEvents.map(toEventRow),
-  fields: v17StandardEvents.flatMap(toFieldRows),
+  events: v18StandardEvents.map(toEventRow),
+  fields: v18StandardEvents.flatMap(toFieldRows),
 };
 
 export const trackingConfigDataSource: TrackingConfigDataSource = {
-  sourceType: localV17DatabaseSnapshot.sourceType,
-  sourceLabel: localV17DatabaseSnapshot.sourceLabel,
-  schemaVersion: localV17DatabaseSnapshot.schemaVersion,
-  databaseName: localV17DatabaseSnapshot.databaseName,
-  eventTable: localV17DatabaseSnapshot.eventTable,
-  fieldTable: localV17DatabaseSnapshot.fieldTable,
-  fetchedAt: localV17DatabaseSnapshot.fetchedAt,
-  eventCount: localV17DatabaseSnapshot.events.length,
-  fieldCount: localV17DatabaseSnapshot.fields.length,
+  sourceType: localV18DatabaseSnapshot.sourceType,
+  sourceLabel: localV18DatabaseSnapshot.sourceLabel,
+  schemaVersion: localV18DatabaseSnapshot.schemaVersion,
+  databaseName: localV18DatabaseSnapshot.databaseName,
+  eventTable: localV18DatabaseSnapshot.eventTable,
+  fieldTable: localV18DatabaseSnapshot.fieldTable,
+  fetchedAt: localV18DatabaseSnapshot.fetchedAt,
+  eventCount: localV18DatabaseSnapshot.events.length,
+  fieldCount: localV18DatabaseSnapshot.fields.length,
 };
 
 export const trackingDatabaseFieldRowsForEvent = (eventId: string) =>
-  localV17DatabaseSnapshot.fields.filter((field) => field.eventId === eventId);
+  localV18DatabaseSnapshot.fields.filter((field) => field.eventId === eventId);
 
-export const trackingDatabaseEventRows = localV17DatabaseSnapshot.events;
-export const trackingDatabaseFieldRows = localV17DatabaseSnapshot.fields;
+export const trackingDatabaseEventRows = localV18DatabaseSnapshot.events;
+export const trackingDatabaseFieldRows = localV18DatabaseSnapshot.fields;
 
 export const trackingDatabaseSource = {
-  ...v17EventSource,
+  ...v18EventSource,
   ...trackingConfigDataSource,
 };
