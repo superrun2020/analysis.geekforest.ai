@@ -12,6 +12,7 @@
 - 每日 08:00 汇总昨天数据，09:30 补充延迟入库数据。
 - 汇总失败后每 30 分钟自动重试；成功后预热工作台缓存。
 - 页面级结果缓存：overview / workbench(ads) / diagnosis / path / evidence 按筛选快照缓存，历史日期 12h、今日 2min（evidence 固定 5min）；`--force` 预热会先清除同快照旧缓存。
+- ads 工作台已迁到 DWS 汇总快路径：读 `dws_ad_fulfillment_daily`（履约/收入/缓存/展示）与 `dws_app_funnel_stage_daily`（用户漏斗步骤，session 口径读 `_v18`）；跨事件耗时/Paid 完整率等需关联 DWD 的指标在汇总页标为「暂无数据」，证据/诊断页仍走 DWD。
 
 ## 目录说明
 
