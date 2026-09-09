@@ -688,7 +688,7 @@ class FunnelAnalyticsService
      */
     private function cacheableQueryPages(): array
     {
-        return ['overview', 'workbench', 'diagnosis', 'path', 'evidence', 'version_comparison'];
+        return ['overview', 'workbench', 'diagnosis', 'path', 'evidence', 'version_comparison', 'domain_report'];
     }
 
     /**
@@ -708,6 +708,7 @@ class FunnelAnalyticsService
             'snapshot' => $this->snapshot(),
             'network_failure_matrix' => $this->networkFailureMatrix($params),
             'version_comparison' => $this->versionComparisonPage($params),
+            'domain_report' => $this->domainReportPage($params),
             default => throw new InvalidArgumentException('不支持的漏斗分析页面'),
         };
     }
@@ -4870,6 +4871,133 @@ class FunnelAnalyticsService
             'context' => $this->context($params),
             'versionComparison' => $this->versionComparisonFromDws($params),
         ];
+    }
+
+    /**
+     * Return the domain -> IP resolution report as a standalone page. Only the
+     * specially registered packages (A003 / A005 / C002) are resolvable here.
+     *
+     * @param array<string, mixed> $params
+     * @return array<string, mixed>
+     */
+    private function domainReportPage(array $params): array
+    {
+        return [
+            'context' => $this->context($params),
+            'domainReport' => $this->domainReport($params),
+        ];
+    }
+
+    /**
+     * VPN node domains resolve to IPs; direct-IP server_ids are shown as-is.
+     * DNS lookups are slow and rate-limited, so cache them per hostname and
+     * only run them for the three registered packages.
+     */
+    private function domainReport(array $params): array
+    {
+        $registeredCodes = ['A003', 'A005', 'C002'];
+        $projectCode = strtoupper(trim((string) ($params['projectCode'] ?? '')));
+        if (!in_array($projectCode, $registeredCodes, true)) {
+            $projectCode = $registeredCodes[0];
+        }
+
+        try {
+            $dimension = (string) ($params['dimension'] ?? 'domain');
+
+            $query = DB::connection('adb')->table($this->eventTable())
+                ->whereBetween('event_date', [$params['dateFrom'], $params['dateTo']])
+                ->where('project_code', $projectCode)
+                ->whereNotNull('server_id')
+                ->where('server_id', '!=', '');
+
+            if (!empty($params['platform'])) {
+                $query->where('platform', strtolower((string) $params['platform']));
+            }
+
+            $rows = $query
+                ->selectRaw('server_id')
+                ->selectRaw('COUNT(*) AS event_count')
+                ->selectRaw("SUM(CASE WHEN LOWER(COALESCE(result_status, '')) IN ('success','connected','ok','granted','allowed','reachable') THEN 1 ELSE 0 END) AS success_count")
+                ->selectRaw('COUNT(DISTINCT NULLIF(country_code, "")) AS country_count')
+                ->groupBy('server_id')
+                ->orderByDesc('event_count')
+                ->limit(200)
+                ->get();
+
+            $resolved = $rows->map(function ($row): array {
+                $serverId = (string) $row->server_id;
+                $ips = $this->resolveDomainIps($serverId);
+                $eventCount = (int) $row->event_count;
+                $successCount = (int) $row->success_count;
+
+                return [
+                    'domain' => $serverId,
+                    'isDomain' => !$this->isIpAddress($serverId),
+                    'ips' => $ips,
+                    'ip' => implode(', ', $ips),
+                    'eventCount' => $eventCount,
+                    'successRate' => $eventCount > 0 ? $this->rate($successCount, $eventCount) : null,
+                    'countryCount' => (int) $row->country_count,
+                ];
+            })->all();
+
+            return [
+                'available' => count($resolved) > 0,
+                'projectCode' => $projectCode,
+                'registeredProjects' => $registeredCodes,
+                'dimension' => $dimension,
+                'rows' => $resolved,
+                'source' => $this->eventTable(),
+                'notice' => '域名由服务端 DNS 解析得到 IP 并缓存 2 小时；仅对 A003 / A005 / C002 这几个包做解析。',
+            ];
+        } catch (Throwable $exception) {
+            Log::warning('jkcl_domain_report_failed', [
+                'message' => $exception->getMessage(),
+                'projectCode' => $projectCode,
+                'dateFrom' => $params['dateFrom'] ?? null,
+                'dateTo' => $params['dateTo'] ?? null,
+            ]);
+
+            return [
+                'available' => false,
+                'projectCode' => $projectCode,
+                'registeredProjects' => $registeredCodes,
+                'dimension' => (string) ($params['dimension'] ?? 'domain'),
+                'rows' => [],
+                'source' => $this->eventTable(),
+                'reason' => '域名解析报表读取失败：' . $exception->getMessage(),
+            ];
+        }
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function resolveDomainIps(string $serverId): array
+    {
+        if ($this->isIpAddress($serverId)) {
+            return [$serverId];
+        }
+
+        $cacheKey = 'jkcl_funnel:domain_ips:' . strtolower($serverId);
+
+        return Cache::remember($cacheKey, 7200, function () use ($serverId): array {
+            $ips = @gethostbynamel($serverId);
+            if (is_array($ips)) {
+                $filtered = array_values(array_filter($ips, static fn ($ip): bool => is_string($ip) && $ip !== ''));
+
+                return $filtered;
+            }
+
+            $single = @gethostbyname($serverId);
+
+            return ($single !== '' && $single !== $serverId && $this->isIpAddress($single)) ? [$single] : [];
+        });
+    }
+
+    private function isIpAddress(string $value): bool
+    {
+        return filter_var($value, FILTER_VALIDATE_IP) !== false;
     }
 
     /**

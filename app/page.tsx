@@ -20,6 +20,7 @@ import { OnlineModulePage } from "./online-module-page";
 import SharedReportPage from "./shared-report/page";
 import ProjectReportSharePage from "./project-report-share-page";
 import { ShareAlertsPage } from "./share-alerts-page";
+import { DomainReportPage } from "./domain-report";
 import { trackingApiBaseUrl } from "./api-base-url";
 import { createCodexQueryLinks } from "./codex-query-links-api";
 
@@ -55,8 +56,8 @@ type FunnelStage = {
   nonLinear?: boolean;
 };
 type TransitionSelection = { from: string; to: string; rate: string; scope: "users" | "events" };
-type ModuleKey = "global" | "project" | "funnel" | "vpn" | "admob" | "firebase" | "reconcile" | "tracking" | "config" | "firebaseSetup" | "tasks" | "shareAlerts";
-const moduleKeys = new Set<ModuleKey>(["global", "project", "funnel", "vpn", "admob", "firebase", "reconcile", "tracking", "config", "firebaseSetup", "tasks", "shareAlerts"]);
+type ModuleKey = "global" | "project" | "funnel" | "vpn" | "admob" | "firebase" | "reconcile" | "tracking" | "config" | "firebaseSetup" | "tasks" | "shareAlerts" | "report";
+const moduleKeys = new Set<ModuleKey>(["global", "project", "funnel", "vpn", "admob", "firebase", "reconcile", "tracking", "config", "firebaseSetup", "tasks", "shareAlerts", "report"]);
 const pageKeys = new Set<PageKey>(["overview", "workbench", "diagnosis", "cohort", "path", "evidence", "issues", "snapshot", "network_failure_matrix"]);
 const legacyWorkbenchPages = new Set<PageKey>(["diagnosis", "cohort", "path", "snapshot"]);
 const emptyFilterOptions: FunnelFilterOptions = { projects: [], platforms: [], countries: [], appVersions: [], buildNumbers: [], versions: [] };
@@ -291,9 +292,10 @@ const moduleMenus: Array<{ key: ModuleKey; index: string; label: string; group: 
   { key: "admob", index: "03", label: "AdMob 分析", group: "经营分析" },
   { key: "firebase", index: "04", label: "Firebase 数据", group: "经营分析" },
   { key: "reconcile", index: "05", label: "数据对账", group: "经营分析" },
-  { key: "tracking", index: "06", label: "打点测试配置", group: "质量治理" },
-  { key: "tasks", index: "07", label: "任务与告警", group: "质量治理" },
-  { key: "shareAlerts", index: "08", label: "异常报警", group: "质量治理" },
+  { key: "report", index: "06", label: "域名解析报表", group: "经营分析" },
+  { key: "tracking", index: "07", label: "打点测试配置", group: "质量治理" },
+  { key: "tasks", index: "08", label: "任务与告警", group: "质量治理" },
+  { key: "shareAlerts", index: "09", label: "异常报警", group: "质量治理" },
 ];
 
 const moduleCopy: Record<ModuleKey, { title: string; description: string; action: string }> = {
@@ -304,6 +306,7 @@ const moduleCopy: Record<ModuleKey, { title: string; description: string; action
   admob: { title: "AdMob 分析", description: "分析请求、匹配、展示、广告浏览用户、eCPM和收入变化", action: "导出 AdMob 报表" },
   firebase: { title: "Firebase 数据", description: "统一查看活跃、事件质量、版本覆盖、数据源连接和同步健康", action: "查看事件字典" },
   reconcile: { title: "数据对账", description: "对比 Firebase、AdMob、中台与 ADB 的用户、展示和收入口径", action: "发起重新对账" },
+  report: { title: "域名解析报表", description: "解析 VPN 节点域名得到真实出口 IP，核对域名与 IP 的对应关系（仅 A003 / A005 / C002）", action: "导出报表" },
   tracking: { title: "打点测试配置", description: "选择线上项目、应测配置和日期，直接检查配置内事件是否已进入 Firebase/ADB，并给出漏打修复建议", action: "新建打点配置" },
   config: { title: "规范与项目配置", description: "从事件主库组装项目打点配置，发布不可变快照并供打点测试引用", action: "新建打点配置" },
   firebaseSetup: { title: "Firebase 对接中心", description: "独立管理多Firebase连接、Project、App、内部项目绑定、同步水位与接口健康", action: "新建 Firebase 连接" },
@@ -319,6 +322,7 @@ const moduleDialog: Record<ModuleKey, DialogKey> = {
   admob: "admob-report",
   firebase: "event-dictionary",
   reconcile: "reconcile-run",
+  report: "project-report",
   tracking: "tracking-run",
   config: "config-version",
   firebaseSetup: "firebase-connection",
@@ -1335,6 +1339,7 @@ export default function Home() {
     admob: { title: "AdMob+Firebase", detail: "AdMob T+3结算 · Firebase T+0 AV", note: "本页默认按AdMob结算口径展示收入、请求、匹配和展示；当天广告浏览人数AV可用Firebase jk_ad_impression先看趋势。" },
     firebase: { title: "实时数据", detail: "BigQuery intraday · 延迟约8分钟", note: "本页展示Firebase实时预估、事件质量与同步水位；中台数字仅用于差异诊断。" },
     reconcile: { title: "分源对账", detail: "今日双源 · T+3全量", note: "当天只比较Firebase与中台；含AdMob的最终对账仅在结算日期执行，避免跨时效误报。" },
+    report: { title: "域名解析报表", detail: "服务端 DNS 解析 · 缓存 2 小时", note: "仅对 A003 / A005 / C002 这几个包解析域名到 IP；直接 IP 的节点按原样展示，解析失败标记为空。" },
     tracking: { title: "线上打点测试", detail: "项目来自线上 · 直接查 DWS/DWD", note: "打点测试只使用线上项目列表和已发布配置快照；按项目、包名、日期查询 Firebase/ADB 入库结果，未收到或字段异常会直接给修复建议。" },
     config: { title: "配置数据", detail: `${trackingConfigDataSource.eventCount}个标准事件 · ${trackingConfigDataSource.fieldCount}条字段明细`, note: "品类与能力包只负责推荐候选事件；最终验收范围以配置逐项选择并发布的不可变快照为准。" },
     firebaseSetup: { title: "对接控制面", detail: "Firebase连接 / Project / App / Dataset", note: "Firebase对接已合并到Firebase数据和任务日志里展示；项目打点配置不保存Firebase凭证、Project、App或Dataset。" },
@@ -1685,7 +1690,7 @@ export default function Home() {
             <div><span>下一步建议</span><strong>{pageGuideCopy[page].next}</strong></div>
           </section>}
 
-          {module !== "firebaseSetup" && <section className={`filter-bar ${isFunnelOverview ? "overview-filter-bar" : ""}`}>
+          {module !== "firebaseSetup" && module !== "report" && <section className={`filter-bar ${isFunnelOverview ? "overview-filter-bar" : ""}`}>
             {isFunnelOverview ? <div className="overview-no-project-filter"><span>项目</span><strong>全部项目问题预览</strong><small>不做项目筛选；每天 08:00 汇总前一天数据，09:30 补充延迟入库数据，点击项目进入单项目分析。</small>{(projectLoadError || projectSourceWarning) && <small className="filter-error">{projectLoadError || projectSourceWarning}</small>}</div> : <label>项目<select value={draftProject} disabled={projectLoading || onlineProjects.length === 0} onChange={(event) => {
               const nextProject = event.target.value;
               setDraftProject(nextProject);
@@ -1769,7 +1774,7 @@ export default function Home() {
             <div className="data-state"><span className={`status-dot ${filtersDirty ? "warn" : ""}`} /><strong>{sourceStatus[module].title}</strong><small>{filtersDirty ? "筛选已修改，点击应用后查询" : `${sourceStatus[module].detail} · 刷新#${filtersApplied}`}</small></div>
           </section>}
 
-          {module !== "firebaseSetup" && <section className="context-toolbar">
+          {module !== "firebaseSetup" && module !== "report" && <section className="context-toolbar">
             <div className="context-summary"><Badge tone="blue">{module === "funnel" ? currentPage.hint : currentModule.title}</Badge><span>{isFunnelOverview ? "全部项目" : project}</span><i /> <span>{isFunnelOverview ? "每日08:00汇总 · 09:30补数" : range}</span><i /> <span>{platform} · {appVersion}</span><i /> <span>{country}</span><i /> <span>口径 V1.8</span></div>
             {module !== "tracking" && <div className="context-actions"><button onClick={() => notify("当前分析视图已保存")}>保存视图</button><button onClick={() => setDialog(module === "admob" ? "admob-report" : "project-report")}>导出报表</button></div>}
           </section>}
@@ -1784,7 +1789,9 @@ export default function Home() {
 
           {module === "shareAlerts" && <ShareAlertsPage projectCode={project} notify={notify} />}
 
-          {module !== "funnel" && module !== "vpn" && module !== "shareAlerts" && <ModulePage module={module as Exclude<ModuleKey, "funnel">} project={project} projectMeta={appliedProjectMeta} onlineProjects={onlineProjects} range={range} platform={platform} country={country} appVersion={appVersion} refreshKey={filtersApplied} configs={configRecords} onProjectChange={(nextProject) => { setProject(nextProject); setDraftProject(nextProject); setFiltersApplied((value) => value + 1); }} openModule={openModule} openDialog={setDialog} openConfigEditor={openConfigEditor} notify={notify} />}
+          {module === "report" && <DomainReportPage range={range} refreshKey={filtersApplied} />}
+
+          {module !== "funnel" && module !== "vpn" && module !== "shareAlerts" && module !== "report" && <ModulePage module={module as Exclude<ModuleKey, "funnel">} project={project} projectMeta={appliedProjectMeta} onlineProjects={onlineProjects} range={range} platform={platform} country={country} appVersion={appVersion} refreshKey={filtersApplied} configs={configRecords} onProjectChange={(nextProject) => { setProject(nextProject); setDraftProject(nextProject); setFiltersApplied((value) => value + 1); }} openModule={openModule} openDialog={setDialog} openConfigEditor={openConfigEditor} notify={notify} />}
 
           {module === "funnel" && <OperationalFunnel
             key="operational-ads"
