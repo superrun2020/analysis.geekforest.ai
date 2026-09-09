@@ -2160,15 +2160,22 @@ class FunnelAnalyticsService
                 ? ['country_code']
                 : ($dimension === 'platform' ? ['platform'] : ['app_version', 'build_number']);
 
+            // When comparing BY version we must not also filter TO a single
+            // version, otherwise the comparison collapses to one row.
+            if ($dimension === 'app_version') {
+                unset($params['appVersion']);
+            }
+
             $query = DB::connection('adb')->table('dws_app_funnel_stage_daily')
                 ->whereBetween('stat_date', [$params['dateFrom'], $params['dateTo']])
                 ->where('funnel_code', $funnelCode)
                 ->where('scope_type', 'users');
             $this->applySummaryProjectFilters($query, $params);
 
-            foreach ($groupColumns as $column) {
-                $query->whereNotNull($column)->where($column, '!=', '');
-            }
+            // Only the primary dimension column must be present; a secondary
+            // column such as build_number may legitimately be empty and is
+            // coalesced to '' in the SELECT below.
+            $query->whereNotNull($groupColumns[0])->where($groupColumns[0], '!=', '');
             if ($dimension !== 'platform' && !empty($params['platform'])) {
                 $query->where('platform', strtolower((string) $params['platform']));
             }
