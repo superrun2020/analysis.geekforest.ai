@@ -18,7 +18,7 @@ JKCL 漏斗分析中心前端。系统面向运营、产品、广告变现和数
 
 ## 架构说明
 
-本仓库只包含前端代码。
+本仓库同时保存前端和可部署到现有 NxPanel Laravel 服务的后端模块快照。后端代码位于 [`backend/`](backend/README.md)，真实凭据只允许配置在服务器环境变量或 Secret Manager 中。
 
 ```text
 浏览器

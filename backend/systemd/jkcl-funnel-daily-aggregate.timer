@@ -1,0 +1,12 @@
+[Unit]
+Description=Run JKCL previous-day funnel aggregation at 08:00 with a 09:30 late-data refresh
+
+[Timer]
+OnCalendar=*-*-* 08:00:00 Asia/Shanghai
+OnCalendar=*-*-* 09:30:00 Asia/Shanghai
+Persistent=true
+AccuracySec=1min
+Unit=jkcl-funnel-daily-aggregate.service
+
+[Install]
+WantedBy=timers.target

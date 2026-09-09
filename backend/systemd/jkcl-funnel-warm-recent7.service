@@ -1,0 +1,14 @@
+[Unit]
+Description=Warm JKCL ad and VPN workbench caches for the previous 7 days
+After=network-online.target jkcl-funnel-api.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/opt/jkcl-funnel-api/current
+Environment=PLUGIN_INITIALIZATION_ENABLED=false
+ExecStart=/bin/bash -lc 'for offset in 7 6 5 4 3 2 1; do day="$(date -d "$offset days ago" +%%F)"; echo "warming $day"; /usr/bin/php artisan funnel-analysis:warm-workbench-cache --date="$day" --domain=all --platform=all --limit=200 --no-interaction || exit $?; done'
+TimeoutStartSec=14400
+StandardOutput=journal
+StandardError=journal
