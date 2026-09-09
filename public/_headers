@@ -1,0 +1,6 @@
+/version.json
+  Cache-Control: no-store, no-cache, must-revalidate
+
+# Cache content-hashed assets immutably.
+/_next/static/*
+  Cache-Control: public, max-age=31536000, immutable

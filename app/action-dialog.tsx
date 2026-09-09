@@ -237,10 +237,9 @@ export function ActionDialog({ dialog, project, configs = trackingConfigs, editi
       if (!selectedRunConfig) nextErrors.push("当前项目没有可用的已发布打点配置，请先发布配置快照");
       if (!payload.tracking_config_id) nextErrors.push("请选择已发布的打点配置");
     }
-    if (dialog === "firebase-binding" && !packageMatches) nextErrors.push("Firebase App与公司App档案的包名或平台不一致");
-    if (dialog === "firebase-binding" && payload.confirm_package_match !== "1") nextErrors.push("请确认包名、平台和公司App档案匹配");
+    if (dialog === "firebase-binding") nextErrors.push("Firebase 资源树真实接口尚未接入，当前不能创建关联，避免保存演示绑定");
     if (dialog === "firebase-connection" && discoveryMode === "SPECIFIED" && !payload.specified_project_ids) nextErrors.push("指定项目模式下，请至少填写一个Firebase Project ID");
-    if (dialog === "firebase-sync") requireOne("binding_ids", "请至少选择一个已绑定的项目/App");
+    if (dialog === "firebase-sync") nextErrors.push("Firebase 同步创建接口尚未接入，当前只允许在任务页查看真实 sync-runs/check-logs，不创建演示任务");
     return nextErrors;
   }
 
@@ -583,44 +582,15 @@ export function ActionDialog({ dialog, project, configs = trackingConfigs, editi
               </div>}
 
               {dialog === "firebase-binding" && <div className="modal-form-grid">
-                <Field label="Firebase连接" required><select name="connection_id" value={connectionId} onChange={(event) => switchConnection(event.target.value as keyof typeof firebaseInventory)} required>{Object.entries(firebaseInventory).map(([id, item]) => <option key={id} value={id}>{item.name}</option>)}</select></Field>
-                <Field label="Firebase Project" required><select name="firebase_project_id" value={firebaseProjectId} onChange={(event) => switchFirebaseProject(event.target.value)} required>{projectOptions.map(([id, item]) => <option key={id} value={id}>{item.name}</option>)}</select></Field>
-                <Field label="Firebase App" required span><select name="firebase_app_id" value={firebaseAppId} onChange={(event) => { const app = appOptions.find((item) => item.id === event.target.value); if (app) selectFirebaseApp(app); }} required>{appOptions.map((app) => <option key={app.id} value={app.id}>{app.name} · {app.packageName}</option>)}</select></Field>
-                <Field label="平台"><input name="platform" value={selectedApp.platform} readOnly /></Field>
-                <Field label="包名/Bundle ID"><input name="app_identifier" value={selectedApp.packageName} readOnly /></Field>
-                <Field label="GA4 Property"><input name="ga4_property_id" value={selectedFirebaseProject.property} readOnly /></Field>
-                <Field label="Data Stream ID"><input name="data_stream_id" value={selectedApp.streamId} readOnly /></Field>
-                <Field label="BigQuery Dataset" span><input name="bigquery_dataset_id" value={selectedFirebaseProject.dataset} readOnly /></Field>
-                <Field label="公司项目" required><select name="project_code" value={internalProjectCode} onChange={(event) => switchInternalProject(event.target.value)} required>{Array.from(new Set(internalAppCatalog.map((item) => item.projectCode))).map((code) => <option key={code}>{code}</option>)}</select></Field>
-                <Field label="公司App档案" required><select name="internal_app_id" value={internalAppId} onChange={(event) => setInternalAppId(event.target.value)} required>{internalAppOptions.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.appIdentifier}</option>)}</select></Field>
-                <Field label="环境" required><select name="environment" required><option value="production">正式</option><option value="staging">测试</option><option value="gray">灰度</option></select></Field>
-                <Field label="数据时区" required><select name="timezone" required><option>UTC</option><option>Asia/Shanghai</option><option>Asia/Tehran</option></select></Field>
-                <Field label="历史回补开始日期"><input name="backfill_from" type="date" defaultValue="2026-08-01" /></Field>
-                <Field label="生效时间" required><input name="effective_from" type="datetime-local" defaultValue="2026-08-11T16:00" required /></Field>
-                <Field label="当天同步间隔" required><select name="intraday_interval_minutes" required><option value="15">15分钟</option><option value="30">30分钟</option><option value="60">60分钟</option></select></Field>
-                <Field label="日表回刷天数" required><select name="lookback_days" required><option value="3">最近3天</option><option value="5">最近5天</option><option value="7">最近7天</option></select></Field>
-                <Field label="事件范围" required><select name="event_name_policy" required><option value="ALLOWLIST">V1.8标准事件Allowlist</option><option value="JK_PREFIX">全部jk_事件</option><option value="ALL">全部Firebase事件</option></select></Field>
-                <Field label="规范版本" required><select name="spec_version" required><option>V1.8</option><option>V1.7</option></select></Field>
-                <Field label="负责人" required><select name="owner_user_id" required><option value="u_oliver">Oliver</option><option value="team_data">数据平台</option></select></Field>
-                <Field label="OSS Raw路径" required span help="每个绑定的原始事件先不可变归档，再进入标准化层"><input name="raw_oss_uri_prefix" defaultValue="oss://jkcl-data-lake/firebase/raw" pattern="^oss://.+" required /></Field>
-                <Field label="ADB数据库" required><input name="target_adb_database" defaultValue="jkcl_analytics" required /></Field>
-                <Field label="ADB事件表" required><input name="target_adb_table" defaultValue="firebase_event_fact" required /></Field>
-                <Field label="当天增量" required><select name="intraday_enabled" required><option value="1">开启 events_intraday_*</option><option value="0">关闭，仅使用日表</option></select></Field>
-                <Field label="历史日表" required><select name="daily_enabled" required><option value="1">开启 events_*</option><option value="0">关闭</option></select></Field>
-                <div className={`binding-check span-2 ${packageMatches ? "" : "mismatch"}`}><div><span>{packageMatches ? "✓" : "!"}</span><p><strong>{packageMatches ? "包名与平台匹配" : "包名或平台不匹配"}</strong><small>{selectedApp.packageName} ↔ {selectedInternalApp?.appIdentifier}</small></p></div><div><span>✓</span><p><strong>最近24小时有数据</strong><small>最新事件 8分钟前 · 2.14M events</small></p></div><label className="risk-check"><input type="checkbox" name="confirm_package_match" value="1" disabled={!packageMatches} /> 我已确认公司App档案与Firebase App的包名、平台和环境一致</label></div>
+                <div className="modal-warning span-2"><strong>真实资源接口待接入，暂不允许创建关联</strong><p>当前前端没有可用的 connections/resources 真实接口，不能再用演示 Firebase Project、App、Dataset 填充表单。请先让后端返回真实连接资源树，字段至少包括 connection_id、firebase_project_id、firebase_app_id、platform、app_identifier、ga4_property_id、bigquery_dataset_id、project_code。</p></div>
+                <Field label="应接接口" span><input value="GET /api/v3/{securePath}/firebase-integration/connections" readOnly /></Field>
+                <Field label="当前状态" span><input value="接口待接入；不会保存演示绑定" readOnly /></Field>
               </div>}
 
               {dialog === "firebase-sync" && <div className="modal-form-grid">
-                <Field label="已绑定项目 / Firebase App" required span><Checks name="binding_ids" items={[{value:"FBB-IRAN-ANDROID",label:"IRAN-VPN-01 · Android · com.jkcl.iran.vpn",checked:true},{value:"FBB-IRAN-IOS",label:"IRAN-VPN-01 · iOS · ai.geekforest.iranvpn"},{value:"FBB-CLEAN-ANDROID",label:"CLEAN-MAX-03 · Android · com.jkcl.clean.max"}]} /></Field>
-                <Field label="同步类型" required><select name="run_type" required><option value="INTRADAY">当天增量 Intraday</option><option value="DAILY">历史日表 Daily</option><option value="BACKFILL">历史回补 Backfill</option><option value="REALTIME_CHECK">只做实时健康检查</option></select></Field>
-                <Field label="触发原因" required><select name="trigger_reason" required><option value="MANUAL_CHECK">人工检查</option><option value="FIRST_IMPORT">首次导入</option><option value="DATA_DELAY">数据延迟</option><option value="REPAIR">故障修复</option></select></Field>
-                <Field label="开始日期" required><input type="date" name="date_from" defaultValue="2026-08-13" required /></Field>
-                <Field label="结束日期" required><input type="date" name="date_to" defaultValue="2026-08-13" required /></Field>
-                <Field label="写入策略" required><select name="write_mode" required><option value="UPSERT">幂等增量UPSERT</option><option value="REBUILD_DATE">重建日期分区</option><option value="DRY_RUN">Dry Run，仅验证不入库</option></select></Field>
-                <Field label="事件范围" required><select name="event_name_policy" required><option value="ALLOWLIST">V1.8标准事件Allowlist</option><option value="JK_PREFIX">全部jk_事件</option><option value="ALL">全部Firebase事件</option></select></Field>
-                <Field label="执行人" required><select name="triggered_by" required><option value="u_oliver">Oliver</option><option value="team_data">数据平台</option></select></Field>
-                <Field label="任务说明" span><textarea name="note" placeholder="说明为什么需要人工同步或回补" maxLength={500} /></Field>
-                <div className="modal-warning span-2"><strong>数据落地顺序</strong><p>BigQuery读取成功后先写OSS Raw，再标准化写ADB；接口成功但ADB未写完时，任务状态为PARTIAL，页面不会显示为全链路成功。</p></div>
+                <div className="modal-warning span-2"><strong>同步创建接口待接入，暂不允许创建演示任务</strong><p>当前页面只能读取真实 sync-runs/check-logs。需要后端提供已绑定 Firebase App 列表和创建同步任务接口后，才能选择绑定并发起同步。</p></div>
+                <Field label="已接读取接口" span><input value="GET /api/v3/{securePath}/firebase-integration/sync-runs" readOnly /></Field>
+                <Field label="待接创建接口" span><input value="POST /api/v3/{securePath}/firebase-integration/sync-runs" readOnly /></Field>
               </div>}
             </div>
             <footer>

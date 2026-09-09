@@ -18,14 +18,13 @@ type ConfigSaveAction = "draft" | "publish";
 type MasterView = "fields" | "events";
 type SelectionView = "all" | "selected" | "unselected";
 
-const projects = [
-  { code: "A054", label: "A054 · VPN V1.8 项目", category: "套利 VPN" },
-  { code: "IRAN-VPN-01", label: "IRAN-VPN-01 · Iran Fast VPN", category: "套利 VPN" },
-  { code: "FAST-VPN-02", label: "FAST-VPN-02 · Fast VPN", category: "套利 VPN" },
-  { code: "CLEAN-MAX-03", label: "CLEAN-MAX-03 · Clean Max", category: "清理" },
-  { code: "TURBO-CLEAN-05", label: "TURBO-CLEAN-05 · Turbo Cleaner", category: "清理" },
-  { code: "AIVORA-LAUNCHER", label: "AIVORA-LAUNCHER · Aivora Launcher", category: "Launcher" },
-];
+type OnlineProjectOption = {
+  projectCode: string;
+  appName?: string;
+  appIdentifier?: string;
+  category?: string;
+  projectType?: string;
+};
 
 function nextVersion(version: string) {
   const match = version.match(/^V(\d+)\.(\d+)$/);
@@ -36,8 +35,16 @@ function priorityTone(priority: TrackingPriority) {
   return priority === "P0" ? "bad" : priority === "P1" ? "warn" : "neutral";
 }
 
-export function TrackingConfigWorkspace({ editingConfig, onCancel, onSave }: {
+function inferProjectCategory(project: OnlineProjectOption) {
+  const raw = `${project.category ?? ""} ${project.projectType ?? ""} ${project.appName ?? ""} ${project.appIdentifier ?? ""} ${project.projectCode ?? ""}`.toLowerCase();
+  if (/clean|清理|垃圾|加速/.test(raw)) return "清理";
+  if (/launcher|桌面|启动器/.test(raw)) return "Launcher";
+  return "套利 VPN";
+}
+
+export function TrackingConfigWorkspace({ editingConfig, onlineProjects = [], onCancel, onSave }: {
   editingConfig: TrackingConfigRecord | null;
+  onlineProjects?: OnlineProjectOption[];
   onCancel: () => void;
   onSave: (submission: TrackingConfigSubmission, action: ConfigSaveAction) => void;
 }) {
@@ -45,7 +52,16 @@ export function TrackingConfigWorkspace({ editingConfig, onCancel, onSave }: {
   const [name, setName] = useState(editingConfig ? `${editingConfig.name}${copyingPublished ? " - 新版本" : ""}` : "VPN 新版本打点配置");
   const [version, setVersion] = useState(editingConfig ? copyingPublished ? nextVersion(editingConfig.version) : editingConfig.version : "V1.9");
   const [category, setCategory] = useState(editingConfig?.category ?? "套利 VPN");
-  const [selectedProjects, setSelectedProjects] = useState<string[]>(editingConfig?.projects ?? ["IRAN-VPN-01"]);
+  const projectOptions = useMemo(() => onlineProjects.map((project) => ({
+    code: project.projectCode,
+    label: `${project.projectCode}${project.appName ? ` · ${project.appName}` : ""}${project.appIdentifier ? ` · ${project.appIdentifier}` : ""}`,
+    category: inferProjectCategory(project),
+  })).filter((project) => project.code), [onlineProjects]);
+  const categoryProjectOptions = useMemo(() => {
+    const matched = projectOptions.filter((project) => project.category === category);
+    return matched.length ? matched : projectOptions;
+  }, [category, projectOptions]);
+  const [selectedProjects, setSelectedProjects] = useState<string[]>(editingConfig?.projects ?? []);
   const [platform, setPlatform] = useState(editingConfig?.platform ?? "Android+iOS");
   const [description, setDescription] = useState(`基于 V1.8「01_事件字段总表」配置本版本需要实现和验收的标准事件。`);
   const [selectedIds, setSelectedIds] = useState<string[]>(editingConfig?.selectedEventIds ?? defaultSelectedEventIds);
@@ -148,7 +164,7 @@ export function TrackingConfigWorkspace({ editingConfig, onCancel, onSave }: {
           <label><span>版本 *</span><input value={version} onChange={(event) => setVersion(event.target.value)} /></label>
           <label><span>适用品类 *</span><select value={category} onChange={(event) => setCategory(event.target.value)}><option>套利 VPN</option><option>清理</option><option>Launcher</option></select></label>
           <label><span>平台 *</span><select value={platform} onChange={(event) => setPlatform(event.target.value)}><option>Android+iOS</option><option>Android</option><option>iOS</option></select></label>
-          <label className="projects-field"><span>关联项目 *</span><div>{projects.map((item) => <button type="button" key={item.code} className={selectedProjects.includes(item.code) ? "selected" : ""} onClick={() => toggleProject(item.code)}><i>{selectedProjects.includes(item.code) ? "✓" : ""}</i>{item.label}</button>)}</div></label>
+          <label className="projects-field"><span>关联项目 *（线上项目列表）</span><div>{categoryProjectOptions.length ? categoryProjectOptions.map((item) => <button type="button" key={item.code} className={selectedProjects.includes(item.code) ? "selected" : ""} onClick={() => toggleProject(item.code)}><i>{selectedProjects.includes(item.code) ? "✓" : ""}</i>{item.label}</button>) : <button type="button" disabled><i>!</i>线上项目暂不可用，请先确认 Firebase 配置/项目接口</button>}</div></label>
           <label className="description-field"><span>配置说明</span><textarea value={description} onChange={(event) => setDescription(event.target.value)} /></label>
         </div>
       </section>

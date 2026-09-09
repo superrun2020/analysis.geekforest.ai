@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { acceptanceApi, type AcceptanceDetail, type AcceptanceFieldCoverage, type AcceptanceRun } from "./tracking-acceptance-api";
+import { queryTrackingOnlineCoverage, type OnlineCoverageEvent, type OnlineCoverageResult } from "./tracking-online-coverage-api";
 import { trackingEventCatalog, type TrackingCatalogEvent, type TrackingConfigRecord } from "./tracking-config-data";
 import type { V18EventParameter } from "./v18-event-catalog";
 
@@ -105,6 +106,32 @@ function resultTone(status?: string): "neutral" | "good" | "warn" | "bad" | "blu
   return "neutral";
 }
 
+function resultLabel(status?: string) {
+  const value = (status ?? "").trim().toUpperCase();
+  const labels: Record<string, string> = {
+    PASSED: "通过",
+    PARAM_INVALID: "参数错误",
+    CHAIN_INVALID: "关联链错误",
+    NOT_RECEIVED: "未收到",
+    PENDING: "待处理",
+    SCENE_NOT_EXECUTED: "未执行场景",
+    NOT_CONFIGURED: "未纳入配置",
+    NEED_RUN: "待创建Run",
+    EVENT_NOT_RECEIVED: "事件未收到",
+    REPORTED: "已上报",
+    INVALID: "格式错误",
+    MISSING: "字段缺失",
+    LIKELY_REPORTED: "疑似已上报",
+    PASSED_BY_RUN_DETAIL: "当前Run通过",
+    CHAIN_WARN: "关联链预警",
+    RUNNING: "运行中",
+    SUCCESS: "成功",
+    FAILED: "失败",
+    UNKNOWN: "未知",
+  };
+  return labels[value] ?? status ?? "—";
+}
+
 function fieldListIncludes(values: string[], fieldName: string) {
   const target = fieldName.trim();
   return values.some((value) => {
@@ -162,7 +189,7 @@ function inferLocalFieldResult(detail: AcceptanceDetail | null, eventName: strin
     return { source: "local" as const, tone: "neutral" as const, title: "待创建或选择验收 Run", status: "NEED_RUN", description: "创建 Run 后才能判断字段是否随事件进入 Firebase/ADB。", eventReceivedCount: undefined, presentCount: undefined, missingCount: undefined, invalidCount: undefined, coverageRate: undefined, lastReceivedAt: undefined, sampleValues: [] };
   }
   if (!event || !knownField) {
-    return { source: "local" as const, tone: "warn" as const, title: "字段不在当前配置字典", status: "NOT_CONFIGURED", description: "请确认字段名是否属于 V1.8 当前配置；如果是新字段，需要先进入规范与配置发布新快照。", eventReceivedCount: detailEvent?.receivedCount, presentCount: undefined, missingCount: undefined, invalidCount: undefined, coverageRate: undefined, lastReceivedAt: detailEvent?.lastReceivedAt, sampleValues: [] };
+    return { source: "local" as const, tone: "warn" as const, title: "字段不在当前配置字典", status: "NOT_CONFIGURED", description: "请确认字段名是否属于 V1.8 当前配置；如果是新字段，需要先进入打点测试配置发布新快照。", eventReceivedCount: detailEvent?.receivedCount, presentCount: undefined, missingCount: undefined, invalidCount: undefined, coverageRate: undefined, lastReceivedAt: detailEvent?.lastReceivedAt, sampleValues: [] };
   }
   if (!detailEvent || detailEvent.receivedCount <= 0) {
     return { source: "local" as const, tone: "bad" as const, title: "事件未收到，字段没有上报进来", status: "EVENT_NOT_RECEIVED", description: `当前 Run 没收到 ${eventName}，所以 ${fieldName} 不可能进入字段统计。先让测试机触发对应页面/动作。`, eventReceivedCount: detailEvent?.receivedCount ?? 0, presentCount: 0, missingCount: undefined, invalidCount: undefined, coverageRate: 0, lastReceivedAt: detailEvent?.lastReceivedAt, sampleValues: [] };
@@ -326,12 +353,12 @@ function PageTrackingAcceptancePanel({
       <div><span>A054重点判断</span><strong>{project === "A054" ? "专项开启" : "通用规则"}</strong><small>screen_view 为页面数据分母</small></div>
     </div>
     {project === "A054" && <div className="page-acceptance-callout"><strong>A054 无页面数据时先按这个顺序排：</strong><span>① Firebase 是否收到 screen_view；② screen_view 是否带 session_id 和 screen_view_id；③ DWS 页面路径是否过滤了缺 ID 事件；④ App 后台是否只打了 app_background 但没有 screen_exit。</span></div>}
-    {expectedCount === 0 && <div className="page-acceptance-callout danger"><strong>当前配置没有纳入页面事件</strong><span>请在“规范与配置”里把 页面行为 / 核心行为 模块加入配置，否则验收中心无法把页面数据缺失算进失败。</span><button onClick={openConfig}>去配置页面事件</button></div>}
+    {expectedCount === 0 && <div className="page-acceptance-callout danger"><strong>当前配置没有纳入页面事件</strong><span>请在“打点测试配置”里把 页面行为 / 核心行为 模块加入配置，否则验收中心无法把页面数据缺失算进失败。</span><button onClick={openConfig}>去配置页面事件</button></div>}
     <div className="table-wrap page-check-table"><table><thead><tr><th>检查项</th><th>标准事件</th><th>必须字段 / 上下文</th><th>打点位置</th><th>验收规则</th><th>当前结果</th><th>影响</th></tr></thead><tbody>{pageTrackingChecks.map((check) => {
       const detailEvent = eventByName.get(check.eventName);
       const configured = configuredNames.has(check.eventName);
       const status = !configured ? "未纳入配置" : !detail ? "待创建Run" : detailEvent?.resultStatus ?? "NOT_RECEIVED";
-      return <tr key={check.key} className={status === "PASSED" ? "" : "row-warn"}><td><strong>{check.name}</strong></td><td><code>{check.eventName}</code></td><td>{check.fields}</td><td>{check.location}</td><td>{check.rule}</td><td><span className={`badge badge-${resultTone(status)}`}>{configured ? status : "未纳入配置"}</span><small>{detailEvent ? `收到 ${detailEvent.receivedCount} 次` : configured ? "暂无接收记录" : "不进本次分母"}</small></td><td>{check.impact}</td></tr>;
+      return <tr key={check.key} className={status === "PASSED" ? "" : "row-warn"}><td><strong>{check.name}</strong></td><td><code>{check.eventName}</code></td><td>{check.fields}</td><td>{check.location}</td><td>{check.rule}</td><td><span className={`badge badge-${resultTone(status)}`}>{configured ? resultLabel(status) : "未纳入配置"}</span><small>{detailEvent ? `收到 ${detailEvent.receivedCount} 次` : configured ? "暂无接收记录" : "不进本次分母"}</small></td><td>{check.impact}</td></tr>;
     })}</tbody></table></div>
     <FieldCoverageLookup detail={detail} configuredEvents={configuredEvents} />
     <div className="page-acceptance-actions">
@@ -347,12 +374,14 @@ export function TrackingAcceptanceCenter({ project, projects, configs, platform,
   onProjectChange: (value: string) => void; openConfig: () => void; notify: (message: string) => void;
 }) {
   const compatible = configs.filter((item) => item.status === "PUBLISHED" && item.projects.includes(project));
-  const [configId, setConfigId] = useState(compatible[0]?.id ?? "");
-  const [runs, setRuns] = useState<AcceptanceRun[]>([]);
-  const [detail, setDetail] = useState<AcceptanceDetail | null>(null);
+  const [configId, setConfigId] = useState(compatible[0]?.id ?? "V18_FULL");
+  const [coverage, setCoverage] = useState<OnlineCoverageResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [filter, setFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [moduleFilter, setModuleFilter] = useState("all");
+  const [keyword, setKeyword] = useState("");
+  const [queryDate, setQueryDate] = useState(() => new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10));
   const projectOption = projects.find((item) => item.code === project);
   const parsedVersion = parseVersion(appVersion);
   const profile = {
@@ -361,68 +390,110 @@ export function TrackingAcceptanceCenter({ project, projects, configs, platform,
     buildNumber: parsedVersion.buildNumber,
     platform: normalizePlatform(platform),
   };
-  const selectedConfig = compatible.find((item) => item.id === configId) ?? compatible[0];
+  const selectedConfig = compatible.find((item) => item.id === configId);
+  const expectedEvents = useMemo(() => {
+    if (!selectedConfig) return trackingEventCatalog;
+    const selectedIds = new Set(selectedConfig.selectedEventIds ?? []);
+    return trackingEventCatalog.filter((event) => selectedIds.has(event.id));
+  }, [selectedConfig]);
+  const coverageByName = useMemo(() => {
+    const map = new Map<string, OnlineCoverageEvent>();
+    coverage?.events.forEach((event) => map.set(normalizeEventName(event.eventName), event));
+    return map;
+  }, [coverage]);
+  const moduleOptions = useMemo(() => Array.from(new Set(expectedEvents.map((event) => event.stage))).sort(), [expectedEvents]);
 
   useEffect(() => {
-    setConfigId(compatible[0]?.id ?? "");
-    setDetail(null);
-    setRuns([]);
+    setConfigId(compatible[0]?.id ?? "V18_FULL");
+    setCoverage(null);
     setError("");
-    if (compatible[0]) void loadRuns();
   }, [project]);
-  async function loadRuns() {
-    if (!selectedConfig) return;
-    setLoading(true); setError("");
-    try { const data = await acceptanceApi.list(project); setRuns(data.items); if (data.items[0]) setDetail(await acceptanceApi.detail(data.items[0].runId)); }
-    catch (e) { setError(e instanceof Error ? e.message : "后端连接失败"); }
-    finally { setLoading(false); }
+
+  function getEventStatus(event: TrackingCatalogEvent) {
+    const online = coverageByName.get(normalizeEventName(event.name));
+    if (!coverage) return { key: "pending", label: "待查询", tone: "neutral" as const, suggestion: "选择项目、配置和日期后点击查询，系统会检查线上是否收到这个事件。" };
+    if (!online?.received) return { key: "missing", label: "未收到", tone: "bad" as const, suggestion: `按“${event.trackingLocation || event.triggerTiming || "对应业务场景"}”触发一次；若仍未收到，检查事件名、Firebase 上报开关、ADB 隔离表和客户端触发时机。` };
+    if ((online.quarantineCount ?? 0) > 0) return { key: "quarantine", label: "隔离异常", tone: "bad" as const, suggestion: "先查隔离原因：event_id、schema_version、my_user_id、时间戳、必填字段是否非法；修好后重新触发该事件。" };
+    if ((online.typeMismatchCount ?? 0) > 0) return { key: "type", label: "类型异常", tone: "bad" as const, suggestion: "检查 bool / timestamp / decimal 是否按 V1.8 转成 String、Int 或 Double，枚举值不要传空字符串。" };
+    if (online.p0CompletenessRate !== null && online.p0CompletenessRate !== undefined && online.p0CompletenessRate < 99) return { key: "field", label: "字段缺失", tone: "warn" as const, suggestion: "事件已收到，但 P0 字段不完整；重点查统一 Provider、广告/VPN Context、session_id/request_id/vpn_session_id 是否贯穿。" };
+    return { key: "success", label: "成功", tone: "good" as const, suggestion: "事件已在线上收到，且未发现明显字段/隔离/类型异常。" };
   }
-  async function createRun() {
-    if (!selectedConfig) return;
-    if (!profile.appIdentifier) { setError("当前线上项目缺少 app_identifier / 包名，请先在 Firebase 对接或项目管理里补齐"); return; }
-    if (!profile.appVersion) { setError("请先选择具体 App 版本后再创建验收 Run，不能用“全部版本”创建验收"); return; }
-    setLoading(true); setError("");
+
+  const rows = useMemo(() => expectedEvents.map((event) => ({ event, online: coverageByName.get(normalizeEventName(event.name)), status: getEventStatus(event) })), [expectedEvents, coverageByName, coverage]);
+  const visibleRows = rows.filter(({ event, status }) => {
+    const text = `${event.stage} ${event.name} ${event.displayName} ${event.trackingLocation} ${event.triggerTiming}`.toLowerCase();
+    const matchesKeyword = !keyword.trim() || text.includes(keyword.trim().toLowerCase());
+    const matchesModule = moduleFilter === "all" || event.stage === moduleFilter;
+    const matchesStatus = statusFilter === "all"
+      || (statusFilter === "success" && status.key === "success")
+      || (statusFilter === "failed" && ["missing", "field", "type", "quarantine"].includes(status.key))
+      || (statusFilter === "missing" && status.key === "missing")
+      || (statusFilter === "pending" && status.key === "pending");
+    return matchesKeyword && matchesModule && matchesStatus;
+  });
+  const summary = useMemo(() => {
+    const total = rows.length;
+    const success = rows.filter((row) => row.status.key === "success").length;
+    const failed = rows.filter((row) => ["missing", "field", "type", "quarantine"].includes(row.status.key)).length;
+    const p0Total = rows.filter((row) => row.event.priority === "P0").length;
+    const p0Success = rows.filter((row) => row.event.priority === "P0" && row.status.key === "success").length;
+    const received = rows.filter((row) => row.online?.received).length;
+    const p0Rates = rows.map((row) => row.online?.p0CompletenessRate).filter((value): value is number => value !== null && value !== undefined);
+    const avgP0 = p0Rates.length ? p0Rates.reduce((sum, value) => sum + value, 0) / p0Rates.length : null;
+    return { total, success, failed, received, p0Total, p0Success, avgP0 };
+  }, [rows]);
+
+  async function queryCoverage() {
+    if (!profile.appIdentifier) { setError("当前项目没有包名 / app_identifier，无法和 Firebase/ADB 数据精确匹配。请先检查 Firebase 对接配置表。"); return; }
+    if (!expectedEvents.length) { setError("当前配置没有选择任何应测事件，请先新建或编辑打点配置。"); return; }
+    setLoading(true);
+    setError("");
     try {
-      const data = await acceptanceApi.create({ projectCode: project, configRevisionId: selectedConfig.id, ...profile, environment: "TEST", testerName: "当前用户" });
-      setDetail(data); await loadRuns(); notify(`验收 Run ${data.run.runId} 已创建`);
-    } catch (e) { setError(e instanceof Error ? e.message : "创建失败"); setLoading(false); }
+      const data = await queryTrackingOnlineCoverage({
+        projectCode: project,
+        appIdentifier: profile.appIdentifier,
+        date: queryDate,
+        eventNames: expectedEvents.map((event) => event.name),
+      });
+      setCoverage(data);
+      notify(`${project} ${queryDate} 打点检查完成：已收到 ${data.events.filter((event) => event.received).length}/${expectedEvents.length} 个应测事件`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "线上打点查询失败");
+    } finally {
+      setLoading(false);
+    }
   }
-  async function markModule(module: string) {
-    if (!detail) return; const names = detail.events.filter((event) => event.module === module).map((event) => event.eventName);
-    try { setDetail(await acceptanceApi.markScene(detail.run.runId, names)); notify(`${module}已标记操作完成，等待事件`); }
-    catch (e) { setError(e instanceof Error ? e.message : "操作失败"); }
-  }
-  async function markPageScene(eventNames: string[]) {
-    if (!detail) return;
-    const detailNames = detail.events
-      .filter((event) => eventNames.includes(normalizeEventName(event.eventName)) || event.module === "页面行为")
-      .map((event) => event.eventName);
-    const names = detailNames.length > 0 ? detailNames : eventNames;
-    try { setDetail(await acceptanceApi.markScene(detail.run.runId, names)); notify("页面场景已标记执行，正在等待 screen_view / screen_exit / element_click"); }
-    catch (e) { setError(e instanceof Error ? e.message : "页面场景标记失败"); }
-  }
-  const modules = useMemo(() => detail ? Array.from(new Set(detail.events.map((event) => event.module ?? "未分组"))) : [], [detail]);
-  const visible = detail?.events.filter((event) => filter === "all" || (filter === "passed" && event.resultStatus === "PASSED") || (filter === "failed" && ["PARAM_INVALID", "CHAIN_INVALID", "NOT_RECEIVED"].includes(event.resultStatus)) || (filter === "pending" && event.resultStatus === "PENDING")) ?? [];
-  const rate = detail?.run.completionRate ?? 0;
 
   return <div className="page-stack">
     <section className="tracking-product-selector surface">
-      <div><div className="eyebrow">配置快照 → 操作任务 → 事件接收 → 参数/关联链校验 → P0 100%</div><h2>选择产品并开始验收</h2><p>验收分母只来自已发布配置；Run 创建后冻结，不受后续配置修改影响。</p></div>
+      <div><h2>打点测试配置</h2><p>选择线上项目和打点配置，系统直接查 Firebase/ADB 入库结果，判断“应该打的点有没有打成功”。</p></div>
       <label><span>产品</span><select value={project} onChange={(e) => onProjectChange(e.target.value)}>{projects.map((item) => <option key={item.code} value={item.code}>{item.code}{item.name ? ` · ${item.name}` : ""}</option>)}</select></label>
-      <label><span>已发布配置</span><select value={selectedConfig?.id ?? ""} disabled={compatible.length === 0} onChange={(e) => setConfigId(e.target.value)}>{compatible.length === 0 ? <option value="">当前线上项目暂无发布配置</option> : compatible.map((item) => <option key={item.id} value={item.id}>{item.name} {item.version} · {item.selectedCount}事件</option>)}</select></label>
-      <button className="primary-button" disabled={!selectedConfig || loading} onClick={createRun}>＋ 创建验收 Run</button>
+      <label><span>应测配置</span><select value={selectedConfig?.id ?? "V18_FULL"} onChange={(e) => setConfigId(e.target.value)}><option value="V18_FULL">V1.8 全量事件自检 · {trackingEventCatalog.length}事件</option>{compatible.map((item) => <option key={item.id} value={item.id}>{item.name} {item.version} · {item.selectedCount}事件</option>)}</select></label>
+      <label><span>查询日期</span><input type="date" value={queryDate} onChange={(e) => setQueryDate(e.target.value)} /></label>
+      <button className="primary-button" disabled={loading || !expectedEvents.length} onClick={queryCoverage}>{loading ? "查询中..." : "查询打点结果"}</button>
     </section>
-    <section className="acceptance-run-bar surface"><div><span>当前线上项目</span><strong>{project}</strong><small>{projectOption?.name || "未返回项目名称"}</small></div><div><span>App / 包名</span><strong>{profile.appIdentifier || "未配置包名"}</strong><small>{profile.appVersion || "未选择具体版本"}{profile.buildNumber ? ` (${profile.buildNumber})` : ""} · {platform}</small></div><div><span>项目来源</span><strong>线上项目接口</strong><small>不再使用本地演示项目</small></div></section>
-    {error && <section className="surface acceptance-api-error"><strong>{error.includes("尚未配置") ? "验收接口未配置" : "验收后端暂不可用"}</strong><span>{error}</span>{selectedConfig && <button className="secondary-button" onClick={loadRuns}>重新连接</button>}</section>}
-    {!selectedConfig && <section className="surface empty-table-state"><strong>{project} 没有已发布打点配置</strong><span>当前产品来自线上项目列表，但没有匹配到已发布配置快照；创建 Run 前必须先为这个项目发布配置。</span><button className="primary-button" onClick={openConfig}>去配置</button></section>}
-    {selectedConfig && <>
-      <PageTrackingAcceptancePanel project={project} selectedConfig={selectedConfig} detail={detail} loading={loading} onCreateRun={createRun} onRefresh={loadRuns} onMarkPageScene={markPageScene} openConfig={openConfig} />
-      <section className="acceptance-run-bar surface"><label><span>当前 Run</span><select value={detail?.run.runId ?? ""} onChange={async (e) => setDetail(await acceptanceApi.detail(e.target.value))}><option value="">选择验收 Run</option>{runs.map((run) => <option key={run.runId} value={run.runId}>{run.runId} · {run.appVersion} · {run.status}</option>)}</select></label><div><span>App / 构建</span><strong>{profile.appIdentifier}</strong><small>{profile.appVersion} ({profile.buildNumber}) · {profile.platform}</small></div><button className="secondary-button" onClick={loadRuns}>刷新结果</button></section>
-      {detail && <>
-        <section className="metric-grid six"><div className="metric-card"><span>总完成率</span><strong>{rate.toFixed(1)}%</strong><small>门槛 {detail.run.passThreshold}%</small></div><div className="metric-card"><span>成功事件</span><strong>{detail.run.passedCount}/{detail.run.expectedCount}</strong><small>按标准事件去重</small></div><div className="metric-card"><span>P0通过</span><strong>{detail.run.p0PassedCount}/{detail.run.p0ExpectedCount}</strong><small>必须100%</small></div><div className="metric-card"><span>失败</span><strong>{detail.run.failedCount}</strong><small>参数或关联链错误</small></div><div className="metric-card"><span>待操作/待接收</span><strong>{detail.run.pendingCount}</strong><small>不提前判定漏打</small></div><div className="metric-card"><span>Run状态</span><strong>{detail.run.status}</strong><small>{detail.run.snapshotId}</small></div></section>
-        <section className="surface"><div className="surface-title"><div><h2>操作任务</h2><p>测试人员按模块执行操作，系统等待对应事件并自动更新结果。</p></div></div><div className="test-task-list">{modules.map((module) => { const events=detail.events.filter(e=>e.module===module);const passed=events.filter(e=>e.resultStatus==="PASSED").length;return <article key={module} className={`test-task-card ${passed===events.length?"passed":events.some(e=>["PARAM_INVALID","CHAIN_INVALID","NOT_RECEIVED"].includes(e.resultStatus))?"failed":"pending"}`}><header><div><strong>{module}</strong></div><span>{passed}/{events.length} 通过</span></header><dl><div><dt>在哪里操作</dt><dd>{events[0]?.trackingLocation || "按事件规范操作"}</dd></div><div><dt>什么时候触发</dt><dd>{events[0]?.triggerTiming || "操作成功后"}</dd></div><div><dt>应收事件</dt><dd>{events.map(e=>e.eventName).join("、")}</dd></div></dl><footer><button className="primary-button" onClick={()=>markModule(module)}>开始并标记已执行</button></footer></article>})}</div></section>
-        <section className="surface"><div className="surface-title"><div><h2>事件接收与失败定位</h2><p>未执行不算漏打；执行后仍未收到、参数错误或关联链错误才进入失败。</p></div><div className="event-result-tabs">{[["all","全部"],["passed","成功"],["failed","失败"],["pending","待处理"]].map(([key,label])=><button key={key} className={filter===key?"active":""} onClick={()=>setFilter(key)}>{label}</button>)}</div></div><div className="table-wrap event-result-table"><table><thead><tr><th>事件</th><th>模块</th><th>优先级</th><th>场景</th><th>接收次数</th><th>结论</th><th>失败详情</th><th>操作建议</th></tr></thead><tbody>{visible.map((event)=><tr key={event.eventName} className={event.resultStatus!=="PASSED"?"row-warn":""}><td><strong>{event.eventName}</strong><small>{event.displayName}</small></td><td>{event.module}</td><td>{event.priority}</td><td>{event.sceneStatus}</td><td>{event.receivedCount}</td><td>{event.resultStatus}</td><td>{[...event.missingParams,...event.invalidParams,...event.chainErrors].join("、")||"—"}</td><td>{event.resultStatus==="PENDING"?(event.sceneStatus==="NOT_EXECUTED"?event.trackingLocation:"等待Firebase事件"):event.resultStatus==="PASSED"?"无需处理":"按打点位置重测并检查字段Provider/Context"}</td></tr>)}</tbody></table></div></section>
-      </>}
-    </>}
+    {error && <section className="surface acceptance-api-error"><strong>线上打点查询不可用</strong><span>{error}</span><button className="secondary-button" onClick={queryCoverage} disabled={loading}>重新查询</button></section>}
+    {!selectedConfig && <section className="surface page-acceptance-callout danger"><strong>当前项目没有发布配置</strong><span>已临时使用 V1.8 全量事件自检。正式发版验收前，请先创建该项目的打点配置，选择本版本真正需要验证的事件。</span><button onClick={openConfig}>新建配置</button></section>}
+    <section className="metric-grid six">
+      <div className="metric-card"><span>应测事件</span><strong>{summary.total}</strong><small>{selectedConfig ? `${selectedConfig.name} · ${selectedConfig.version}` : "V1.8 全量事件自检"}</small></div>
+      <div className="metric-card"><span>已收到</span><strong>{coverage ? summary.received : "—"}</strong><small>按项目+包名+日期查线上数据</small></div>
+      <div className="metric-card"><span>未通过</span><strong>{coverage ? summary.failed : "—"}</strong><small>未收到/字段缺失/类型或隔离异常</small></div>
+      <div className="metric-card"><span>P0通过</span><strong>{coverage ? `${summary.p0Success}/${summary.p0Total}` : "—"}</strong><small>P0 应 100% 通过</small></div>
+      <div className="metric-card"><span>P0字段完整率</span><strong>{summary.avgP0 === null ? "—" : `${summary.avgP0.toFixed(1)}%`}</strong><small>DWS 有值时展示平均完整率</small></div>
+      <div className="metric-card"><span>数据时间</span><strong>{coverage?.queryPlan.queriedAt?.slice(11, 16) ?? "未查询"}</strong><small>{coverage ? `${coverage.date} · ${coverage.queryPlan.summaryMatched}个汇总命中` : `${profile.appIdentifier || "缺包名"} · ${platform}`}</small></div>
+    </section>
+    <section className="surface tracking-clean-console">
+      <div className="surface-title">
+        <div><h2>应测事件接收结果</h2><p>这里不再创建 Run，只判断当前配置里应该打的事件，线上有没有收到、字段是否完整、失败后该去哪里修。</p></div>
+        <div className="event-result-tabs">{[["all","全部"],["success","成功"],["failed","需处理"],["missing","未收到"],["pending","待查询"]].map(([key,label])=><button key={key} className={statusFilter===key?"active":""} onClick={()=>setStatusFilter(key)}>{label}</button>)}</div>
+      </div>
+      <div className="tracking-test-toolbar">
+        <label><span>事件模块</span><select value={moduleFilter} onChange={(e)=>setModuleFilter(e.target.value)}><option value="all">全部模块</option>{moduleOptions.map((item)=><option key={item} value={item}>{item}</option>)}</select></label>
+        <label><span>搜索事件</span><input value={keyword} onChange={(e)=>setKeyword(e.target.value)} placeholder="搜标准事件名 / 显示名 / 打点位置" /></label>
+        <button className="secondary-button" onClick={()=>{ setModuleFilter("all"); setStatusFilter("all"); setKeyword(""); }}>重置筛选</button>
+      </div>
+      {loading && <div className="query-progress-panel"><div className="query-progress-title"><div><strong>正在检查线上打点</strong><small>优先查 dws_app_event_quality_daily，缺失事件再查 DWD 明细回填。</small></div><span>{project} · {queryDate}</span></div><div className="query-progress-list"><div className="loading"><i>1</i><span>汇总表查询</span><small>事件数量、隔离、类型异常、P0完整率</small><strong>进行中</strong></div><div className="loading"><i>2</i><span>明细表补查</span><small>汇总没有命中的事件用 DWD 再确认</small><strong>等待返回</strong></div><div className="loading"><i>3</i><span>生成修复建议</span><small>按未收到/字段缺失/类型/隔离分类</small><strong>准备中</strong></div></div></div>}
+      <div className="table-wrap event-result-table"><table><thead><tr><th>模块</th><th>标准事件名</th><th>事件显示名</th><th>优先级</th><th>在哪里打点 / 怎么触发</th><th>是否收到</th><th>次数 / UV</th><th>P0完整率</th><th>异常</th><th>最后收到</th><th>建议</th></tr></thead><tbody>{visibleRows.length ? visibleRows.map(({ event, online, status }) => <tr key={event.id} className={status.key === "success" ? "" : "row-warn"}><td>{event.stage}</td><td><strong>{event.name}</strong><small>{event.chainKey}</small></td><td>{event.displayName}</td><td><span className={`badge badge-${event.priority === "P0" ? "bad" : event.priority === "P1" ? "warn" : "neutral"}`}>{event.priority}</span></td><td><strong>{event.trackingLocation || event.page}</strong><small>{event.triggerTiming || event.operation}</small></td><td><span className={`badge badge-${status.tone}`}>{status.label}</span><small>{online?.source ?? "待查询"}</small></td><td><strong>{online?.eventCount ?? 0}</strong><small>UV {online?.users ?? "—"} · 有效 {online?.acceptedCount ?? "—"}</small></td><td>{online?.p0CompletenessRate === null || online?.p0CompletenessRate === undefined ? "—" : `${online.p0CompletenessRate.toFixed(1)}%`}</td><td><small>隔离 {online?.quarantineCount ?? 0}</small><small>类型 {online?.typeMismatchCount ?? 0}</small></td><td>{online?.latestAt ?? "—"}</td><td>{status.suggestion}</td></tr>) : <tr><td colSpan={11}><div className="empty-table-state"><strong>没有匹配的事件</strong><span>请放宽模块、状态或搜索条件。</span></div></td></tr>}</tbody></table></div>
+    </section>
   </div>;
 }

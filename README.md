@@ -55,14 +55,17 @@ pnpm run dev
 
 ```env
 NEXT_PUBLIC_TRACKING_API_BASE_URL=https://analysis.geekforest.ai
-NEXT_PUBLIC_OA_API_BASE_URL=https://oa.geekforest.ai
+OA_API_BASE_URL=https://oa.geekforest.ai
 NEXT_PUBLIC_TRACKING_API_SECURE_PATH=
 ```
 
 说明：
 
 - `NEXT_PUBLIC_TRACKING_API_BASE_URL` 为空时，前端默认使用当前页面域名。
-- `NEXT_PUBLIC_OA_API_BASE_URL` 默认是 `https://oa.geekforest.ai`。
+- 企业邮箱登录默认走同域 `/api/auth/*` 代理，再由服务端请求 `OA_API_BASE_URL`，避免浏览器跨域预检失败。
+- 如必须让浏览器直连 OA，才配置 `NEXT_PUBLIC_OA_API_BASE_URL`；这要求 OA 域名允许 `analysis.geekforest.ai` 的 CORS。
+- 登录方式为企业邮箱 + 密码；JKCL 初始密码等于企业邮箱，首次登录后必须修改密码。
+- OA 每次 `/api/auth/me` 会复核 HRBP 员工状态，员工状态变为离职或不纳入管理后，已有设备登录态也会失效。
 - 不要把数据库密码、Firebase JSON、OAuth Token、SSH 密码写入 `.env`、README 或前端代码。
 
 ## 构建
@@ -207,6 +210,56 @@ Content-Type: application/json
 
 如果 `scope_type=sessions` 没有数据，前端 session 口径会缺少完整聚合能力。
 
+### DAU / 日活跃用户口径
+
+运营看板优先使用：
+
+```sql
+dws_app_funnel_stage_daily.scope_type = 'users'
+AND dws_app_funnel_stage_daily.step_code = 'dau'
+-- 指标字段：subject_count
+```
+
+不要在多维广告履约表上直接 `SUM(dws_ad_fulfillment_daily.dau_users)` 当总 DAU。该表按广告格式、广告位、国家、版本等维度展开，跨维度求和容易重复或偏差。`dws_app_event_quality_daily.firebase_dau / middle_platform_dau` 更适合做 Firebase 与中台 DAU 对账，不建议作为广告/VPN 漏斗主起点。
+
+广告 Session 漏斗的第一步不是 DAU，应使用前台 Session 基准：
+
+```sql
+dws_app_funnel_stage_daily.scope_type = 'sessions'
+AND step_code IN ('app_foreground_sessions', 'foreground_sessions', 'session_start')
+-- 指标字段：subject_count
+```
+
+如果后端没有返回前台 Session 基准，前端会显示“前台 Session 基准（待补）/ 暂无数据”，避免误判为日活真的为 0。
+
+### AI 分析文档
+
+前端提供“AI 分析文档”入口，会把当前页面的筛选条件、核心指标、漏斗步骤、最大断点、页面路径、原因分布和数据状态提交给后端：
+
+```http
+POST /api/v3/jkcl-funnel/ai-analysis
+Authorization: Bearer <company_login_token>
+Content-Type: application/json
+```
+
+安全要求：
+
+- AI token 只能配置在后端环境变量或密钥系统中，不能写入前端代码、构建产物或 README。
+- 后端必须复用 OA 登录 token 校验员工身份和项目权限。
+- 后端代调绩效系统 AI 服务或 DeepSeek 服务，并返回 `markdown` / `analysis` / `summary` 字段。
+- 建议后端环境变量名：`PERFORMANCE_AI_TOKEN` 或 `DEEPSEEK_API_KEY`。
+
+响应示例：
+
+```json
+{
+  "code": 0,
+  "data": {
+    "markdown": "## 当前最大问题\n..."
+  }
+}
+```
+
 ## 身份登录
 
 前端使用公司邮箱登录。
@@ -255,6 +308,18 @@ git diff --check
 
 ## 最近关键变更
 
+- V76：完成 5 项运营修复：菜单「规范与配置」改为「打点测试配置」；新建配置关联项目改用线上项目列表；广告履约卡片在 DWS 缺字段时用 DWD 补算；页面路径不再把缺 page×step 字段误判为真 0，使用 DWD screen/current/from_screen 回填；广告资格诊断展示 blocked_reason 中文说明、占拦截比例、占全部资格检查比例和优化建议。
+- V75：继续拆细 VPN 连接成功后的广告链路，新增连接后广告资格检查、资格通过、广告请求、展示尝试等节点，并把连接后资格拦截原因纳入大流失原因拆解。
+- V79：按 `project_projects.internal_project_category` 识别套利V/服务器V/安卓套利V/iOS V 项目。VPN 品类广告 UV/Session 漏斗统一为 `DAU/前台Session → 进入首页 → 资格检查 → 资格通过 → 广告机会 → 缓存命中|实时请求 → 加载成功 → 广告可展示 → 展示尝试 → Impression → Paid`；资格不通过原因保留为 `blocked_reason` 分支。VPN 功能漏斗保持 `DAU → 首页 → 点击连接 → 权限 → 节点 → 连接开始 → 连接成功`。
+- V78：首页人数改为自动降级口径：优先 `core_action.actionName=vpn_home`；当其无数据时，主漏斗自动使用 `screen_view.screen_name=MainActivity`。页面标记当前采用信号，并按有效首页 UV 计算首页到达率和首页→连接按钮点击率。
+- V77：VPN 工作台新增「进入首页多信号对照」，同时返回 `core_action.vpn_home`、`screen_view.MainActivity`、`screen_view.home_page`、两页联合去重、`element_click.home_connect_button`、`core_action.vpn_connect` 的 UV/Session/事件次数、DAU 覆盖率和未记录人数；代理信号不冒充正式口径。
+- V76：VPN 主漏斗新增「进入首页」节点，顺序修正为 DAU → 首页 → 连接按钮点击；首页严格按 `core_action.actionName=vpn_home`，连接按钮点击率改为 `element_click UV / vpn_home UV`。若已有后续点击但 `vpn_home=0`，页面标记为埋点/入库缺失，不解释为真实用户流失。
+- V75：纠正 VPN 连接按钮点击口径，只统计 `element_click`；`core_action` 保留为核心事件，不再计入按钮点击 UV、session、次数和流失诊断。
+- V74：VPN 工作台补真实后端计算口径，按 DWD 明细计算连接按钮点击、权限可用、节点选择、连接开始、连接成功，并新增大流失原因拆解表，展示字段口径、返回值、流失率和建议动作。
+- V73：修正 VPN 前置链路展示，连接按钮点击/权限通过字段缺失但后续连接尝试有数据时，不再误显示 0，改为“待补字段”并提示后端补充聚合口径。
+- V72：漏斗断点新增“功能入口 × 技术定位”下钻，把页面流失继续拆到具体入口、事件链、缺失步骤、字段取值和研发可执行修复点。
+- V71：整体放大运营页面小字体，提升表格、诊断说明、漏斗步骤、AI 文档、筛选控件和 Firebase 配置页可读性。
+- V70：新增 AI 分析文档入口；单项目分析新增“人均浏览者比例”（`impression_count / impression_users`）；修正 DAU 优先口径为 `dws_app_funnel_stage_daily(scope_type=users, step_code=dau).subject_count`；Session 漏斗缺前台 Session 基准时不再显示日活为 0。
 - 项目列表改为从 Firebase 配置库拉取，不再展示无 Firebase 配置项目。
 - 前端 API Base 改为默认同源，修复部署在 `analysis.geekforest.ai` 时仍请求旧域名导致项目列表 HTTP 404 的问题。
 - 增加 V1.8 VPN 功能分析菜单和 VPN 弱网专项指标。

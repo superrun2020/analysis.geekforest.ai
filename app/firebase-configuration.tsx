@@ -1,157 +1,216 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { DialogKey } from "./action-dialog";
+import { firebaseTaskLogsApi, type FirebaseCheckLog, type FirebaseSyncRunLog } from "./firebase-task-logs-api";
 
 type ConfigTab = "overview" | "resources" | "runs" | "latest" | "health" | "api";
 type StatusTone = "good" | "warn" | "bad" | "blue" | "neutral";
 
-const connections = [
-  { id: "FBC-20260801-001", name: "增长业务 Firebase", auth: "服务账号", projects: 2, apps: 3, binding: "3/3", latest: "8分钟前", success: "99.8%", owner: "Oliver", status: "健康", tone: "good" as StatusTone },
-  { id: "FBC-20260803-002", name: "Launcher Firebase", auth: "服务账号", projects: 1, apps: 1, binding: "0/1", latest: "11分钟前", success: "100%", owner: "数据平台", status: "待确认", tone: "warn" as StatusTone },
-];
-
-const bindings = [
-  { project: "IRAN-VPN-01", name: "Iran Fast VPN", app: "Android · com.jkcl.iran.vpn", connection: "增长业务 Firebase", firebaseProject: "jkcl-growth-prod", firebaseApp: "…android:iranvpn01", dataset: "analytics_482910731", event: "8分钟前", delay: "8m", status: "正常", tone: "good" as StatusTone },
-  { project: "IRAN-VPN-01", name: "Iran Fast VPN", app: "iOS · ai.geekforest.iranvpn", connection: "增长业务 Firebase", firebaseProject: "jkcl-growth-prod", firebaseApp: "…ios:iranvpn01", dataset: "analytics_482910731", event: "12分钟前", delay: "12m", status: "正常", tone: "good" as StatusTone },
-  { project: "CLEAN-MAX-03", name: "Clean Max", app: "Android · com.jkcl.clean.max", connection: "增长业务 Firebase", firebaseProject: "clean-suite-prod", firebaseApp: "…android:cleanmax03", dataset: "analytics_497226510", event: "9分钟前", delay: "9m", status: "正常", tone: "good" as StatusTone },
-  { project: "待关联", name: "Aivora Launcher", app: "Android · com.aivora.launcher", connection: "Launcher Firebase", firebaseProject: "aivora-launcher-prod", firebaseApp: "…android:aivora", dataset: "analytics_501832744", event: "11分钟前", delay: "—", status: "待绑定", tone: "warn" as StatusTone },
-];
-
-const runs = [
-  { id: "FBR-20260813-1530", project: "IRAN-VPN-01", type: "INTRADAY", range: "今天 15:15–15:30", started: "15:31:02", duration: "2m18s", source: "2,140,682", oss: "2,140,682", adb: "2,138,941", quarantine: "1,741", watermark: "15:29:41", status: "成功", tone: "good" as StatusTone },
-  { id: "FBR-20260813-1515", project: "CLEAN-MAX-03", type: "INTRADAY", range: "今天 15:00–15:15", started: "15:16:01", duration: "1m44s", source: "814,209", oss: "814,209", adb: "813,802", quarantine: "407", watermark: "15:14:52", status: "成功", tone: "good" as StatusTone },
-  { id: "FBR-20260813-DAILY", project: "IRAN-VPN-01", type: "DAILY", range: "8月10日–8月12日", started: "03:15:00", duration: "8m09s", source: "26,802,411", oss: "26,802,411", adb: "26,799,830", quarantine: "2,581", watermark: "8月12日", status: "成功", tone: "good" as StatusTone },
-  { id: "FBR-20260813-1445", project: "AIVORA-LAUNCHER", type: "INTRADAY", range: "今天 14:30–14:45", started: "14:46:00", duration: "12s", source: "0", oss: "0", adb: "0", quarantine: "0", watermark: "—", status: "跳过·未识别", tone: "warn" as StatusTone },
-  { id: "FBR-20260813-1430", project: "IRAN-VPN-01", type: "INTRADAY", range: "今天 14:15–14:30", started: "14:31:02", duration: "3m12s", source: "2,032,801", oss: "2,032,801", adb: "1,841,226", quarantine: "0", watermark: "14:29:54", status: "ADB重试成功", tone: "blue" as StatusTone },
-];
-
-const healthChecks = [
-  { layer: "认证", check: "服务账号凭证", endpoint: "Google OAuth Token", checked: "15:40:11", duration: "182ms", status: "成功", detail: "firebase-reader@…iam.gserviceaccount.com", tone: "good" as StatusTone },
-  { layer: "资源发现", check: "Firebase项目列表", endpoint: "Firebase Management API", checked: "15:40:12", duration: "426ms", status: "成功", detail: "发现3个Project", tone: "good" as StatusTone },
-  { layer: "资源发现", check: "Firebase App列表", endpoint: "Firebase Management API", checked: "15:40:13", duration: "515ms", status: "成功", detail: "发现4个App", tone: "good" as StatusTone },
-  { layer: "原始事件", check: "BigQuery Dataset与Query", endpoint: "BigQuery API", checked: "15:40:15", duration: "1.82s", status: "成功", detail: "3个analytics_*可读", tone: "good" as StatusTone },
-  { layer: "最新数据", check: "events_intraday_*", endpoint: "BigQuery API", checked: "15:40:17", duration: "1.31s", status: "成功", detail: "最大事件时间15:32:09", tone: "good" as StatusTone },
-  { layer: "原始归档", check: "OSS写入与回读", endpoint: "OSS PutObject/HeadObject", checked: "15:34:27", duration: "624ms", status: "成功", detail: "manifest checksum一致", tone: "good" as StatusTone },
-  { layer: "事实入库", check: "ADB批量写入", endpoint: "ADB Batch Upsert", checked: "15:35:09", duration: "4.18s", status: "成功", detail: "2,138,941行", tone: "good" as StatusTone },
-  { layer: "实时对照", check: "GA4 Realtime", endpoint: "Analytics Data API", checked: "15:40:20", duration: "781ms", status: "未授权", detail: "不影响BigQuery原始事件同步", tone: "warn" as StatusTone },
-];
-
 const apiRows = [
-  ["POST", "/api/v1/firebase/connections", "connection_id", "创建连接并异步验证", "Idempotency-Key + secret_ref"],
-  ["POST", "/api/v1/firebase/connections/{id}/verify", "run_id", "验证凭证和全部读权限", "AUTH/BQ/GA4检查"],
-  ["POST", "/api/v1/firebase/connections/{id}/discover", "run_id", "发现一个或多个Project/App", "幂等UPSERT远端资源"],
-  ["GET", "/api/v1/firebase/connections/{id}/resources", "—", "读取连接资源树", "Project→App→Dataset→自动识别"],
-  ["POST", "/api/v1/firebase/apps/resolve", "run_id", "按平台和包名识别内部项目", "歧义资源进入待确认清单"],
-  ["POST", "/api/v1/firebase/sync-runs", "run_id", "单个或批量触发同步", "INTRADAY/DAILY/BACKFILL"],
-  ["POST", "/api/v1/firebase/sync-runs/{id}/retry", "run_id", "重试失败Run", "保留parent_run_id"],
-  ["GET", "/api/v1/firebase/overview", "—", "读取总览与水位", "连接、绑定、延迟、成功率"],
-  ["GET", "/api/v1/firebase/latest-events", "—", "读取最新标准化事件", "默认100条、字段脱敏"],
-  ["GET", "/api/v1/firebase/health-checks", "—", "读取各层接口健康", "认证/发现/BQ/OSS/ADB"],
+  ["GET", "/api/v3/{securePath}/firebase-integration/sync-runs", "items[]", "读取真实 Firebase 同步任务", "当前页面已接入"],
+  ["GET", "/api/v3/{securePath}/firebase-integration/check-logs", "items[]", "读取真实 Firebase 资源/权限检查", "当前页面已接入"],
+  ["GET", "/api/v3/{securePath}/firebase-integration/connections", "items[]", "读取连接、Project、App、Dataset 资源树", "接口待接入；页面不展示假资源"],
+  ["GET", "/api/v3/{securePath}/firebase-integration/latest-events", "items[]", "读取最新标准化事件明细", "接口待接入；页面不展示假事件"],
+  ["POST", "/api/v3/{securePath}/firebase-integration/sync-runs", "run_id", "触发单项目或批量同步", "接口待接入；当前仅保留入口"],
+  ["POST", "/api/v3/{securePath}/firebase-integration/sync-runs/{id}/retry", "run_id", "重试失败同步任务", "接口待接入；失败重试由后端任务实现"],
 ];
 
 function StatusBadge({ tone, children }: { tone: StatusTone; children: React.ReactNode }) {
   return <span className={`badge badge-${tone}`}>{children}</span>;
 }
 
+function isFailedStatus(status?: string | null) {
+  return ["FAILED", "FAIL", "ERROR", "TIMEOUT", "NO_DATA"].includes(String(status ?? "").toUpperCase());
+}
+
+function isRunningStatus(status?: string | null) {
+  return ["QUEUED", "RUNNING", "PROCESSING", "VERIFYING", "RETRYING"].includes(String(status ?? "").toUpperCase());
+}
+
+function statusTone(status?: string | null): StatusTone {
+  if (isFailedStatus(status)) return "bad";
+  if (isRunningStatus(status)) return "blue";
+  if (["SUCCESS", "SUCCEEDED", "PASS", "PASSED", "OK", "READY"].includes(String(status ?? "").toUpperCase())) return "good";
+  if (!status) return "neutral";
+  return "warn";
+}
+
+function statusLabel(status?: string | null) {
+  const normalized = String(status ?? "").toUpperCase();
+  const labels: Record<string, string> = {
+    SUCCESS: "成功",
+    SUCCEEDED: "成功",
+    PASS: "通过",
+    PASSED: "通过",
+    OK: "正常",
+    READY: "就绪",
+    FAILED: "失败",
+    FAIL: "失败",
+    ERROR: "错误",
+    TIMEOUT: "超时",
+    NO_DATA: "无数据",
+    QUEUED: "排队中",
+    RUNNING: "运行中",
+    PROCESSING: "处理中",
+    VERIFYING: "验证中",
+    RETRYING: "重试中",
+  };
+  return labels[normalized] ?? status ?? "未知";
+}
+
+function formatRows(value?: number | null) {
+  if (value === undefined || value === null) return "—";
+  return Number(value).toLocaleString();
+}
+
+function formatTime(value?: string | null) {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString("zh-CN", { hour12: false });
+}
+
+function formatDuration(value?: number | null) {
+  if (value === undefined || value === null) return "—";
+  if (value < 1000) return `${value}ms`;
+  if (value < 60000) return `${(value / 1000).toFixed(1)}s`;
+  return `${Math.floor(value / 60000)}m${Math.round((value % 60000) / 1000)}s`;
+}
+
+function projectLabel(row: FirebaseSyncRunLog | FirebaseCheckLog) {
+  return row.projectCode || row.projectName || row.packageName || row.connectionName || "未关联项目";
+}
+
+function EmptyRealState({ title, detail, action }: { title: string; detail: string; action?: React.ReactNode }) {
+  return <div className="empty-table-state"><strong>{title}</strong><span>{detail}</span>{action}</div>;
+}
+
 export function FirebaseConfiguration({ openDialog, notify }: { openDialog: (dialog: DialogKey) => void; notify: (message: string) => void }) {
   const [tab, setTab] = useState<ConfigTab>("overview");
   const [projectFilter, setProjectFilter] = useState("all");
-  const visibleRuns = useMemo(() => runs.filter((item) => projectFilter === "all" || item.project === projectFilter), [projectFilter]);
+  const [syncRuns, setSyncRuns] = useState<FirebaseSyncRunLog[]>([]);
+  const [checkLogs, setCheckLogs] = useState<FirebaseCheckLog[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [refreshIndex, setRefreshIndex] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError("");
+    Promise.all([
+      firebaseTaskLogsApi.syncRuns({ page: 1, pageSize: 100 }),
+      firebaseTaskLogsApi.checkLogs({ page: 1, pageSize: 100 }),
+    ])
+      .then(([runs, logs]) => {
+        if (cancelled) return;
+        setSyncRuns(runs.items ?? []);
+        setCheckLogs(logs.items ?? []);
+      })
+      .catch((reason) => {
+        if (cancelled) return;
+        setSyncRuns([]);
+        setCheckLogs([]);
+        setError(reason instanceof Error ? reason.message : "Firebase 真实接口读取失败");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [refreshIndex]);
 
   const tabs: Array<[ConfigTab, string]> = [
     ["overview", "接入总览"], ["resources", "连接与资源"], ["runs", "同步任务"], ["latest", "最新数据"], ["health", "接口健康"], ["api", "接口说明"],
   ];
 
+  const projects = useMemo(() => Array.from(new Set([...syncRuns.map(projectLabel), ...checkLogs.map(projectLabel)].filter(Boolean))), [syncRuns, checkLogs]);
+  const visibleRuns = useMemo(() => syncRuns.filter((item) => projectFilter === "all" || projectLabel(item) === projectFilter), [syncRuns, projectFilter]);
+  const visibleChecks = useMemo(() => checkLogs.filter((item) => projectFilter === "all" || projectLabel(item) === projectFilter), [checkLogs, projectFilter]);
+  const failedRuns = syncRuns.filter((item) => isFailedStatus(item.status)).length;
+  const runningRuns = syncRuns.filter((item) => isRunningStatus(item.status)).length;
+  const failedChecks = checkLogs.filter((item) => isFailedStatus(item.status)).length;
+  const resources = useMemo(() => {
+    const map = new Map<string, { connectionName: string; projectCode: string; app: string; firebaseProjectId: string; firebaseAppId: string; lastSeen: string }>();
+    [...syncRuns, ...checkLogs].forEach((row) => {
+      const key = [row.connectionName, row.firebaseProjectId, row.firebaseAppId, row.packageName].join("|");
+      if (!key.replace(/\|/g, "")) return;
+      const lastSeen = ("startedAt" in row ? row.startedAt || row.createdAt : row.checkedAt || row.createdAt) ?? "";
+      map.set(key, {
+        connectionName: row.connectionName || "未命名连接",
+        projectCode: projectLabel(row),
+        app: row.packageName || row.appName || row.firebaseAppIdentifier || "未返回 App 标识",
+        firebaseProjectId: row.firebaseProjectId || "未返回 Firebase Project",
+        firebaseAppId: row.firebaseAppId || "未返回 Firebase App",
+        lastSeen,
+      });
+    });
+    return Array.from(map.values());
+  }, [syncRuns, checkLogs]);
+  const latestRun = syncRuns.find((item) => item.startedAt || item.finishedAt || item.createdAt);
+  const latestCheck = checkLogs.find((item) => item.checkedAt || item.createdAt);
+
   return (
     <section className="surface firebase-config-v5 firebase-integration-v13">
       <div className="surface-title firebase-config-head">
-        <div><div className="eyebrow">Firebase 分析内置数据源控制面</div><h2>Firebase 数据源设置</h2><p>凭证连接 → 多Firebase项目 → 多App自动识别 → OSS → ADB</p></div>
-        <div className="config-actions"><button className="secondary-button" onClick={() => openDialog("firebase-sync")}>立即同步</button><button className="primary-button" onClick={() => openDialog("firebase-connection")}>＋ 新建连接</button></div>
+        <div><div className="eyebrow">Firebase 真实数据源控制面</div><h2>Firebase 数据源设置</h2><p>只展示后端接口返回或日志可推导的数据；未接入接口不展示演示数字。</p></div>
+        <div className="config-actions"><button className="secondary-button" onClick={() => { setRefreshIndex((value) => value + 1); notify("正在重新读取 Firebase 真实任务日志"); }}>刷新真实日志</button><button className="primary-button" onClick={() => openDialog("firebase-connection")}>＋ 新建连接</button></div>
       </div>
 
       <div className="config-tabbar firebase-main-tabs" role="tablist">
         {tabs.map(([key, label]) => <button key={key} className={tab === key ? "active" : ""} onClick={() => setTab(key)}>{label}</button>)}
       </div>
 
-      <div className="firebase-demo-banner" role="status"><span>演示数据</span><p><strong>页面流程、字段和接口契约已完成，当前数字不代表真实 Firebase 状态。</strong>接入密钥引用、Firebase Project 权限及 project_projects 实际表结构后，才会切换为真实资源、最新事件和接口健康结果。</p></div>
+      <div className="firebase-demo-banner real-data-banner" role="status"><span>真实数据</span><p><strong>本页已移除演示项目、演示事件和演示健康状态。</strong>同步任务与检查记录来自线上接口；连接资源树和最新事件明细在专用接口接入前，只展示日志中能真实推导出的信息。</p></div>
 
-      {tab === "overview" && <div className="config-tab-content">
+      {error && <div className="firebase-log-state warn"><strong>Firebase 控制接口未返回真实数据</strong><p>{error}。当前不会展示任何演示数字，请检查后端地址、securePath、登录态和 firebase-integration 接口。</p></div>}
+      {loading && <EmptyRealState title="正在读取 Firebase 真实接口" detail="读取同步任务和接口检查日志中，请稍候。" />}
+
+      {!loading && tab === "overview" && <div className="config-tab-content">
         <div className="firebase-overview-metrics">
-          <button onClick={() => setTab("resources")}><span>有效连接</span><strong>2</strong><small>凭证有效 · 3个Firebase项目</small></button>
-          <button onClick={() => setTab("resources")}><span>Firebase App</span><strong>4</strong><small>Android 3 · iOS 1</small></button>
-          <button onClick={() => setTab("resources")}><span>App 自动识别</span><strong>3/4</strong><small>按平台＋包名匹配 · 待确认1</small></button>
-          <button onClick={() => setTab("latest")}><span>最新源事件</span><strong>8分钟前</strong><small>BigQuery Intraday 15:32</small></button>
-          <button onClick={() => setTab("runs")}><span>24h同步成功率</span><strong>99.8%</strong><small>287成功 · 1已恢复</small></button>
-          <button onClick={() => setTab("health")}><span>接口异常</span><strong>1</strong><small>GA4 Realtime未授权</small></button>
+          <button onClick={() => setTab("resources")}><span>日志可识别项目</span><strong>{projects.length || "—"}</strong><small>{projects.length ? "由同步/检查日志推导" : "暂无真实日志"}</small></button>
+          <button onClick={() => setTab("resources")}><span>日志可识别资源</span><strong>{resources.length || "—"}</strong><small>Firebase Project/App/包名</small></button>
+          <button onClick={() => setTab("runs")}><span>同步任务</span><strong>{syncRuns.length || "—"}</strong><small>{runningRuns ? `${runningRuns} 个运行中` : "最近任务记录"}</small></button>
+          <button onClick={() => setTab("runs")}><span>失败任务</span><strong>{failedRuns}</strong><small>来自真实 status 字段</small></button>
+          <button onClick={() => setTab("health")}><span>检查记录</span><strong>{checkLogs.length || "—"}</strong><small>{failedChecks ? `${failedChecks} 个失败` : "服务账号/Firebase/BQ"}</small></button>
+          <button onClick={() => setTab("latest")}><span>最近任务时间</span><strong>{formatTime(latestRun?.startedAt || latestRun?.finishedAt || latestRun?.createdAt).slice(11) || "—"}</strong><small>{formatTime(latestRun?.startedAt || latestRun?.finishedAt || latestRun?.createdAt).slice(0, 10) || "暂无"}</small></button>
         </div>
         <div className="firebase-pipeline-v13">
-          {[["1","密钥引用","2个只读连接","good"],["2","Firebase资源","3 Project · 4 App","good"],["3","BigQuery Export","日表+Intraday可读","good"],["4","OSS Raw","最近归档15:34","good"],["5","ADB事实表","水位15:31","good"],["6","面板与验收","延迟8分钟","good"]].map(([no,title,detail,tone], index) => <div key={title}><span className={tone}>{no}</span><strong>{title}</strong><small>{detail}</small>{index < 5 && <i>→</i>}</div>)}
+          {[["1","连接日志","sync-runs / check-logs","good"],["2","资源推导","从真实日志提取 Project/App","blue"],["3","同步水位","range_start / range_end","blue"],["4","ADB写入","adb_rows / source_rows","blue"],["5","错误隔离","status / error_message","blue"],["6","运营面板","无接口则空态","good"]].map(([no,title,detail,tone], index) => <div key={title}><span className={tone}>{no}</span><strong>{title}</strong><small>{detail}</small>{index < 5 && <i>→</i>}</div>)}
         </div>
         <div className="firebase-overview-grid">
-          <div className="surface nested-surface"><div className="surface-title"><div><h3>接入资源</h3><p>一个连接可访问一个或多个Firebase项目</p></div><button className="text-button" onClick={() => setTab("resources")}>查看资源树</button></div>
-            <div className="firebase-account-cards">{connections.map((item) => <button key={item.id} onClick={() => setTab("resources")}><header><strong>{item.name}</strong><StatusBadge tone={item.tone}>{item.status}</StatusBadge></header><small>{item.id} · {item.auth}</small><div><span><b>{item.projects}</b> Project</span><span><b>{item.apps}</b> App</span><span><b>{item.binding}</b> 已识别</span></div><footer>最新数据 {item.latest} · 同步 {item.success}</footer></button>)}</div>
+          <div className="surface nested-surface"><div className="surface-title"><div><h3>最近同步任务</h3><p>真实 sync-runs 返回；无返回时显示空态。</p></div><button className="text-button" onClick={() => setTab("runs")}>全部任务</button></div>
+            {syncRuns.length ? <div className="firebase-recent-runs">{syncRuns.slice(0, 5).map((run) => <button key={run.runId} onClick={() => setTab("runs")}><span className={`run-state-dot ${statusTone(run.status)}`} /><div><strong>{projectLabel(run)} · {run.runType || "SYNC"}</strong><small>{formatTime(run.rangeStart)} → {formatTime(run.rangeEnd)}</small></div><div><b>{formatRows(run.adbRows)}</b><small>ADB行数</small></div><StatusBadge tone={statusTone(run.status)}>{statusLabel(run.status)}</StatusBadge></button>)}</div> : <EmptyRealState title="暂无真实同步任务" detail="后端返回 sync-runs 后这里会展示项目、范围、源行数、ADB行数和状态。" />}
           </div>
-          <div className="surface nested-surface"><div className="surface-title"><div><h3>最近同步</h3><p>同时显示接口成功与数据落库结果</p></div><button className="text-button" onClick={() => setTab("runs")}>全部任务</button></div>
-            <div className="firebase-recent-runs">{runs.slice(0,4).map((run) => <button key={run.id} onClick={() => setTab("runs")}><span className={`run-state-dot ${run.tone}`} /><div><strong>{run.project} · {run.type}</strong><small>{run.range} · {run.duration}</small></div><div><b>{run.adb}</b><small>ADB行数</small></div><StatusBadge tone={run.tone}>{run.status}</StatusBadge></button>)}</div>
+          <div className="surface nested-surface"><div className="surface-title"><div><h3>最近接口检查</h3><p>真实 check-logs 返回；用于判断权限和资源可读性。</p></div><button className="text-button" onClick={() => setTab("health")}>全部检查</button></div>
+            {checkLogs.length ? <div className="firebase-recent-runs">{checkLogs.slice(0, 5).map((log) => <button key={log.logId} onClick={() => setTab("health")}><span className={`run-state-dot ${statusTone(log.status)}`} /><div><strong>{projectLabel(log)} · {log.checkType || "CHECK"}</strong><small>{log.firebaseProjectId || log.connectionName || "未返回资源"}</small></div><div><b>{formatDuration(log.durationMs)}</b><small>耗时</small></div><StatusBadge tone={statusTone(log.status)}>{statusLabel(log.status)}</StatusBadge></button>)}</div> : <EmptyRealState title="暂无真实检查日志" detail="后端返回 check-logs 后这里会展示认证、Firebase、BigQuery 和 Dataset 检查结果。" />}
           </div>
-        </div>
-        <div className="binding-notice"><span>i</span><div><strong>项目配置与 Firebase 数据源解耦</strong><p>系统按平台＋包名与 project_projects 自动匹配 App；无法唯一识别的资源只标记“待确认”，不再单独提供项目绑定菜单。</p></div></div>
-      </div>}
-
-      {tab === "resources" && <div className="config-tab-content">
-        <div className="firebase-section-toolbar"><div><strong>连接与远端资源</strong><span>重新发现会更新 Project、App、Dataset，并按平台＋包名自动识别内部项目</span></div><button onClick={() => notify("演示模式：接入后将调用资源发现接口")}>重新发现全部资源</button></div>
-        <div className="firebase-resource-tree-v13">
-          <article><header><div><span className="resource-icon">F</span><p><strong>增长业务 Firebase</strong><small>FBC-20260801-001 · firebase-reader@…iam.gserviceaccount.com</small></p></div><StatusBadge tone="good">连接健康</StatusBadge></header>
-            <section><div className="tree-line" /><div className="resource-project"><header><div><span>Project</span><p><strong>jkcl-growth-prod</strong><small>JKCL Growth Production · properties/482910731</small></p></div><StatusBadge tone="good">READY</StatusBadge></header><div className="resource-dataset"><b>BigQuery</b><code>jkcl-growth-prod.analytics_482910731</code><span>US · events_* + events_intraday_*</span></div><div className="resource-app-grid"><button onClick={() => notify("Android Iran Fast VPN 已自动识别为 IRAN-VPN-01")}><strong>Android · Iran Fast VPN</strong><small>com.jkcl.iran.vpn</small><span>自动识别 IRAN-VPN-01 · 最新8分钟前</span></button><button onClick={() => notify("iOS Iran Fast VPN 已自动识别为 IRAN-VPN-01")}><strong>iOS · Iran Fast VPN</strong><small>ai.geekforest.iranvpn</small><span>自动识别 IRAN-VPN-01 · 最新12分钟前</span></button></div></div>
-            <div className="resource-project"><header><div><span>Project</span><p><strong>clean-suite-prod</strong><small>Cleaner Suite · properties/497226510</small></p></div><StatusBadge tone="good">READY</StatusBadge></header><div className="resource-dataset"><b>BigQuery</b><code>clean-suite-prod.analytics_497226510</code><span>US · events_* + events_intraday_*</span></div><div className="resource-app-grid"><button onClick={() => notify("Clean Max 已自动识别为 CLEAN-MAX-03")}><strong>Android · Clean Max</strong><small>com.jkcl.clean.max</small><span>自动识别 CLEAN-MAX-03 · 最新9分钟前</span></button></div></div></section>
-          </article>
-          <article><header><div><span className="resource-icon">F</span><p><strong>Launcher Firebase</strong><small>FBC-20260803-002 · launcher-reader@…iam.gserviceaccount.com</small></p></div><StatusBadge tone="warn">1个App待确认</StatusBadge></header>
-            <section><div className="tree-line" /><div className="resource-project"><header><div><span>Project</span><p><strong>aivora-launcher-prod</strong><small>Aivora Launcher · properties/501832744</small></p></div><StatusBadge tone="good">READY</StatusBadge></header><div className="resource-dataset"><b>BigQuery</b><code>aivora-launcher-prod.analytics_501832744</code><span>US · events_* + events_intraday_*</span></div><div className="resource-app-grid"><button className="unbound" onClick={() => notify("com.aivora.launcher 未唯一匹配，请先补全 project_projects 平台与包名")}><strong>Android · Aivora Launcher</strong><small>com.aivora.launcher</small><span>自动识别待确认 · 检查 project_projects</span></button></div></div></section>
-          </article>
         </div>
       </div>}
 
-      {tab === "runs" && <div className="config-tab-content">
-        <div className="firebase-section-toolbar"><label>内部项目<select value={projectFilter} onChange={(event) => setProjectFilter(event.target.value)}><option value="all">全部项目</option>{Array.from(new Set(runs.map((item) => item.project))).map((item) => <option key={item}>{item}</option>)}</select></label><div><button onClick={() => notify("失败任务筛选已应用")}>只看失败</button><button onClick={() => openDialog("firebase-sync")}>立即同步</button></div></div>
-        <div className="table-wrap"><table><thead><tr><th>Run / 项目</th><th>类型</th><th>源范围</th><th>开始/耗时</th><th>BigQuery源行</th><th>OSS</th><th>ADB写入</th><th>隔离</th><th>事件水位</th><th>状态</th><th>操作</th></tr></thead><tbody>{visibleRuns.map((run) => <tr key={run.id}><td><strong>{run.id}</strong><small>{run.project}</small></td><td><code>{run.type}</code></td><td>{run.range}</td><td><strong>{run.started}</strong><small>{run.duration}</small></td><td>{run.source}</td><td>{run.oss}</td><td>{run.adb}</td><td>{run.quarantine}</td><td>{run.watermark}</td><td><StatusBadge tone={run.tone}>{run.status}</StatusBadge></td><td><button className="table-link" onClick={() => notify(`${run.id}阶段日志已展开`)}>详情</button></td></tr>)}</tbody></table></div>
-        <div className="firebase-run-legend"><span><i className="good" />INTRADAY：当天每15分钟</span><span><i className="blue" />DAILY：每天重刷最近3天</span><span><i className="warn" />BACKFILL：首次或人工历史回补</span><span>日表落地后替换同日Intraday临时结果</span></div>
+      {!loading && tab === "resources" && <div className="config-tab-content">
+        <div className="firebase-section-toolbar"><label>内部项目<select value={projectFilter} onChange={(event) => setProjectFilter(event.target.value)}><option value="all">全部项目</option>{projects.map((item) => <option key={item}>{item}</option>)}</select></label><div><button onClick={() => notify("资源发现专用接口待接入；当前只展示日志可推导资源")}>重新发现资源</button></div></div>
+        {resources.length ? <div className="table-wrap"><table><thead><tr><th>内部项目</th><th>连接</th><th>Firebase Project</th><th>Firebase App</th><th>App / 包名</th><th>最近出现</th><th>来源</th></tr></thead><tbody>{resources.filter((item) => projectFilter === "all" || item.projectCode === projectFilter).map((item) => <tr key={`${item.connectionName}${item.firebaseProjectId}${item.firebaseAppId}${item.app}`}><td><strong>{item.projectCode}</strong></td><td>{item.connectionName}</td><td><code>{item.firebaseProjectId}</code></td><td><code>{item.firebaseAppId}</code></td><td>{item.app}</td><td>{formatTime(item.lastSeen)}</td><td><StatusBadge tone="blue">日志推导</StatusBadge></td></tr>)}</tbody></table></div> : <EmptyRealState title="连接与资源树接口待接入" detail="当前 sync-runs/check-logs 没有可推导的 Firebase Project/App 信息；不会展示旧的演示资源树。" action={<button className="primary-button" onClick={() => openDialog("firebase-connection")}>去配置连接</button>} />}
       </div>}
 
-      {tab === "latest" && <div className="config-tab-content">
-        <div className="firebase-latest-watermarks">{bindings.filter((item) => item.project !== "待关联").map((item) => <button key={`${item.project}${item.app}`} onClick={() => notify(`${item.project}最新事件明细已筛选`)}><header><strong>{item.project}</strong><StatusBadge tone={item.tone}>FRESH</StatusBadge></header><small>{item.app}</small><div><span>源事件<b>{item.event}</b></span><span>ADB入库<b>{item.delay}</b></span><span>24h事件<b>{item.project === "IRAN-VPN-01" ? "8.42M" : "2.16M"}</b></span><span>事件名<b>{item.project === "IRAN-VPN-01" ? "46" : "39"}</b></span></div></button>)}</div>
-        <div className="surface nested-surface"><div className="surface-title"><div><h3>最新标准化事件</h3><p>来自ADB事实表；原始完整参数保存在OSS，不在页面展示敏感字段</p></div><StatusBadge tone="blue">自动刷新30秒</StatusBadge></div><div className="table-wrap"><table><thead><tr><th>事件时间</th><th>项目</th><th>Firebase App</th><th>事件</th><th>event_id</th><th>版本</th><th>国家</th><th>质量</th><th>入库延迟</th></tr></thead><tbody>{[["15:32:09.418","IRAN-VPN-01","Android","jk_ad_paid_event","evt…2a23","1.8.1 (109)","IR","通过","7m52s"],["15:32:09.401","IRAN-VPN-01","Android","jk_ad_impression","evt…2a22","1.8.1 (109)","IR","通过","7m52s"],["15:32:08.972","IRAN-VPN-01","iOS","jk_ad_show_attempt","evt…b019","1.8.0 (42)","TR","P1缺失","7m53s"],["15:32:08.146","CLEAN-MAX-03","Android","jk_ad_opportunity","evt…0d18","3.2.0 (320)","EG","通过","8m11s"],["15:32:07.884","IRAN-VPN-01","Android","jk_ad_request","evt…2a10","1.8.1 (109)","IR","通过","7m54s"]].map((row) => <tr key={`${row[0]}${row[4]}`}>{row.map((cell,index) => <td key={index}>{index === 7 ? <StatusBadge tone={cell === "通过" ? "good" : "warn"}>{cell}</StatusBadge> : index === 3 || index === 4 ? <code>{cell}</code> : cell}</td>)}</tr>)}</tbody></table></div></div>
-        <div className="binding-notice"><span>i</span><div><strong>当天数据为什么能看见</strong><p>有events_intraday_*时可读取当天原始事件，通常延迟数分钟至数十分钟；没有Streaming Export时只能等待events_*日表。页面必须展示真实水位，不能把“同步接口成功”误写成“数据已最新”。</p></div></div>
+      {!loading && tab === "runs" && <div className="config-tab-content">
+        <div className="firebase-section-toolbar"><label>内部项目<select value={projectFilter} onChange={(event) => setProjectFilter(event.target.value)}><option value="all">全部项目</option>{projects.map((item) => <option key={item}>{item}</option>)}</select></label><div><button onClick={() => setProjectFilter("all")}>全部</button><button onClick={() => openDialog("firebase-sync")}>立即同步</button></div></div>
+        <div className="table-wrap"><table><thead><tr><th>Run / 项目</th><th>类型</th><th>源范围</th><th>开始/结束</th><th>BigQuery源行</th><th>ADB写入</th><th>耗时</th><th>Firebase资源</th><th>状态</th><th>错误</th></tr></thead><tbody>{visibleRuns.length ? visibleRuns.map((run) => <tr key={run.runId} className={isFailedStatus(run.status) ? "row-warn" : ""}><td><strong>Run #{run.runId}</strong><small>{projectLabel(run)}</small></td><td><code>{run.runType || "SYNC"}</code></td><td><strong>{formatTime(run.rangeStart)}</strong><small>{formatTime(run.rangeEnd)}</small></td><td><strong>{formatTime(run.startedAt)}</strong><small>{formatTime(run.finishedAt)}</small></td><td>{formatRows(run.sourceRows)}</td><td>{formatRows(run.adbRows)}</td><td>{formatDuration(run.durationMs)}</td><td><strong>{run.firebaseProjectId || "—"}</strong><small>{run.firebaseAppId || run.firebaseAppIdentifier || run.packageName || "—"}</small></td><td><StatusBadge tone={statusTone(run.status)}>{statusLabel(run.status)}</StatusBadge></td><td>{run.errorMessage || "—"}</td></tr>) : <tr><td colSpan={10}><EmptyRealState title="暂无真实同步任务" detail={error ? "接口未返回任务日志。" : "当前筛选下没有 sync-runs 记录。"} /></td></tr>}</tbody></table></div>
       </div>}
 
-      {tab === "health" && <div className="config-tab-content">
-        <div className="firebase-health-summary"><div><span className="status-dot" /><strong>核心链路可用</strong><small>认证→BigQuery→OSS→ADB全部成功</small></div><div><span>最近检查</span><strong>15:40:20</strong><small>每5分钟自动检查</small></div><div><span>成功项</span><strong>7 / 8</strong><small>GA4 Realtime为可选项</small></div><div><span>数据水位</span><strong>15:32:09</strong><small>当前延迟8分钟</small></div></div>
-        <div className="table-wrap"><table><thead><tr><th>层级</th><th>检查项</th><th>接口</th><th>最近检查</th><th>耗时</th><th>结果</th><th>详情/错误</th><th>操作</th></tr></thead><tbody>{healthChecks.map((item) => <tr key={item.check} className={item.status !== "成功" ? "row-warn" : ""}><td>{item.layer}</td><td><strong>{item.check}</strong></td><td><code>{item.endpoint}</code></td><td>{item.checked}</td><td>{item.duration}</td><td><StatusBadge tone={item.tone}>{item.status}</StatusBadge></td><td>{item.detail}</td><td><button className="table-link" onClick={() => notify(`${item.check}已重新检查`)}>重新检查</button></td></tr>)}</tbody></table></div>
-        <div className="connection-checks"><div><span>✓</span><p><strong>凭证安全</strong><small>数据库只保存secret_ref</small></p></div><div><span>✓</span><p><strong>任务幂等</strong><small>Idempotency-Key + Run锁</small></p></div><div><span>✓</span><p><strong>事件不静默丢弃</strong><small>缺ID/未知事件进入质量标记</small></p></div><div><span>✓</span><p><strong>全链路审计</strong><small>request_id、操作人、错误阶段</small></p></div></div>
+      {!loading && tab === "latest" && <div className="config-tab-content">
+        <div className="binding-notice"><span>i</span><div><strong>最新标准化事件明细接口尚未接入</strong><p>为了避免误导，这里不展示旧的 jk_ad_impression / event_id 演示行。当前只能从同步任务日志展示真实任务水位；需要后端补充 latest-events 接口后才能展示事件明细。</p></div></div>
+        <div className="table-wrap"><table><thead><tr><th>项目</th><th>任务类型</th><th>源数据范围</th><th>开始/结束</th><th>源行数</th><th>ADB行数</th><th>状态</th><th>错误</th></tr></thead><tbody>{visibleRuns.length ? visibleRuns.slice(0, 20).map((run) => <tr key={`latest-${run.runId}`} className={isFailedStatus(run.status) ? "row-warn" : ""}><td><strong>{projectLabel(run)}</strong><small>{run.packageName || run.appName || run.connectionName || "—"}</small></td><td><code>{run.runType || "SYNC"}</code></td><td><strong>{formatTime(run.rangeStart)}</strong><small>{formatTime(run.rangeEnd)}</small></td><td><strong>{formatTime(run.startedAt)}</strong><small>{formatTime(run.finishedAt)}</small></td><td>{formatRows(run.sourceRows)}</td><td>{formatRows(run.adbRows)}</td><td><StatusBadge tone={statusTone(run.status)}>{statusLabel(run.status)}</StatusBadge></td><td>{run.errorMessage || "—"}</td></tr>) : <tr><td colSpan={8}><EmptyRealState title="暂无真实水位记录" detail="sync-runs 无返回时无法判断最新事件水位；不会使用静态 8 分钟、15:32 这类假水位。" /></td></tr>}</tbody></table></div>
+      </div>}
+
+      {!loading && tab === "health" && <div className="config-tab-content">
+        <div className="firebase-health-summary"><div><span className="status-dot" /><strong>{failedChecks ? "存在检查失败" : checkLogs.length ? "检查日志已返回" : "暂无检查记录"}</strong><small>只按真实 check-logs 判断</small></div><div><span>最近检查</span><strong>{formatTime(latestCheck?.checkedAt || latestCheck?.createdAt).slice(11) || "—"}</strong><small>{formatTime(latestCheck?.checkedAt || latestCheck?.createdAt).slice(0, 10) || "暂无"}</small></div><div><span>失败项</span><strong>{failedChecks}</strong><small>失败状态来自后端</small></div><div><span>检查总数</span><strong>{checkLogs.length || "—"}</strong><small>当前筛选返回</small></div></div>
+        <div className="table-wrap"><table><thead><tr><th>检查项 / 日志ID</th><th>项目</th><th>Firebase资源</th><th>检查时间</th><th>耗时</th><th>结果</th><th>错误码</th><th>详情</th></tr></thead><tbody>{visibleChecks.length ? visibleChecks.map((item) => <tr key={item.logId} className={isFailedStatus(item.status) ? "row-warn" : ""}><td><strong>{item.checkType || "CHECK"}</strong><small>Log #{item.logId}</small></td><td><strong>{projectLabel(item)}</strong><small>{item.projectName || item.packageName || item.connectionName || "—"}</small></td><td><strong>{item.firebaseProjectId || "—"}</strong><small>{item.firebaseAppId || item.firebaseAppIdentifier || "—"}</small></td><td>{formatTime(item.checkedAt || item.createdAt)}</td><td>{formatDuration(item.durationMs)}</td><td><StatusBadge tone={statusTone(item.status)}>{statusLabel(item.status)}</StatusBadge></td><td>{item.errorCode || "—"}</td><td>{item.message || "—"}</td></tr>) : <tr><td colSpan={8}><EmptyRealState title="暂无真实接口检查日志" detail="后端返回 check-logs 后才展示服务账号、Firebase App、BigQuery Dataset 和 events 表检查结果。" /></td></tr>}</tbody></table></div>
       </div>}
 
       {tab === "api" && <div className="config-tab-content api-reference">
-        <div className="api-principles"><div><strong>统一响应</strong><code>{`{ ok, data, error, request_id }`}</code></div><div><strong>幂等创建</strong><code>Idempotency-Key</code></div><div><strong>项目主数据</strong><code>project_projects</code></div><div><strong>凭证</strong><code>secret_ref only</code></div></div>
-        <div className="table-wrap"><table><thead><tr><th>方法</th><th>接口</th><th>返回业务ID</th><th>用途</th><th>规则</th></tr></thead><tbody>{apiRows.map((row) => <tr key={row[1]}><td><span className={row[0] === "GET" ? "method-get" : "method-post"}>{row[0]}</span></td><td><code>{row[1]}</code></td><td><code>{row[2]}</code></td><td>{row[3]}</td><td>{row[4]}</td></tr>)}</tbody></table></div>
-        <div className="api-response-example"><div><strong>连接创建响应</strong><pre>{`{
-  "ok": true,
-  "data": {
-    "connection_id": "FBC_01J...",
-    "status": "VERIFYING",
-    "verification_run_id": "FBR_01J..."
-  },
-  "error": null,
-  "request_id": "req_01J..."
-}`}</pre></div><div><strong>失败响应</strong><pre>{`{
-  "ok": false,
-  "data": null,
-  "error": {
-    "code": "FIREBASE_BIGQUERY_DATASET_NOT_FOUND",
-    "message": "未检测到Analytics导出Dataset",
-    "retryable": false
-  },
-  "request_id": "req_01J..."
-}`}</pre></div></div>
+        <div className="api-principles"><div><strong>页面原则</strong><code>无真实接口 = 空态</code></div><div><strong>已接真实接口</strong><code>sync-runs / check-logs</code></div><div><strong>项目主数据</strong><code>project_projects / firebase_connections</code></div><div><strong>凭证</strong><code>secret_ref only</code></div></div>
+        <div className="table-wrap"><table><thead><tr><th>方法</th><th>接口</th><th>返回业务ID</th><th>用途</th><th>当前状态</th></tr></thead><tbody>{apiRows.map((row) => <tr key={row[1]}><td><span className={row[0] === "GET" ? "method-get" : "method-post"}>{row[0]}</span></td><td><code>{row[1]}</code></td><td><code>{row[2]}</code></td><td>{row[3]}</td><td>{row[4]}</td></tr>)}</tbody></table></div>
       </div>}
     </section>
   );
