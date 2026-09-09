@@ -2432,6 +2432,25 @@ const versionCompareDimensions = [
   { key: "platform", label: "平台" },
 ];
 
+/** Compare dimension labels naturally: version parts as numbers, rest lexically. */
+function compareDimensionLabels(a: string, b: string): number {
+  const parse = (value: string) => value.split(/[.\s]+/).map((part) => {
+    const num = parseInt(part, 10);
+    return Number.isNaN(num) || String(num) !== part ? part.toLowerCase() : num;
+  });
+  const left = parse(a);
+  const right = parse(b);
+  const length = Math.max(left.length, right.length);
+  for (let i = 0; i < length; i++) {
+    const l = left[i] ?? (typeof right[i] === "number" ? 0 : "");
+    const r = right[i] ?? (typeof left[i] === "number" ? 0 : "");
+    if (l === r) continue;
+    if (typeof l === "number" && typeof r === "number") return l - r;
+    return String(l).localeCompare(String(r), "zh-CN");
+  }
+  return 0;
+}
+
 function VersionComparison({ data, domain, projectCode, appIdentifier, platform, country, appVersion, initialRange, refreshKey }: {
   data: AnyRow;
   domain: "ads" | "vpn" | "quality";
@@ -2491,6 +2510,27 @@ function VersionComparison({ data, domain, projectCode, appIdentifier, platform,
   useEffect(() => { setBaselineLabel(suggested); }, [suggested]);
   const baseline = rows.find((row) => text(row.dimensionLabel) === baselineLabel) ?? rows[0];
 
+  const [sortKey, setSortKey] = useState<string>("");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
+  const toggleSort = (key: string) => {
+    if (sortKey === key) {
+      setSortDirection((direction) => (direction === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setSortKey(key);
+    setSortDirection(key === "__dimension" ? "asc" : "desc");
+  };
+  const sortedRows = useMemo(() => {
+    if (!sortKey) return rows;
+    const direction = sortDirection === "asc" ? 1 : -1;
+    return [...rows].sort((a, b) => {
+      if (sortKey === "__dimension") {
+        return direction * compareDimensionLabels(text(a.dimensionLabel), text(b.dimensionLabel));
+      }
+      return direction * (Number(a[sortKey] ?? 0) - Number(b[sortKey] ?? 0));
+    });
+  }, [rows, sortKey, sortDirection]);
+
   const rateDelta = (value: unknown, base: unknown) => {
     const delta = Number(value ?? 0) - Number(base ?? 0);
     return <span className={delta < -3 ? "version-delta bad" : delta > 3 ? "version-delta good" : "version-delta"}>{delta > 0 ? "+" : ""}{delta.toFixed(2)}pp</span>;
@@ -2527,10 +2567,10 @@ function VersionComparison({ data, domain, projectCode, appIdentifier, platform,
         {error && <div className="version-compare-loading warn">{error}</div>}
         {!rows.length && !loading ? <section className="surface"><div className="empty-table-state"><strong>当前筛选范围没有可对比数据</strong><span>请确认所选维度字段已上报，并选择包含多个分组的日期范围。</span></div></section> : <section className="surface"><div className="table-wrap"><table className="version-compare-table">
           <thead><tr>
-            <th>{dimensionLabel}</th>
-            {selectedColumns.map((column) => <th key={column.key}>{column.label}{column.unit === "ratio" && <small title="同组分子分母计算的比例">%</small>}</th>)}
+            <th className="sortable" onClick={() => toggleSort("__dimension")}><span>{dimensionLabel}</span>{sortKey === "__dimension" && <span className="sort-indicator">{sortDirection === "asc" ? "▲" : "▼"}</span>}</th>
+            {selectedColumns.map((column) => <th key={column.key} className="sortable" onClick={() => toggleSort(column.key)}><span>{column.label}</span>{column.unit === "ratio" && <small title="同组分子分母计算的比例">%</small>}{sortKey === column.key && <span className="sort-indicator">{sortDirection === "asc" ? "▲" : "▼"}</span>}</th>)}
           </tr></thead>
-          <tbody>{rows.map((row) => {
+          <tbody>{sortedRows.map((row) => {
             const sampleSmall = Number(row.dauUsers ?? 0) < 100;
             const isBaseline = text(row.dimensionLabel) === text(baseline?.dimensionLabel);
             return <tr key={text(row.dimensionLabel)} className={isBaseline ? "row-baseline" : ""}>

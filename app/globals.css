@@ -2780,6 +2780,9 @@ body {
 .domain-badge { display: inline-block; padding: 2px 8px; border-radius: 999px; background: #e8f1fb; color: #1f5f8b; font-size: 11px; font-weight: 700; }
 .ip-badge { display: inline-block; padding: 2px 8px; border-radius: 999px; background: #f0f4f0; color: #16845b; font-size: 11px; font-weight: 700; }
 .muted { color: #a2adba; }
+.version-compare-table th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+.version-compare-table th.sortable:hover { color: #1f5f8b; }
+.sort-indicator { margin-left: 5px; font-size: 10px; color: #1f5f8b; }
 @media (max-width: 1180px) {
   .domain-report-layout { grid-template-columns: 1fr; }
 }
