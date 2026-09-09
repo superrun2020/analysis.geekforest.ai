@@ -2673,7 +2673,9 @@ export function OperationalFunnel(props: Props) {
   const dates = useMemo(() => dateRange(props.range), [props.range]);
   const queryUnit: FunnelUnit = domain === "vpn" ? "sessions" : domain === "ads" ? unit : "users";
   const scope = props.page === "overview" ? "overview" : "project";
-  const activePage: FunnelPageKey = props.page === "workbench" ? workbenchSection : props.page;
+  const activePage: FunnelPageKey = props.page === "workbench"
+    ? (workbenchSection === "versions" ? "workbench" : workbenchSection)
+    : props.page;
   const activeKey = packageKey(activePage, scope === "overview" ? "ads" : domain, scope === "overview" ? "users" : queryUnit);
   const data = dataPackage[activeKey] ?? null;
   const packageLabel = scope === "overview" ? "多项目总览" : "核心漏斗、流失诊断、页面路径、证据明细、问题闭环、口径快照";
