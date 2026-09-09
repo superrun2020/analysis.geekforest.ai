@@ -2029,21 +2029,53 @@ function VpnPrerequisiteInsight({ rows, data }: { rows: AnyRow[]; data: AnyRow }
   </section><VpnDropoffReasonBoard data={data} /></>;
 }
 
-function AdNetworkFailureMatrix({ data }: { data: AnyRow }) {
+const MATRIX_DIMENSIONS: Array<{ key: string; label: string }> = [
+  { key: "country_code", label: "国家" },
+  { key: "asn", label: "ASN" },
+  { key: "server_id", label: "节点" },
+  { key: "protocol", label: "协议" },
+];
+
+function matrixDimensionLabel(key: string): string {
+  return MATRIX_DIMENSIONS.find((dimension) => dimension.key === key)?.label ?? key;
+}
+
+function AdNetworkFailureMatrix({ data, dimensions, onDimensionsChange }: { data: AnyRow; dimensions: string[]; onDimensionsChange: (dimensions: string[]) => void }) {
   const matrix = data.adNetworkFailureMatrix ?? {};
   const rows = Array.isArray(matrix.rows) ? matrix.rows : [];
   const totals = matrix.totals ?? {};
+  const activeDimensions: string[] = Array.isArray(matrix.dimensions) && matrix.dimensions.length ? (matrix.dimensions as string[]) : dimensions;
   const topBad = rows.find((row: AnyRow) => row.status === "bad") ?? rows[0];
   const statusLabel: Record<string, string> = { bad: "严重", warn: "关注", good: "正常", unavailable: "暂无数据" };
+
+  const toggleDimension = (key: string) => {
+    if (activeDimensions.includes(key)) {
+      if (activeDimensions.length <= 1) return;
+      onDimensionsChange(activeDimensions.filter((dimension) => dimension !== key));
+      return;
+    }
+    onDimensionsChange([...activeDimensions, key]);
+  };
+
+  const renderDimensionCell = (dimension: string, value: unknown) => {
+    if (dimension === "server_id") return <code>{text(value)}</code>;
+    return <strong>{text(value)}</strong>;
+  };
+
   return <section className="surface ad-network-failure-matrix">
     <div className="surface-title">
       <div>
         <h2>广告网络失败横向报表</h2>
-        <p>按国家 × ASN × 节点 × 协议横向看广告请求、加载失败、展示失败和展示拦截，定位是不是某个网络出口影响变现。</p>
+        <p>按所选维度横向看广告请求、加载失败、展示失败和展示拦截的成功率与失败率；去掉某个维度即向上聚合。</p>
       </div>
       <span>{matrix.available === false ? "等待网络上下文" : `${rows.length} 个组合`}</span>
     </div>
     {matrix.available === false ? <div className="diagnosis-no-reasons compact warn"><strong>当前没有可聚合的网络维度广告事件</strong><p>{text(matrix.reason)}。需要广告事件携带 <code>country_code</code>、<code>asn</code>、<code>server_id</code>、<code>protocol</code>，否则只能看到普通广告漏斗，不能定位到具体网络出口。</p></div> : <>
+      <div className="matrix-dimension-picker">
+        <span>聚合维度：</span>
+        {MATRIX_DIMENSIONS.map((dimension) => <label key={dimension.key} className={activeDimensions.includes(dimension.key) ? "active" : ""} title={activeDimensions.includes(dimension.key) ? "取消勾选即向上聚合" : "勾选后按此维度细分"}><input type="checkbox" checked={activeDimensions.includes(dimension.key)} onChange={() => toggleDimension(dimension.key)} disabled={activeDimensions.includes(dimension.key) && activeDimensions.length <= 1} /><span>{dimension.label}</span></label>)}
+        <small>至少保留一个维度；去掉维度 = 向上聚合</small>
+      </div>
       <div className="matrix-summary-grid">
         <article><span>请求数</span><strong>{number(totals.requestCount)}</strong><small>ad_request · request_id 去重</small></article>
         <article><span>加载成功率</span><strong>{percent(totals.loadSuccessRate)}</strong><small>{number(totals.loadSuccessCount)} 成功 / {number(totals.requestCount)} 请求</small></article>
@@ -2051,20 +2083,21 @@ function AdNetworkFailureMatrix({ data }: { data: AnyRow }) {
         <article><span>Impression</span><strong>{number(totals.impressionCount)}</strong><small>展示率 {percent(totals.impressionRate)}</small></article>
       </div>
       {topBad && <div className={`matrix-risk-card ${topBad.status === "bad" ? "bad" : topBad.status === "warn" ? "warn" : "good"}`}>
-        <div><span>优先排查组合</span><strong>{text(topBad.countryCode)} × ASN {text(topBad.asn)} × 节点 {text(topBad.serverId)} × {text(topBad.protocol)}</strong></div>
+        <div><span>优先排查组合</span><strong>{activeDimensions.map((dimension) => `${matrixDimensionLabel(dimension)} ${text((topBad.dimensions ?? {})[dimension] ?? "unknown")}`).join(" × ")}</strong></div>
         <div><span>主要问题</span><strong>{statusLabel[String(topBad.status)] ?? text(topBad.status)} · 失败 {number(topBad.failureCount)} · {percent(topBad.failureRate)}</strong></div>
         <div><span>建议动作</span><strong>{text(topBad.suggestion)}</strong></div>
       </div>}
       <div className="table-wrap">
         <table className="ad-network-failure-table">
-          <thead><tr><th>国家</th><th>ASN</th><th>节点</th><th>协议</th><th>请求</th><th>加载成功</th><th>加载失败</th><th>展示失败/拦截</th><th>Impression</th><th>失败率</th><th>Top原因</th><th>建议</th></tr></thead>
+          <thead><tr>
+            {activeDimensions.map((dimension) => <th key={dimension}>{matrixDimensionLabel(dimension)}</th>)}
+            <th>请求</th><th>加载成功</th><th>加载失败</th><th>展示失败/拦截</th><th>Impression</th><th>失败率</th><th>Top原因</th><th>建议</th>
+          </tr></thead>
           <tbody>{rows.slice(0, 50).map((row: AnyRow, index: number) => {
             const reasons = Array.isArray(row.topReasons) ? row.topReasons : [];
-            return <tr key={`${row.countryCode}-${row.asn}-${row.serverId}-${row.protocol}-${index}`} className={row.status === "bad" ? "row-bad" : row.status === "warn" ? "row-warn" : ""}>
-              <td><strong>{text(row.countryCode)}</strong></td>
-              <td>{text(row.asn)}</td>
-              <td><code>{text(row.serverId)}</code></td>
-              <td>{text(row.protocol)}</td>
+            const dimValues: AnyRow = row.dimensions ?? {};
+            return <tr key={`${activeDimensions.map((dimension) => text(dimValues[dimension] ?? "unknown")).join("-")}-${index}`} className={row.status === "bad" ? "row-bad" : row.status === "warn" ? "row-warn" : ""}>
+              {activeDimensions.map((dimension) => <td key={dimension}>{renderDimensionCell(dimension, dimValues[dimension] ?? "unknown")}</td>)}
               <td>{number(row.requestCount)}</td>
               <td><strong>{percent(row.loadSuccessRate)}</strong><small>{number(row.loadSuccessCount)}</small></td>
               <td>{number(row.loadFailedCount)}</td>
@@ -2077,7 +2110,7 @@ function AdNetworkFailureMatrix({ data }: { data: AnyRow }) {
           })}</tbody>
         </table>
       </div>
-      <div className="matrix-footnote">字段来源：{text(matrix.source)}；口径：仅统计携带 VPN/网络上下文的广告事件，维度为 <code>country_code × asn × server_id × protocol</code>。后续如果要更快，可以把这张报表沉淀成独立 DWS 日汇总表。</div>
+      <div className="matrix-footnote">字段来源：{text(matrix.source)}；口径：仅统计携带 VPN/网络上下文的广告事件，当前维度为 {activeDimensions.map((dimension) => <code key={dimension}>{dimension}</code>)}。去掉维度即向上聚合，成功率/失败率按所选维度组合重算。</div>
     </>}
   </section>;
 }
@@ -2849,6 +2882,7 @@ export function OperationalFunnel(props: Props) {
   const [matrixData, setMatrixData] = useState<AnyRow | null>(null);
   const [matrixLoading, setMatrixLoading] = useState(false);
   const [matrixError, setMatrixError] = useState("");
+  const [matrixDimensions, setMatrixDimensions] = useState<string[]>(["country_code", "asn", "server_id", "protocol"]);
   const dates = useMemo(() => dateRange(props.range), [props.range]);
   const queryUnit: FunnelUnit = domain === "vpn" ? "sessions" : domain === "ads" ? unit : "users";
   const scope = props.page === "overview" ? "overview" : "project";
@@ -3046,11 +3080,11 @@ export function OperationalFunnel(props: Props) {
       country: props.country === "全部国家" ? undefined : props.country,
       appVersion: props.appVersion === "全部版本" ? undefined : props.appVersion.split(" ")[0],
     };
-    queryFunnel<AnyRow>({ ...baseQuery, page: "network_failure_matrix", domain: "vpn", unit: "users", evidenceMode: "ad", pageSize: 50 }, controller.signal)
+    queryFunnel<AnyRow>({ ...baseQuery, page: "network_failure_matrix", domain: "vpn", unit: "users", evidenceMode: "ad", pageSize: 50, dimensions: matrixDimensions }, controller.signal)
       .then((result) => { if (active) { setMatrixData(result); setMatrixLoading(false); } })
       .catch((reason) => { if (active) { setMatrixError(reason instanceof Error ? reason.message : "查询失败"); setMatrixLoading(false); } });
     return () => { active = false; controller.abort(); };
-  }, [props.page, props.enabled, props.projectCode, props.appIdentifier, props.platform, props.country, props.appVersion, props.refreshKey, dates]);
+  }, [props.page, props.enabled, props.projectCode, props.appIdentifier, props.platform, props.country, props.appVersion, props.refreshKey, dates, matrixDimensions]);
 
   useEffect(() => {
     if (!props.enabled || Object.keys(dataPackage).length === 0) {
@@ -3096,7 +3130,7 @@ export function OperationalFunnel(props: Props) {
     if (matrixLoading) return <StatePanel kind="loading" message="正在读取广告网络失败横向报表，按国家 × ASN × 节点 × 协议横向聚合…" />;
     if (matrixError) return <StatePanel kind="error" message={matrixError} retry={() => setRetryKey((value) => value + 1)} />;
     if (!matrixData) return <StatePanel kind="empty" message="当前筛选范围没有可聚合的网络维度广告事件。" />;
-    return <div className="page-stack"><AdNetworkFailureMatrix data={matrixData} /></div>;
+    return <div className="page-stack"><AdNetworkFailureMatrix data={matrixData} dimensions={matrixDimensions} onDimensionsChange={setMatrixDimensions} /></div>;
   }
 
   if (loading) return <StatePanel kind="loading" message={`正在优先加载当前页面：${packageLabel}。核心页完成后立即展示，其他数据后台继续查询。`}><QueryProgressPanel items={progressItems} compact /></StatePanel>;

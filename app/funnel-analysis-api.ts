@@ -15,6 +15,7 @@ export type FunnelQuery = {
   domain?: "ads" | "vpn" | "quality";
   unit?: "users" | "sessions" | "events";
   dimension?: string;
+  dimensions?: string[];
   startStep?: string;
   endStep?: string;
   screenName?: string;

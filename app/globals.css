@@ -2711,6 +2711,13 @@ body {
   word-break: break-word;
 }
 
+.matrix-dimension-picker { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; padding: 10px 12px; border: 1px dashed #dbe4f0; border-radius: 10px; background: #fbfdff; }
+.matrix-dimension-picker > span { color: #52606d; font-weight: 700; font-size: 13px; }
+.matrix-dimension-picker label { display: inline-flex; align-items: center; gap: 5px; padding: 5px 10px; border: 1px solid #cfd8e3; border-radius: 999px; background: #fff; color: #52606d; font-size: 12px; cursor: pointer; }
+.matrix-dimension-picker label.active { background: #1f5f8b; border-color: #1f5f8b; color: #fff; }
+.matrix-dimension-picker label input { accent-color: #1f5f8b; }
+.matrix-dimension-picker small { margin-left: auto; color: #7b8794; font-size: 12px; }
+
 .matrix-footnote {
   margin-top: 10px;
   padding: 10px 12px;

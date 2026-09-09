@@ -5017,6 +5017,30 @@ class FunnelAnalyticsService
     }
 
     /**
+     * Resolve which dimensions the matrix aggregates by. The frontend sends a
+     * subset of the four network dimensions; anything omitted rolls up into the
+     * remaining ones (aggregation). Unknown values fall back to the full set.
+     *
+     * @param array<string, mixed> $params
+     * @return array<int, string>
+     */
+    private function adNetworkFailureDimensions(array $params): array
+    {
+        $allowed = ['country_code', 'asn', 'server_id', 'protocol'];
+        $requested = $params['dimensions'] ?? null;
+        if (is_array($requested)) {
+            $dimensions = array_values(array_unique(array_filter(
+                $requested,
+                static fn ($dimension): bool => is_string($dimension) && in_array($dimension, $allowed, true)
+            )));
+
+            return $dimensions ?: $allowed;
+        }
+
+        return $allowed;
+    }
+
+    /**
      * Cross table for ad delivery failures under VPN/network dimensions.
      *
      * Ad fulfillment DWS does not contain ASN/node/protocol. Until ETL produces
@@ -5025,42 +5049,34 @@ class FunnelAnalyticsService
      */
     private function adNetworkFailureMatrix(array $params): array
     {
-        $cacheKey = 'jkcl_funnel:ad_network_failure_matrix:v2:' . md5(json_encode(
+        $cacheKey = 'jkcl_funnel:ad_network_failure_matrix:v3:' . md5(json_encode(
             $this->sortForCacheKey($params),
             JSON_UNESCAPED_UNICODE
         ));
 
         return Cache::remember($cacheKey, $this->adNetworkFailureCacheSeconds($params), function () use ($params): array {
             try {
-                $summaryRows = $this->adNetworkFailureSummaryRows($params);
+                $dimensions = $this->adNetworkFailureDimensions($params);
+                $summaryRows = $this->adNetworkFailureSummaryRows($params, $dimensions);
                 if ($summaryRows->isEmpty()) {
                     return [
                         'available' => false,
                         'source' => $this->eventTable(),
                         'reason' => '当前筛选范围没有携带 country/asn/server_id/protocol 网络上下文的广告事件。',
-                        'dimensions' => ['country_code', 'asn', 'server_id', 'protocol'],
+                        'dimensions' => $dimensions,
                         'rows' => [],
                         'totals' => $this->emptyAdNetworkFailureTotals(),
                     ];
                 }
 
-                $reasonRows = $this->adNetworkFailureReasonRows($params)
-                    ->groupBy(fn ($row): string => $this->adNetworkFailureDimensionKey(
-                        (string) $row->country_code,
-                        (string) $row->asn,
-                        (string) $row->server_id,
-                        (string) $row->protocol
-                    ));
+                $reasonRows = $this->adNetworkFailureReasonRows($params, $dimensions)
+                    ->groupBy(fn ($row): string => $this->adNetworkFailureDimensionKey($dimensions, $row));
                 $totals = $this->adNetworkFailureTotals($summaryRows);
                 $rows = $summaryRows
                     ->map(fn ($row): array => $this->formatAdNetworkFailureRow(
                         $row,
-                        $reasonRows->get($this->adNetworkFailureDimensionKey(
-                            (string) $row->country_code,
-                            (string) $row->asn,
-                            (string) $row->server_id,
-                            (string) $row->protocol
-                        ), collect())
+                        $reasonRows->get($this->adNetworkFailureDimensionKey($dimensions, $row), collect()),
+                        $dimensions
                     ))
                     ->sortByDesc('failureScore')
                     ->values()
@@ -5069,10 +5085,10 @@ class FunnelAnalyticsService
                 return [
                     'available' => true,
                     'source' => $this->eventTable(),
-                    'dimensions' => ['country_code', 'asn', 'server_id', 'protocol'],
+                    'dimensions' => $dimensions,
                     'rows' => $rows,
                     'totals' => $totals,
-                    'queryHint' => '按 V1.8 明细表里广告事件携带的 country_code、asn、server_id、protocol 横向聚合；用于定位特定国家/ASN/节点/协议下广告请求、加载和展示失败。',
+                    'queryHint' => '按所选维度（国家/ASN/节点/协议）横向聚合广告请求、加载和展示的成功率与失败率；去掉某个维度即向上聚合。',
                 ];
             } catch (Throwable $exception) {
                 Log::warning('jkcl_ad_network_failure_matrix_failed', [
@@ -5086,7 +5102,7 @@ class FunnelAnalyticsService
                     'available' => false,
                     'source' => $this->eventTable(),
                     'reason' => '广告网络失败横向报表读取失败：' . $exception->getMessage(),
-                    'dimensions' => ['country_code', 'asn', 'server_id', 'protocol'],
+                    'dimensions' => $this->adNetworkFailureDimensions($params),
                     'rows' => [],
                     'totals' => $this->emptyAdNetworkFailureTotals(),
                 ];
@@ -5094,9 +5110,16 @@ class FunnelAnalyticsService
         });
     }
 
-    private function adNetworkFailureSummaryRows(array $params)
+    private function adNetworkFailureSummaryRows(array $params, array $dimensions)
     {
-        return $this->adNetworkFailureEventQuery($params, [
+        $dimensionSql = [
+            'country_code' => "COALESCE(NULLIF(ad.country_code, ''), NULLIF(vpn_ctx.ctx_country_code, ''), 'unknown')",
+            'asn' => "COALESCE(CAST(ad.asn AS CHAR), CAST(vpn_ctx.ctx_asn AS CHAR), 'unknown')",
+            'server_id' => "COALESCE(NULLIF(ad.server_id, ''), NULLIF(vpn_ctx.ctx_server_id, ''), 'unknown')",
+            'protocol' => "COALESCE(NULLIF(ad.protocol, ''), NULLIF(vpn_ctx.ctx_protocol, ''), 'unknown')",
+        ];
+
+        $query = $this->adNetworkFailureEventQuery($params, [
                 'ad_opportunity',
                 'ad_request',
                 'ad_load_success',
@@ -5107,11 +5130,13 @@ class FunnelAnalyticsService
                 'ad_show_blocked',
                 'ad_impression',
                 'ad_paid_event',
-            ])
-            ->selectRaw("COALESCE(NULLIF(ad.country_code, ''), NULLIF(vpn_ctx.ctx_country_code, ''), 'unknown') AS country_code")
-            ->selectRaw("COALESCE(CAST(ad.asn AS CHAR), CAST(vpn_ctx.ctx_asn AS CHAR), 'unknown') AS asn")
-            ->selectRaw("COALESCE(NULLIF(ad.server_id, ''), NULLIF(vpn_ctx.ctx_server_id, ''), 'unknown') AS server_id")
-            ->selectRaw("COALESCE(NULLIF(ad.protocol, ''), NULLIF(vpn_ctx.ctx_protocol, ''), 'unknown') AS protocol")
+            ]);
+
+        foreach ($dimensions as $dimension) {
+            $query->selectRaw($dimensionSql[$dimension] . " AS {$dimension}");
+        }
+
+        return $query
             ->selectRaw("COUNT(*) AS event_count")
             ->selectRaw("COUNT(DISTINCT NULLIF(ad.my_user_id, '')) AS users")
             ->selectRaw("COUNT(DISTINCT CASE WHEN ad.event_name = 'ad_opportunity' THEN NULLIF(ad.my_user_id, '') END) AS opportunity_users")
@@ -5128,24 +5153,33 @@ class FunnelAnalyticsService
             ->selectRaw("SUM(CASE WHEN ad.event_name = 'ad_impression' THEN 1 ELSE 0 END) AS impression_count")
             ->selectRaw("SUM(CASE WHEN ad.event_name = 'ad_paid_event' THEN COALESCE(ad.value_micros, 0) ELSE 0 END) AS revenue_micros")
             ->selectRaw("MAX(ad.event_time_utc) AS latest_event_at")
-            ->groupBy('country_code', 'asn', 'server_id', 'protocol')
+            ->groupBy($dimensions)
             ->orderByDesc('load_failed_count')
             ->orderByDesc('show_failed_count')
             ->limit(80)
             ->get();
     }
 
-    private function adNetworkFailureReasonRows(array $params)
+    private function adNetworkFailureReasonRows(array $params, array $dimensions)
     {
-        return $this->adNetworkFailureEventQuery($params, ['ad_load_failed', 'ad_show_failed', 'ad_show_blocked'])
-            ->selectRaw("COALESCE(NULLIF(ad.country_code, ''), NULLIF(vpn_ctx.ctx_country_code, ''), 'unknown') AS country_code")
-            ->selectRaw("COALESCE(CAST(ad.asn AS CHAR), CAST(vpn_ctx.ctx_asn AS CHAR), 'unknown') AS asn")
-            ->selectRaw("COALESCE(NULLIF(ad.server_id, ''), NULLIF(vpn_ctx.ctx_server_id, ''), 'unknown') AS server_id")
-            ->selectRaw("COALESCE(NULLIF(ad.protocol, ''), NULLIF(vpn_ctx.ctx_protocol, ''), 'unknown') AS protocol")
+        $dimensionSql = [
+            'country_code' => "COALESCE(NULLIF(ad.country_code, ''), NULLIF(vpn_ctx.ctx_country_code, ''), 'unknown')",
+            'asn' => "COALESCE(CAST(ad.asn AS CHAR), CAST(vpn_ctx.ctx_asn AS CHAR), 'unknown')",
+            'server_id' => "COALESCE(NULLIF(ad.server_id, ''), NULLIF(vpn_ctx.ctx_server_id, ''), 'unknown')",
+            'protocol' => "COALESCE(NULLIF(ad.protocol, ''), NULLIF(vpn_ctx.ctx_protocol, ''), 'unknown')",
+        ];
+
+        $query = $this->adNetworkFailureEventQuery($params, ['ad_load_failed', 'ad_show_failed', 'ad_show_blocked']);
+
+        foreach ($dimensions as $dimension) {
+            $query->selectRaw($dimensionSql[$dimension] . " AS {$dimension}");
+        }
+
+        return $query
             ->selectRaw("COALESCE(NULLIF(ad.blocked_reason, ''), NULLIF(ad.error_category, ''), NULLIF(ad.error_domain, ''), NULLIF(ad.error_code, ''), 'unknown') AS reason")
             ->selectRaw("COUNT(*) AS events")
             ->selectRaw("COUNT(DISTINCT NULLIF(ad.my_user_id, '')) AS users")
-            ->groupBy('country_code', 'asn', 'server_id', 'protocol', 'reason')
+            ->groupBy(array_merge($dimensions, ['reason']))
             ->orderByDesc('events')
             ->limit(300)
             ->get();
@@ -5255,8 +5289,12 @@ class FunnelAnalyticsService
         }
     }
 
-    private function formatAdNetworkFailureRow(object $row, iterable $reasonRows): array
+    private function formatAdNetworkFailureRow(object $row, iterable $reasonRows, array $dimensions): array
     {
+        $dimensionValues = [];
+        foreach ($dimensions as $dimension) {
+            $dimensionValues[$dimension] = (string) ($row->{$dimension} ?? 'unknown');
+        }
         $requestCount = (int) ($row->request_count ?? 0);
         $loadSuccessCount = (int) ($row->load_success_count ?? 0);
         $loadFailedCount = (int) ($row->load_failed_count ?? 0);
@@ -5284,10 +5322,11 @@ class FunnelAnalyticsService
         $topReason = $topReasons[0]['reason'] ?? '暂无失败原因';
 
         return [
-            'countryCode' => (string) ($row->country_code ?? 'unknown'),
-            'asn' => (string) ($row->asn ?? 'unknown'),
-            'serverId' => (string) ($row->server_id ?? 'unknown'),
-            'protocol' => (string) ($row->protocol ?? 'unknown'),
+            'dimensions' => $dimensionValues,
+            'countryCode' => $dimensionValues['country_code'] ?? 'unknown',
+            'asn' => $dimensionValues['asn'] ?? 'unknown',
+            'serverId' => $dimensionValues['server_id'] ?? 'unknown',
+            'protocol' => $dimensionValues['protocol'] ?? 'unknown',
             'users' => (int) ($row->users ?? 0),
             'eventCount' => (int) ($row->event_count ?? 0),
             'opportunityUsers' => (int) ($row->opportunity_users ?? 0),
@@ -5403,9 +5442,12 @@ class FunnelAnalyticsService
         return '当前组合没有明显广告网络失败；继续观察请求量、展示量和收入变化。';
     }
 
-    private function adNetworkFailureDimensionKey(string $countryCode, string $asn, string $serverId, string $protocol): string
+    private function adNetworkFailureDimensionKey(array $dimensions, object $row): string
     {
-        return implode('|', [$countryCode, $asn, $serverId, $protocol]);
+        return implode('|', array_map(
+            static fn (string $dimension): string => trim((string) ($row->{$dimension} ?? '')),
+            $dimensions
+        ));
     }
 
     private function context(array $params): array

@@ -49,6 +49,8 @@ class FunnelAnalyticsQueryRequest extends FormRequest
             'domain' => ['nullable', Rule::in(['vpn', 'ads', 'quality'])],
             'unit' => ['nullable', Rule::in(['users', 'sessions', 'events'])],
             'dimension' => ['nullable', Rule::in(['app_version', 'country_code', 'platform', 'network_type', 'device_model', 'ad_format', 'placement'])],
+            'dimensions' => 'nullable|array|min:1|max:4',
+            'dimensions.*' => ['string', Rule::in(['country_code', 'asn', 'server_id', 'protocol'])],
             'startStep' => 'nullable|string|max:100',
             'endStep' => 'nullable|string|max:100',
             'screenName' => 'nullable|string|max:100',
