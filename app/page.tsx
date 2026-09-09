@@ -24,7 +24,7 @@ import { DomainReportPage } from "./domain-report";
 import { trackingApiBaseUrl } from "./api-base-url";
 import { createCodexQueryLinks } from "./codex-query-links-api";
 
-const APP_VERSION = "V118";
+const APP_VERSION = "V119";
 const VERSION_MANIFEST_PATH = "/version.json";
 
 type PageKey =
@@ -56,8 +56,8 @@ type FunnelStage = {
   nonLinear?: boolean;
 };
 type TransitionSelection = { from: string; to: string; rate: string; scope: "users" | "events" };
-type ModuleKey = "global" | "project" | "funnel" | "vpn" | "admob" | "firebase" | "reconcile" | "tracking" | "config" | "firebaseSetup" | "tasks" | "shareAlerts" | "report";
-const moduleKeys = new Set<ModuleKey>(["global", "project", "funnel", "vpn", "admob", "firebase", "reconcile", "tracking", "config", "firebaseSetup", "tasks", "shareAlerts", "report"]);
+type ModuleKey = "global" | "project" | "funnel" | "vpn" | "vpnReport" | "admob" | "firebase" | "reconcile" | "tracking" | "config" | "firebaseSetup" | "tasks" | "shareAlerts" | "report";
+const moduleKeys = new Set<ModuleKey>(["global", "project", "funnel", "vpn", "vpnReport", "admob", "firebase", "reconcile", "tracking", "config", "firebaseSetup", "tasks", "shareAlerts", "report"]);
 const pageKeys = new Set<PageKey>(["overview", "workbench", "diagnosis", "cohort", "path", "evidence", "issues", "snapshot", "network_failure_matrix"]);
 const legacyWorkbenchPages = new Set<PageKey>(["diagnosis", "cohort", "path", "snapshot"]);
 const emptyFilterOptions: FunnelFilterOptions = { projects: [], platforms: [], countries: [], appVersions: [], buildNumbers: [], versions: [] };
@@ -289,13 +289,14 @@ async function createProjectReportShare(snapshot: OperationalReportSnapshot, mod
 const moduleMenus: Array<{ key: ModuleKey; index: string; label: string; group: "经营分析" | "质量治理" }> = [
   { key: "funnel", index: "01", label: "广告漏斗分析中心", group: "经营分析" },
   { key: "vpn", index: "02", label: "VPN功能漏斗分析", group: "经营分析" },
-  { key: "admob", index: "03", label: "AdMob 分析", group: "经营分析" },
-  { key: "firebase", index: "04", label: "Firebase 数据", group: "经营分析" },
-  { key: "reconcile", index: "05", label: "数据对账", group: "经营分析" },
-  { key: "report", index: "06", label: "域名解析报表", group: "经营分析" },
-  { key: "tracking", index: "07", label: "打点测试配置", group: "质量治理" },
-  { key: "tasks", index: "08", label: "任务与告警", group: "质量治理" },
-  { key: "shareAlerts", index: "09", label: "异常报警", group: "质量治理" },
+  { key: "vpnReport", index: "03", label: "VPN诊断报表", group: "经营分析" },
+  { key: "admob", index: "04", label: "AdMob 分析", group: "经营分析" },
+  { key: "firebase", index: "05", label: "Firebase 数据", group: "经营分析" },
+  { key: "reconcile", index: "06", label: "数据对账", group: "经营分析" },
+  { key: "report", index: "07", label: "域名解析报表", group: "经营分析" },
+  { key: "tracking", index: "08", label: "打点测试配置", group: "质量治理" },
+  { key: "tasks", index: "09", label: "任务与告警", group: "质量治理" },
+  { key: "shareAlerts", index: "10", label: "异常报警", group: "质量治理" },
 ];
 
 const moduleCopy: Record<ModuleKey, { title: string; description: string; action: string }> = {
@@ -303,6 +304,7 @@ const moduleCopy: Record<ModuleKey, { title: string; description: string; action
   project: { title: "单项目诊断", description: "围绕单个项目串联用户增长、产品漏斗、广告变现和数据质量", action: "创建诊断任务" },
   funnel: { title: "广告漏斗分析中心", description: "聚焦广告变现链路：DAU、资格检查、广告机会、请求、加载、展示、AV、收入和流失诊断", action: "新建广告诊断" },
   vpn: { title: "VPN功能漏斗分析", description: "基于 V1.8 弱网专项分析 VPN 点击、权限、节点、连接阶段、协议回退、可用性、IP 与会话质量", action: "新建 VPN 诊断" },
+  vpnReport: { title: "VPN诊断报表", description: "按国家、ASN、节点、协议维度查看广告请求、加载、展示的成功率与失败率，维度可选并支持向上聚合", action: "导出 VPN 诊断报表" },
   admob: { title: "AdMob 分析", description: "分析请求、匹配、展示、广告浏览用户、eCPM和收入变化", action: "导出 AdMob 报表" },
   firebase: { title: "Firebase 数据", description: "统一查看活跃、事件质量、版本覆盖、数据源连接和同步健康", action: "查看事件字典" },
   reconcile: { title: "数据对账", description: "对比 Firebase、AdMob、中台与 ADB 的用户、展示和收入口径", action: "发起重新对账" },
@@ -319,6 +321,7 @@ const moduleDialog: Record<ModuleKey, DialogKey> = {
   project: "diagnosis",
   funnel: "diagnosis",
   vpn: "diagnosis",
+  vpnReport: "project-report",
   admob: "admob-report",
   firebase: "event-dictionary",
   reconcile: "reconcile-run",
@@ -338,7 +341,6 @@ const pages: Array<{ key: PageKey; label: string; hint: string }> = [
 ];
 const vpnPages: Array<{ key: PageKey; label: string; hint: string }> = [
   { key: "workbench", label: "单项目分析工作台", hint: "连接·回退·网络诊断" },
-  { key: "network_failure_matrix", label: "广告网络失败横向报表", hint: "国家×ASN×节点×协议" },
 ];
 const pageGuideCopy: Record<PageKey, { purpose: string; source: string; next: string }> = {
   overview: { purpose: "每天 05:00 横向发现所有项目的问题，只展示异常项目，不在这里做项目筛选。", source: "优先读 DWS 全项目快照；只在点击项目下钻时查询单项目明细。", next: "点击问题项目进入单项目分析工作台。" },
@@ -349,7 +351,7 @@ const pageGuideCopy: Record<PageKey, { purpose: string; source: string; next: st
   cohort: { purpose: "按国家、版本、页面、渠道等维度找异常集中人群。", source: "来自 DWS/DWM 切片聚合。", next: "选择最差切片进入证据明细。" },
   path: { purpose: "按页面看访问、退出和链路到达，定位页面承接流失。", source: "来自 screen_view/screen_exit 和 page × step 聚合。", next: "点击核心漏斗断点查看页面级流失。" },
   snapshot: { purpose: "查看当前执行漏斗口径和步骤定义。", source: "来自已发布漏斗配置快照。", next: "发现口径不对时进入打点测试配置修订。" },
-  network_failure_matrix: { purpose: "按国家 × ASN × 节点 × 协议横向看广告请求、加载失败、展示失败和展示拦截。", source: "来自 V1.8 明细事件携带的网络上下文，独立查询、按需加载。", next: "定位到具体网络出口后回 VPN 工作台看连接与协议回退。" },
+  network_failure_matrix: { purpose: "按国家 × ASN × 节点 × 协议横向看广告请求、加载失败、展示失败和展示拦截。", source: "来自 V1.8 明细事件携带的网络上下文，独立查询、按需加载。", next: "定位到具体网络出口后回 VPN 功能漏斗分析查看连接与协议回退。" },
 };
 
 const projects = [
@@ -1091,7 +1093,7 @@ export default function Home() {
     ? `${filterOptions.dateRange.min} 至 ${filterOptions.dateRange.max}`
     : "";
   const draftProjectMeta = useMemo(() => onlineProjects.find((item) => item.projectCode === draftProject), [draftProject, onlineProjects]);
-  const dateSessionDomain = module === "vpn" ? "vpn" : "ads";
+  const dateSessionDomain = module === "vpn" || module === "vpnReport" ? "vpn" : "ads";
   const dateSessionScopeMatches = Boolean(
     dateSessionSummary
       && (dateSessionSummary.projectCode ?? "") === draftProject
@@ -1336,6 +1338,7 @@ export default function Home() {
     project: { title: "项目诊断", detail: "Firebase延迟约8分钟 · AdMob T+3", note: "用户与产品指标可看当天；收入和AdMob效率使用已结算日期，不参与当天实时结论。" },
     funnel: { title: "每日问题快照", detail: isFunnelOverview ? "每日08:00 · 09:30补数 · 全项目问题预览" : "默认昨日DWS汇总 · 今天实时补查", note: isFunnelOverview ? "多项目漏斗预览只展示全项目问题榜，不做项目筛选；需要筛选、页面路径、流失原因、版本差异和证据时，点击项目进入单项目分析。" : "漏斗默认读取前一天已完成汇总；只有筛选包含今天时才补查实时数据。不可计算指标显示暂无数据，收入最终以AdMob结算为准。" },
     vpn: { title: "V1.8 弱网专项", detail: "Firebase T+0 · 会话/连接/阶段关联", note: "本页以 vpn_session_id 串联用户会话，以 connection_id 区分每次真实连接尝试；俄罗斯/伊朗须按 ASN、网络、协议、端口和限制信号联合判断。" },
+    vpnReport: { title: "VPN诊断报表", detail: "广告请求/加载/展示 · 成功率/失败率", note: "按国家、ASN、节点、协议维度查看广告请求、加载和展示的成功率与失败率；维度可自由选择，并可向上聚合定位网络异常。" },
     admob: { title: "AdMob+Firebase", detail: "AdMob T+3结算 · Firebase T+0 AV", note: "本页默认按AdMob结算口径展示收入、请求、匹配和展示；当天广告浏览人数AV可用Firebase jk_ad_impression先看趋势。" },
     firebase: { title: "实时数据", detail: "BigQuery intraday · 延迟约8分钟", note: "本页展示Firebase实时预估、事件质量与同步水位；中台数字仅用于差异诊断。" },
     reconcile: { title: "分源对账", detail: "今日双源 · T+3全量", note: "当天只比较Firebase与中台；含AdMob的最终对账仅在结算日期执行，避免跨时效误报。" },
@@ -1791,7 +1794,7 @@ export default function Home() {
 
           {module === "report" && <DomainReportPage range={range} refreshKey={filtersApplied} />}
 
-          {module !== "funnel" && module !== "vpn" && module !== "shareAlerts" && module !== "report" && <ModulePage module={module as Exclude<ModuleKey, "funnel">} project={project} projectMeta={appliedProjectMeta} onlineProjects={onlineProjects} range={range} platform={platform} country={country} appVersion={appVersion} refreshKey={filtersApplied} configs={configRecords} onProjectChange={(nextProject) => { setProject(nextProject); setDraftProject(nextProject); setFiltersApplied((value) => value + 1); }} openModule={openModule} openDialog={setDialog} openConfigEditor={openConfigEditor} notify={notify} />}
+          {module !== "funnel" && module !== "vpn" && module !== "vpnReport" && module !== "shareAlerts" && module !== "report" && <ModulePage module={module as Exclude<ModuleKey, "funnel">} project={project} projectMeta={appliedProjectMeta} onlineProjects={onlineProjects} range={range} platform={platform} country={country} appVersion={appVersion} refreshKey={filtersApplied} configs={configRecords} onProjectChange={(nextProject) => { setProject(nextProject); setDraftProject(nextProject); setFiltersApplied((value) => value + 1); }} openModule={openModule} openDialog={setDialog} openConfigEditor={openConfigEditor} notify={notify} />}
 
           {module === "funnel" && <OperationalFunnel
             key="operational-ads"
@@ -1814,7 +1817,26 @@ export default function Home() {
           {module === "vpn" && <OperationalFunnel
             key="operational-vpn"
             enabled={!projectLoading && onlineProjects.length > 0}
-            page={page === "network_failure_matrix" ? "network_failure_matrix" : "workbench"}
+            page="workbench"
+            projectCode={project}
+            appIdentifier={appliedProjectMeta?.appIdentifier}
+            range={range}
+            platform={platform}
+            country={country}
+            appVersion={appVersion}
+            refreshKey={filtersApplied}
+            onPageChange={() => undefined}
+            onProjectSelect={(nextProject) => { setProject(nextProject); setDraftProject(nextProject); setFiltersApplied((value) => value + 1); }}
+            initialDomain="vpn"
+            lockDomain
+            softFailure
+            onSnapshotChange={setReportSnapshot}
+          />}
+
+          {module === "vpnReport" && <OperationalFunnel
+            key="operational-vpn-report"
+            enabled={!projectLoading && onlineProjects.length > 0}
+            page="network_failure_matrix"
             projectCode={project}
             appIdentifier={appliedProjectMeta?.appIdentifier}
             range={range}
