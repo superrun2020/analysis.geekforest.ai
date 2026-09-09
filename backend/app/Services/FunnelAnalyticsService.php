@@ -816,6 +816,44 @@ class FunnelAnalyticsService
         ];
     }
 
+    /**
+     * Warm the ad network failure matrix cache for the given filter snapshot.
+     * The matrix is a heavy DWD cross-table (18s+ cold), so precomputing it for
+     * the default "last 7 days / android" view keeps the page instant.
+     *
+     * @param array<string, mixed> $params
+     * @return array<string, mixed>
+     */
+    public function warmNetworkFailureMatrix(array $params, bool $force = false): array
+    {
+        $query = array_filter($params, static fn ($value): bool => $value !== null && $value !== '');
+        $query['page'] = 'network_failure_matrix';
+        $query['domain'] = 'vpn';
+        $query['unit'] = 'users';
+        if (!empty($query['projectCode'])) {
+            $query['projectCode'] = $this->resolveProjectCode((string) $query['projectCode']);
+        }
+
+        if ($force) {
+            $cacheKey = 'jkcl_funnel:ad_network_failure_matrix:v2:' . md5(json_encode(
+                $this->sortForCacheKey($query),
+                JSON_UNESCAPED_UNICODE
+            ));
+            Cache::forget($cacheKey);
+        }
+
+        $startedAt = microtime(true);
+        $matrix = $this->adNetworkFailureMatrix($query);
+
+        return [
+            'projectCode' => $query['projectCode'] ?? null,
+            'platform' => $query['platform'] ?? null,
+            'available' => $matrix['available'] ?? false,
+            'rows' => is_countable($matrix['rows'] ?? null) ? count($matrix['rows']) : 0,
+            'elapsedMs' => (int) round((microtime(true) - $startedAt) * 1000),
+        ];
+    }
+
     /** Generate an AI diagnosis document and a password-protected public share link. */
     public function generateAiAnalysis(array $payload, string $actorEmail, string $frontendBaseUrl): array
     {
@@ -2434,6 +2472,26 @@ class FunnelAnalyticsService
         }
 
         return $dateTo < $today ? 43200 : 120;
+    }
+
+    /**
+     * The ad network failure matrix is a diagnostic cross-table that scans the
+     * DWD event detail table (country × asn × node × protocol). It is far more
+     * expensive than the DWS summaries, so keep its result warm longer: today
+     * refreshes every 30 minutes (ad failure reasons rarely need sub-minute
+     * freshness) and historical windows stay for a full day.
+     */
+    private function adNetworkFailureCacheSeconds(array $params): int
+    {
+        $timezone = (string) ($params['timezone'] ?? config('app.timezone', 'Asia/Shanghai'));
+        try {
+            $today = Carbon::now($timezone)->toDateString();
+            $dateTo = Carbon::parse((string) ($params['dateTo'] ?? $today), $timezone)->toDateString();
+        } catch (Throwable) {
+            return 1800;
+        }
+
+        return $dateTo < $today ? 86400 : 1800;
     }
 
     private function vpnSummaryWorkbenchCacheKey(array $params): string
@@ -4844,7 +4902,7 @@ class FunnelAnalyticsService
             JSON_UNESCAPED_UNICODE
         ));
 
-        return Cache::remember($cacheKey, $this->summaryWorkbenchCacheSeconds($params), function () use ($params): array {
+        return Cache::remember($cacheKey, $this->adNetworkFailureCacheSeconds($params), function () use ($params): array {
             try {
                 $summaryRows = $this->adNetworkFailureSummaryRows($params);
                 if ($summaryRows->isEmpty()) {

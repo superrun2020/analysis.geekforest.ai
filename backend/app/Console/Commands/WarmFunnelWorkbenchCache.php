@@ -16,6 +16,7 @@ class WarmFunnelWorkbenchCache extends Command
         {--domain=vpn : 预热领域：vpn、ads 或 all}
         {--platform=android : 默认预热平台：android、ios 或 all}
         {--limit=120 : 未指定项目时最多预热多少个 Firebase 已绑定项目}
+        {--matrix : 同时预热广告网络失败横向报表缓存（近7天 / android）}
         {--force : 清掉同 key 旧缓存后重新查询}';
 
     protected $description = 'Warm JKCL funnel workbench caches from DWS summaries for Firebase-bound projects';
@@ -81,6 +82,35 @@ class WarmFunnelWorkbenchCache extends Command
         }
 
         $this->info(sprintf('预热完成：success=%d failed=%d', $success, $failed));
+
+        if ($this->option('matrix')) {
+            $matrixSuccess = 0;
+            $matrixFailed = 0;
+            $this->info('开始预热广告网络失败横向报表缓存（近7天 / android）...');
+            foreach ($projects as $project) {
+                $params = $this->buildMatrixParams($project);
+                try {
+                    $result = $service->warmNetworkFailureMatrix($params, (bool) $this->option('force'));
+                    $matrixSuccess++;
+                    $this->line(sprintf(
+                        '[MATRIX OK] %s platform=%s available=%s rows=%d elapsed=%dms',
+                        $result['projectCode'] ?: '-',
+                        $result['platform'] ?: '-',
+                        $result['available'] ? 'yes' : 'no',
+                        $result['rows'],
+                        $result['elapsedMs']
+                    ));
+                } catch (Throwable $error) {
+                    $matrixFailed++;
+                    $this->warn(sprintf(
+                        '[MATRIX FAIL] %s %s',
+                        (string) ($project['projectCode'] ?? '-'),
+                        $error->getMessage()
+                    ));
+                }
+            }
+            $this->info(sprintf('横向报表预热完成：success=%d failed=%d', $matrixSuccess, $matrixFailed));
+        }
 
         return $failed > 0 && $success === 0 ? self::FAILURE : self::SUCCESS;
     }
@@ -183,6 +213,34 @@ class WarmFunnelWorkbenchCache extends Command
         }
         if ($platform !== null && $platform !== '') {
             $params['platform'] = $platform;
+        }
+
+        return $params;
+    }
+
+    /**
+     * Match the frontend default for the ad network failure matrix tab: last 7
+     * days (excluding today, whose DWD detail is still arriving), Android, all
+     * countries/versions.
+     *
+     * @param array<string, mixed> $project
+     * @return array<string, mixed>
+     */
+    private function buildMatrixParams(array $project): array
+    {
+        $timezone = (string) config('app.timezone', 'Asia/Shanghai');
+        $params = [
+            'dateFrom' => Carbon::now($timezone)->subDays(7)->toDateString(),
+            'dateTo' => Carbon::now($timezone)->subDay()->toDateString(),
+            'projectCode' => (string) ($project['projectCode'] ?? ''),
+            'platform' => 'android',
+            'evidenceMode' => 'ad',
+            'pageSize' => 50,
+        ];
+
+        $appIdentifier = trim((string) ($project['appIdentifier'] ?? ''));
+        if ($appIdentifier !== '') {
+            $params['appIdentifier'] = $appIdentifier;
         }
 
         return $params;
