@@ -706,6 +706,7 @@ class FunnelAnalyticsService
             'evidence' => $this->evidence($params),
             'issues' => $this->issues($params),
             'snapshot' => $this->snapshot(),
+            'network_failure_matrix' => $this->networkFailureMatrix($params),
             default => throw new InvalidArgumentException('不支持的漏斗分析页面'),
         };
     }
@@ -1763,7 +1764,7 @@ class FunnelAnalyticsService
             'qualityGates' => $qualityGates,
             'vpnNetworkChanges' => $vpnSupplemental['networkChanges'] ?? [],
             'vpnProtocolNodeRanking' => $vpnSupplemental['protocolNodeRanking'] ?? [],
-            'adNetworkFailureMatrix' => ($params['domain'] ?? 'ads') === 'vpn' ? $this->adNetworkFailureMatrix($params) : [],
+            'adNetworkFailureMatrix' => [],
             'vpnTrend' => $vpnSupplemental['trend'] ?? [],
             'adPrechecks' => $adSupplemental['prechecks'] ?? [],
             'adTrend' => $adSupplemental['trend'] ?? [],
@@ -2297,7 +2298,7 @@ class FunnelAnalyticsService
                 'qualityGates' => $qualityGates,
                 'vpnNetworkChanges' => $vpnSupplemental['networkChanges'] ?? [],
                 'vpnProtocolNodeRanking' => $vpnSupplemental['protocolNodeRanking'] ?? [],
-                'adNetworkFailureMatrix' => $this->adNetworkFailureMatrix($params),
+                'adNetworkFailureMatrix' => [],
                 'vpnTrend' => $vpnSupplemental['trend'] ?? [],
                 'technicalChecks' => $vpnSupplemental['technicalChecks'] ?? [],
                 'versionComparison' => $this->versionComparisonFromDws($params),
@@ -4716,6 +4717,22 @@ class FunnelAnalyticsService
             ->orderByDesc('events')
             ->limit(20)
             ->get();
+    }
+
+    /**
+     * Return the ad network failure matrix as a standalone page so the heavy
+     * DWD cross-table report is only computed on demand instead of blocking the
+     * VPN workbench response.
+     *
+     * @param array<string, mixed> $params
+     * @return array<string, mixed>
+     */
+    private function networkFailureMatrix(array $params): array
+    {
+        return [
+            'context' => $this->context($params),
+            'adNetworkFailureMatrix' => $this->adNetworkFailureMatrix($params),
+        ];
     }
 
     /**

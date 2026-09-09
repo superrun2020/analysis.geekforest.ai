@@ -670,6 +670,7 @@ function queryItemLabel(item: FunnelQueryPackageItem) {
     evidence: "证据明细",
     issues: "问题闭环",
     snapshot: "口径快照",
+    network_failure_matrix: "网络失败横向报表",
   };
   const domainNames: Record<string, string> = { ads: "广告", vpn: "VPN", quality: "质量" };
   const unitNames: Record<string, string> = { users: "用户口径", sessions: "Session口径", events: "事件口径" };
@@ -2436,7 +2437,7 @@ function Workbench({ data, domain, setDomain, unit, setUnit, pageData, diagnosis
   const metrics: AnyRow[] = useMemo(() => addSingleProjectDerivedMetrics(baseMetrics, data, funnelRows, domain), [baseMetrics, data, funnelRows, domain]);
   const [dropoffSelection, setDropoffSelection] = useState<DropoffSelection>(() => bestDropoffSelection(funnelRows));
   useEffect(() => { setDropoffSelection(bestDropoffSelection(funnelRows)); }, [data, domain, funnelRows]);
-  return <div className="page-stack">{!lockDomain && <nav className="operational-tabs"><button className={domain === "ads" ? "active" : ""} onClick={() => setDomain("ads")}>广告变现</button><button className={domain === "vpn" ? "active" : ""} onClick={() => setDomain("vpn")}>VPN 功能</button><button className={domain === "quality" ? "active" : ""} onClick={() => setDomain("quality")}>数据质量</button></nav>}{domain === "ads" && <nav className="operational-tabs unit-tabs"><button className={unit === "sessions" ? "active" : ""} onClick={() => setUnit("sessions")}>Session 漏斗</button><button className={unit === "users" ? "active" : ""} onClick={() => setUnit("users")}>用户 UV</button><button className={unit === "events" ? "active" : ""} onClick={() => setUnit("events")}>履约次数</button></nav>}<AvailabilityBanner data={data} /><section className="operational-metric-grid">{metrics.map((row) => <MetricCard key={row.metricKey ?? row.name} label={text(row.name)} value={row.displayValue ?? (row.unit === "ratio" ? percent(row.value) : number(row.value))} note={row.detail ?? row.formula} status={row.status} />)}</section><AiAnalysisPanel data={data} metrics={metrics} funnelRows={funnelRows} rawFunnelRows={rawFunnelRows} domain={domain} unit={unit} pageData={pageData} diagnosisData={diagnosisData} />{domain === "ads" && isVpnProduct && unit !== "events" && <VpnHomeSignalBoard data={data} />}{domain === "ads" && unit === "sessions" && !isVpnProduct && <AdSessionBaselineWarning rows={funnelRows} rawRows={rawFunnelRows} />}{domain === "ads" && <AdViewerRatioDeepDive rows={funnelRows} data={data} metrics={metrics} pageData={pageData} diagnosisData={diagnosisData} diagnosisProgress={diagnosisProgress} pageProgress={pageProgress} />}{domain === "ads" && <AdEligibilityInsight rows={funnelRows} data={data} diagnosisData={diagnosisData} diagnosisProgress={diagnosisProgress} />}{domain === "vpn" && <VpnPrerequisiteInsight rows={funnelRows} data={data} />}{domain === "vpn" && <AdNetworkFailureMatrix data={data} />}<section className="surface"><div className="surface-title"><div><h2>{domain === "vpn" ? "VPN 功能详细漏斗" : domain === "quality" ? "数据质量门禁" : isVpnProduct && unit !== "events" ? "VPN 品类广告变现全链路漏斗" : "广告核心漏斗"}</h2><p>{domain === "vpn" ? "DAU → 进入首页 → 点击连接 → 权限可用 → 节点选择 → 连接开始 → 连接成功。" : domain === "ads" && isVpnProduct && unit !== "events" ? "DAU → 进入首页 → 资格检查/不通过原因 → 资格通过 → 广告机会 → 缓存或实时请求 → 加载成功 → 广告可展示 → 展示尝试 → Impression → Paid。" : domain === "ads" && unit === "events" ? "按广告链路 ID 统计履约次数，用于检查缓存、请求、加载和展示断点。" : "按当前去重口径展示广告变现链路。"}</p></div><span title={funnelUnitHint(unit, domain)}>当前口径：{domain === "vpn" ? "用户 UV" : funnelUnitLabel(unit, domain)}</span></div><Funnel rows={funnelRows} selectedTransition={dropoffSelection} onSelectTransition={setDropoffSelection} unit={unit} domain={domain} data={data} /></section><DropoffAnalysisPanel rows={funnelRows} selection={dropoffSelection} onSelectionChange={setDropoffSelection} data={data} pageData={pageData} diagnosisData={diagnosisData} pageProgress={pageProgress} diagnosisProgress={diagnosisProgress} />{data.vpnStageHealth?.stages?.length > 0 && <section className="surface"><div className="surface-title"><div><h2>连接阶段成功率与 P95</h2><p>按 connection_id 关联真实连接阶段</p></div></div><div className="table-wrap"><table><thead><tr><th>阶段</th><th>样本</th><th>成功率</th><th>P95</th><th>状态</th></tr></thead><tbody>{data.vpnStageHealth.stages.map((row: AnyRow) => <tr key={row.stageKey}><td>{text(row.stageName)}</td><td>{number(row.totalCount)}</td><td>{percent(row.successRate)}</td><td>{text(row.displayP95 ?? row.p95Ms)}</td><td>{row.available === false ? "暂无数据" : text(row.status)}</td></tr>)}</tbody></table></div></section>}</div>;
+  return <div className="page-stack">{!lockDomain && <nav className="operational-tabs"><button className={domain === "ads" ? "active" : ""} onClick={() => setDomain("ads")}>广告变现</button><button className={domain === "vpn" ? "active" : ""} onClick={() => setDomain("vpn")}>VPN 功能</button><button className={domain === "quality" ? "active" : ""} onClick={() => setDomain("quality")}>数据质量</button></nav>}{domain === "ads" && <nav className="operational-tabs unit-tabs"><button className={unit === "sessions" ? "active" : ""} onClick={() => setUnit("sessions")}>Session 漏斗</button><button className={unit === "users" ? "active" : ""} onClick={() => setUnit("users")}>用户 UV</button><button className={unit === "events" ? "active" : ""} onClick={() => setUnit("events")}>履约次数</button></nav>}<AvailabilityBanner data={data} /><section className="operational-metric-grid">{metrics.map((row) => <MetricCard key={row.metricKey ?? row.name} label={text(row.name)} value={row.displayValue ?? (row.unit === "ratio" ? percent(row.value) : number(row.value))} note={row.detail ?? row.formula} status={row.status} />)}</section><AiAnalysisPanel data={data} metrics={metrics} funnelRows={funnelRows} rawFunnelRows={rawFunnelRows} domain={domain} unit={unit} pageData={pageData} diagnosisData={diagnosisData} />{domain === "ads" && isVpnProduct && unit !== "events" && <VpnHomeSignalBoard data={data} />}{domain === "ads" && unit === "sessions" && !isVpnProduct && <AdSessionBaselineWarning rows={funnelRows} rawRows={rawFunnelRows} />}{domain === "ads" && <AdViewerRatioDeepDive rows={funnelRows} data={data} metrics={metrics} pageData={pageData} diagnosisData={diagnosisData} diagnosisProgress={diagnosisProgress} pageProgress={pageProgress} />}{domain === "ads" && <AdEligibilityInsight rows={funnelRows} data={data} diagnosisData={diagnosisData} diagnosisProgress={diagnosisProgress} />}{domain === "vpn" && <VpnPrerequisiteInsight rows={funnelRows} data={data} />}<section className="surface"><div className="surface-title"><div><h2>{domain === "vpn" ? "VPN 功能详细漏斗" : domain === "quality" ? "数据质量门禁" : isVpnProduct && unit !== "events" ? "VPN 品类广告变现全链路漏斗" : "广告核心漏斗"}</h2><p>{domain === "vpn" ? "DAU → 进入首页 → 点击连接 → 权限可用 → 节点选择 → 连接开始 → 连接成功。" : domain === "ads" && isVpnProduct && unit !== "events" ? "DAU → 进入首页 → 资格检查/不通过原因 → 资格通过 → 广告机会 → 缓存或实时请求 → 加载成功 → 广告可展示 → 展示尝试 → Impression → Paid。" : domain === "ads" && unit === "events" ? "按广告链路 ID 统计履约次数，用于检查缓存、请求、加载和展示断点。" : "按当前去重口径展示广告变现链路。"}</p></div><span title={funnelUnitHint(unit, domain)}>当前口径：{domain === "vpn" ? "用户 UV" : funnelUnitLabel(unit, domain)}</span></div><Funnel rows={funnelRows} selectedTransition={dropoffSelection} onSelectTransition={setDropoffSelection} unit={unit} domain={domain} data={data} /></section><DropoffAnalysisPanel rows={funnelRows} selection={dropoffSelection} onSelectionChange={setDropoffSelection} data={data} pageData={pageData} diagnosisData={diagnosisData} pageProgress={pageProgress} diagnosisProgress={diagnosisProgress} />{data.vpnStageHealth?.stages?.length > 0 && <section className="surface"><div className="surface-title"><div><h2>连接阶段成功率与 P95</h2><p>按 connection_id 关联真实连接阶段</p></div></div><div className="table-wrap"><table><thead><tr><th>阶段</th><th>样本</th><th>成功率</th><th>P95</th><th>状态</th></tr></thead><tbody>{data.vpnStageHealth.stages.map((row: AnyRow) => <tr key={row.stageKey}><td>{text(row.stageName)}</td><td>{number(row.totalCount)}</td><td>{percent(row.successRate)}</td><td>{text(row.displayP95 ?? row.p95Ms)}</td><td>{row.available === false ? "暂无数据" : text(row.status)}</td></tr>)}</tbody></table></div></section>}</div>;
 }
 
 function DiagnosisPage({ data, workbenchData, onOpenWorkbench }: { data: AnyRow; workbenchData?: AnyRow | null; onOpenWorkbench?: () => void }) {
@@ -2666,6 +2667,9 @@ export function OperationalFunnel(props: Props) {
   const [domain, setDomain] = useState<"ads" | "vpn" | "quality">(props.initialDomain ?? initialOperationalView.domain);
   const [unit, setUnit] = useState<FunnelUnit>(props.initialDomain === "vpn" ? "sessions" : initialOperationalView.unit);
   const [workbenchSection, setWorkbenchSection] = useState<"workbench" | "diagnosis" | "path" | "versions">("workbench");
+  const [matrixData, setMatrixData] = useState<AnyRow | null>(null);
+  const [matrixLoading, setMatrixLoading] = useState(false);
+  const [matrixError, setMatrixError] = useState("");
   const dates = useMemo(() => dateRange(props.range), [props.range]);
   const queryUnit: FunnelUnit = domain === "vpn" ? "sessions" : domain === "ads" ? unit : "users";
   const scope = props.page === "overview" ? "overview" : "project";
@@ -2693,6 +2697,7 @@ export function OperationalFunnel(props: Props) {
   }, [props.onSnapshotChange]);
 
   useEffect(() => {
+    if (props.page === "network_failure_matrix") return;
     if (!props.enabled) {
       setLoading(true);
       props.onSnapshotChange?.(null);
@@ -2846,6 +2851,27 @@ export function OperationalFunnel(props: Props) {
   }, [props.enabled, scope, props.projectCode, props.appIdentifier, props.range, props.platform, props.country, props.appVersion, props.refreshKey, dates, domain, unit, retryKey, props.softFailure]);
 
   useEffect(() => {
+    if (props.page !== "network_failure_matrix" || !props.enabled || !props.projectCode) return;
+    let active = true;
+    const controller = new AbortController();
+    setMatrixLoading(true);
+    setMatrixError("");
+    setMatrixData(null);
+    const baseQuery = {
+      ...dates,
+      projectCode: props.projectCode,
+      appIdentifier: props.appIdentifier,
+      platform: props.platform === "全部" ? undefined : props.platform.toLowerCase() as "android" | "ios",
+      country: props.country === "全部国家" ? undefined : props.country,
+      appVersion: props.appVersion === "全部版本" ? undefined : props.appVersion.split(" ")[0],
+    };
+    queryFunnel<AnyRow>({ ...baseQuery, page: "network_failure_matrix", domain: "vpn", unit: "users", evidenceMode: "ad", pageSize: 50 }, controller.signal)
+      .then((result) => { if (active) { setMatrixData(result); setMatrixLoading(false); } })
+      .catch((reason) => { if (active) { setMatrixError(reason instanceof Error ? reason.message : "查询失败"); setMatrixLoading(false); } });
+    return () => { active = false; controller.abort(); };
+  }, [props.page, props.enabled, props.projectCode, props.appIdentifier, props.platform, props.country, props.appVersion, props.refreshKey, dates]);
+
+  useEffect(() => {
     if (!props.enabled || Object.keys(dataPackage).length === 0) {
       props.onSnapshotChange?.(null);
       return;
@@ -2884,6 +2910,13 @@ export function OperationalFunnel(props: Props) {
       dataPackage,
     });
   }, [props.enabled, props.initialDomain, props.page, props.projectCode, props.appIdentifier, props.range, props.platform, props.country, props.appVersion, activePage, activeKey, dates, domain, queryUnit, loadedAt, progressItems, packageErrors, dataPackage, props.onSnapshotChange]);
+
+  if (props.page === "network_failure_matrix") {
+    if (matrixLoading) return <StatePanel kind="loading" message="正在读取广告网络失败横向报表，按国家 × ASN × 节点 × 协议横向聚合…" />;
+    if (matrixError) return <StatePanel kind="error" message={matrixError} retry={() => setRetryKey((value) => value + 1)} />;
+    if (!matrixData) return <StatePanel kind="empty" message="当前筛选范围没有可聚合的网络维度广告事件。" />;
+    return <div className="page-stack"><AdNetworkFailureMatrix data={matrixData} /></div>;
+  }
 
   if (loading) return <StatePanel kind="loading" message={`正在优先加载当前页面：${packageLabel}。核心页完成后立即展示，其他数据后台继续查询。`}><QueryProgressPanel items={progressItems} compact /></StatePanel>;
   if (error) return <StatePanel kind="error" message={error} retry={() => setRetryKey((value) => value + 1)} />;

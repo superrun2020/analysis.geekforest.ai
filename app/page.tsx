@@ -34,7 +34,8 @@ type PageKey =
   | "path"
   | "evidence"
   | "issues"
-  | "snapshot";
+  | "snapshot"
+  | "network_failure_matrix";
 
 type FunnelMode = "product" | "monetization";
 type UnitMode = "users" | "events";
@@ -56,7 +57,7 @@ type FunnelStage = {
 type TransitionSelection = { from: string; to: string; rate: string; scope: "users" | "events" };
 type ModuleKey = "global" | "project" | "funnel" | "vpn" | "admob" | "firebase" | "reconcile" | "tracking" | "config" | "firebaseSetup" | "tasks" | "shareAlerts";
 const moduleKeys = new Set<ModuleKey>(["global", "project", "funnel", "vpn", "admob", "firebase", "reconcile", "tracking", "config", "firebaseSetup", "tasks", "shareAlerts"]);
-const pageKeys = new Set<PageKey>(["overview", "workbench", "diagnosis", "cohort", "path", "evidence", "issues", "snapshot"]);
+const pageKeys = new Set<PageKey>(["overview", "workbench", "diagnosis", "cohort", "path", "evidence", "issues", "snapshot", "network_failure_matrix"]);
 const legacyWorkbenchPages = new Set<PageKey>(["diagnosis", "cohort", "path", "snapshot"]);
 const emptyFilterOptions: FunnelFilterOptions = { projects: [], platforms: [], countries: [], appVersions: [], buildNumbers: [], versions: [] };
 
@@ -331,6 +332,10 @@ const pages: Array<{ key: PageKey; label: string; hint: string }> = [
   { key: "evidence", label: "证据与事件明细", hint: "事件链与原始参数" },
   { key: "issues", label: "问题修复闭环", hint: "任务·重测·效果" },
 ];
+const vpnPages: Array<{ key: PageKey; label: string; hint: string }> = [
+  { key: "workbench", label: "单项目分析工作台", hint: "连接·回退·网络诊断" },
+  { key: "network_failure_matrix", label: "广告网络失败横向报表", hint: "国家×ASN×节点×协议" },
+];
 const pageGuideCopy: Record<PageKey, { purpose: string; source: string; next: string }> = {
   overview: { purpose: "每天 05:00 横向发现所有项目的问题，只展示异常项目，不在这里做项目筛选。", source: "优先读 DWS 全项目快照；只在点击项目下钻时查询单项目明细。", next: "点击问题项目进入单项目分析工作台。" },
   workbench: { purpose: "单项目内看核心漏斗、断点、页面路径和流失原因。", source: "一次加载核心、诊断、路径、证据、闭环数据包，切 Tab 不重复查。", next: "点击漏斗相邻步骤，看页面 × 断点流失。" },
@@ -340,6 +345,7 @@ const pageGuideCopy: Record<PageKey, { purpose: string; source: string; next: st
   cohort: { purpose: "按国家、版本、页面、渠道等维度找异常集中人群。", source: "来自 DWS/DWM 切片聚合。", next: "选择最差切片进入证据明细。" },
   path: { purpose: "按页面看访问、退出和链路到达，定位页面承接流失。", source: "来自 screen_view/screen_exit 和 page × step 聚合。", next: "点击核心漏斗断点查看页面级流失。" },
   snapshot: { purpose: "查看当前执行漏斗口径和步骤定义。", source: "来自已发布漏斗配置快照。", next: "发现口径不对时进入打点测试配置修订。" },
+  network_failure_matrix: { purpose: "按国家 × ASN × 节点 × 协议横向看广告请求、加载失败、展示失败和展示拦截。", source: "来自 V1.8 明细事件携带的网络上下文，独立查询、按需加载。", next: "定位到具体网络出口后回 VPN 工作台看连接与协议回退。" },
 };
 
 const projects = [
@@ -1517,6 +1523,7 @@ export default function Home() {
       setModule("firebase");
     } else {
       setModule(next);
+      if (next === "vpn") setPage("workbench");
     }
     if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
   }
@@ -1668,6 +1675,10 @@ export default function Home() {
             {pages.map((item) => <button key={item.key} className={page === item.key ? "active" : ""} onClick={() => go(item.key)}><span>{item.label}</span><small>{item.hint}</small></button>)}
           </nav>}
 
+          {module === "vpn" && <nav className="page-nav" aria-label="VPN 分析页面">
+            {vpnPages.map((item) => <button key={item.key} className={page === item.key ? "active" : ""} onClick={() => setPage(item.key)}><span>{item.label}</span><small>{item.hint}</small></button>)}
+          </nav>}
+
           {module === "funnel" && <section className="page-purpose-strip">
             <div><span>当前页能做什么</span><strong>{pageGuideCopy[page].purpose}</strong></div>
             <div><span>数据从哪里来</span><strong>{pageGuideCopy[page].source}</strong></div>
@@ -1796,7 +1807,7 @@ export default function Home() {
           {module === "vpn" && <OperationalFunnel
             key="operational-vpn"
             enabled={!projectLoading && onlineProjects.length > 0}
-            page="workbench"
+            page={page === "network_failure_matrix" ? "network_failure_matrix" : "workbench"}
             projectCode={project}
             appIdentifier={appliedProjectMeta?.appIdentifier}
             range={range}

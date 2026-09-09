@@ -1,7 +1,7 @@
 import { getCompanyAuthToken } from "./company-auth";
 import { trackingApiBaseUrl } from "./api-base-url";
 
-export type FunnelPageKey = "overview" | "workbench" | "diagnosis" | "cohort" | "path" | "evidence" | "issues" | "snapshot";
+export type FunnelPageKey = "overview" | "workbench" | "diagnosis" | "cohort" | "path" | "evidence" | "issues" | "snapshot" | "network_failure_matrix";
 
 export type FunnelQuery = {
   page: FunnelPageKey;
