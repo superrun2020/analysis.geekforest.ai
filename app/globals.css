@@ -2731,6 +2731,38 @@ body {
 .version-delta.good { color: #16845b; }
 .version-delta.bad { color: #d64545; }
 
+.version-compare-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 272px;
+  gap: 16px;
+  align-items: start;
+}
+.version-compare-main { min-width: 0; }
+.version-compare-table { min-width: 900px; }
+.version-compare-table td small { display: inline-block; margin-top: 0; margin-left: 8px; }
+.version-compare-table .sample-small { color: #b7791f; font-size: 11px; }
+.version-compare-table tr.row-baseline { background: #f4f8ff; }
+.version-compare-table tr.row-baseline td:first-child strong { color: #1f5f8b; }
+.version-compare-table tfoot td { border-top: 1px solid #e4ebf3; background: #fbfdff; }
+.version-compare-footnote { margin-top: 10px; padding: 10px 12px; border: 1px dashed #dbe4f0; border-radius: 10px; background: #fbfdff; color: #7b8794; font-size: 12px; }
+.version-compare-loading { padding: 18px 16px; border-radius: 10px; background: #f4f8ff; color: #496078; margin-bottom: 12px; }
+.version-compare-loading.warn { background: #fff4f4; color: #b04747; }
+.version-compare-config { position: sticky; top: 14px; padding: 14px; }
+.config-group + .config-group { margin-top: 16px; padding-top: 16px; border-top: 1px solid #eef2f7; }
+.config-title { margin-bottom: 8px; color: #52606d; font-weight: 700; font-size: 13px; }
+.config-options { display: flex; flex-wrap: wrap; gap: 6px; }
+.config-options button { border: 1px solid #cfd8e3; border-radius: 999px; padding: 6px 12px; background: #fff; color: #52606d; font-size: 12px; cursor: pointer; }
+.config-options button:hover { border-color: #7c9bc7; }
+.config-options button.active { background: #1f5f8b; border-color: #1f5f8b; color: #fff; }
+.config-checkboxes { display: flex; flex-direction: column; gap: 2px; max-height: 340px; overflow-y: auto; }
+.config-checkboxes label { display: flex; align-items: center; gap: 8px; padding: 5px 4px; border-radius: 6px; color: #3e4c59; font-size: 13px; cursor: pointer; }
+.config-checkboxes label:hover { background: #f4f8ff; }
+.config-checkboxes input { accent-color: #1f5f8b; }
+@media (max-width: 1180px) {
+  .version-compare-layout { grid-template-columns: 1fr; }
+  .version-compare-config { position: static; }
+}
+
 @media (max-width: 1440px) {
   .topbar {
     padding-inline: 18px;

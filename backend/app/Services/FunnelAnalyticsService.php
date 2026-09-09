@@ -688,7 +688,7 @@ class FunnelAnalyticsService
      */
     private function cacheableQueryPages(): array
     {
-        return ['overview', 'workbench', 'diagnosis', 'path', 'evidence'];
+        return ['overview', 'workbench', 'diagnosis', 'path', 'evidence', 'version_comparison'];
     }
 
     /**
@@ -707,6 +707,7 @@ class FunnelAnalyticsService
             'issues' => $this->issues($params),
             'snapshot' => $this->snapshot(),
             'network_failure_matrix' => $this->networkFailureMatrix($params),
+            'version_comparison' => $this->versionComparisonPage($params),
             default => throw new InvalidArgumentException('不支持的漏斗分析页面'),
         };
     }
@@ -2139,100 +2140,172 @@ class FunnelAnalyticsService
     }
 
     /**
-     * Compare application versions from the daily funnel summary without
-     * scanning DWD detail events. The largest-DAU version is only a suggested
-     * baseline; the UI may select any returned version as the baseline.
+     * Compare a chosen dimension (app version / country / platform) from the
+     * daily funnel summary without scanning DWD detail events. The largest-DAU
+     * group is only a suggested baseline; the UI may select any baseline.
+     *
+     * @param array<string, mixed> $params
+     * @return array<string, mixed>
      */
     private function versionComparisonFromDws(array $params): array
     {
         $domain = (string) ($params['domain'] ?? 'ads');
         $funnelCode = $domain === 'vpn' ? 'vpn_user_coverage' : 'ad_user_coverage';
+        $dimension = in_array($params['dimension'] ?? null, ['country_code', 'platform'], true)
+            ? (string) $params['dimension']
+            : 'app_version';
 
         try {
+            $groupColumns = $dimension === 'country_code'
+                ? ['country_code']
+                : ($dimension === 'platform' ? ['platform'] : ['app_version', 'build_number']);
+
             $query = DB::connection('adb')->table('dws_app_funnel_stage_daily')
                 ->whereBetween('stat_date', [$params['dateFrom'], $params['dateTo']])
                 ->where('funnel_code', $funnelCode)
-                ->where('scope_type', 'users')
-                ->whereNotNull('app_version')
-                ->where('app_version', '!=', '');
+                ->where('scope_type', 'users');
             $this->applySummaryProjectFilters($query, $params);
-            if (!empty($params['platform'])) {
+
+            foreach ($groupColumns as $column) {
+                $query->whereNotNull($column)->where($column, '!=', '');
+            }
+            if ($dimension !== 'platform' && !empty($params['platform'])) {
                 $query->where('platform', strtolower((string) $params['platform']));
             }
-            if (!empty($params['country'])) {
+            if ($dimension !== 'country_code' && !empty($params['country'])) {
                 $query->where('country_code', (string) $params['country']);
             }
 
+            $columnsSql = implode(', ', array_map(
+                static fn (string $column): string => "COALESCE({$column}, '') AS {$column}",
+                $groupColumns
+            ));
             $stageRows = $query
-                ->selectRaw('app_version, build_number, step_code, SUM(subject_count) AS users')
-                ->groupBy('app_version', 'build_number', 'step_code')
+                ->selectRaw($columnsSql . ', step_code, SUM(subject_count) AS users')
+                ->groupBy(array_merge($groupColumns, ['step_code']))
                 ->get();
 
-            $versions = [];
+            $groups = [];
             foreach ($stageRows as $stage) {
-                $version = trim((string) ($stage->app_version ?? ''));
-                $build = trim((string) ($stage->build_number ?? ''));
-                $key = $version . '|' . $build;
-                if (!isset($versions[$key])) {
-                    $versions[$key] = [
-                        'appVersion' => $version,
-                        'buildNumber' => $build !== '' ? $build : null,
-                        'versionLabel' => $build !== '' ? "{$version} ({$build})" : $version,
-                        'stages' => [],
-                    ];
+                $keyParts = array_map(
+                    fn (string $column): string => trim((string) ($stage->{$column} ?? '')),
+                    $groupColumns
+                );
+                $key = implode('|', $keyParts);
+                if (!isset($groups[$key])) {
+                    $groups[$key] = $this->versionComparisonDimensionRow($dimension, $stage, $groupColumns);
                 }
-                $versions[$key]['stages'][(string) $stage->step_code] = (int) ($stage->users ?? 0);
+                $groups[$key]['stages'][(string) $stage->step_code] = (int) ($stage->users ?? 0);
             }
 
-            $rows = collect(array_values($versions))->map(function (array $version) use ($domain): array {
-                $stage = $version['stages'];
-                $dau = (int) ($stage['dau'] ?? 0);
-                if ($domain === 'vpn') {
-                    $attempt = (int) ($stage['connect_attempt'] ?? 0);
-                    $success = (int) ($stage['connect_success'] ?? 0);
-                    return $version + [
-                        'dauUsers' => $dau,
-                        'connectAttemptUsers' => $attempt,
-                        'connectSuccessUsers' => $success,
-                        'connectAttemptRate' => $this->rate($attempt, $dau),
-                        'connectSuccessRate' => $this->rate($success, $attempt),
-                    ];
-                }
+            $rows = collect(array_values($groups))
+                ->map(fn (array $group): array => $this->formatVersionComparisonMetrics($group, $domain))
+                ->sortByDesc('dauUsers')
+                ->values();
 
-                $check = (int) ($stage['eligibility'] ?? 0);
-                $eligible = (int) ($stage['eligible'] ?? 0);
-                $opportunity = (int) ($stage['opportunity'] ?? 0);
-                $request = (int) ($stage['request'] ?? 0);
-                $impression = (int) ($stage['impression'] ?? 0);
-                $paid = (int) ($stage['paid'] ?? 0);
-                return $version + [
-                    'dauUsers' => $dau,
-                    'eligibilityCheckUsers' => $check,
-                    'eligibleUsers' => $eligible,
-                    'opportunityUsers' => $opportunity,
-                    'requestUsers' => $request,
-                    'impressionUsers' => $impression,
-                    'paidUsers' => $paid,
-                    'viewerRatio' => $this->rate($impression, $dau),
-                    'eligibilityPassRate' => $this->rate($eligible, $check),
-                    'opportunityCoverageRate' => $this->rate($opportunity, $eligible),
-                    'requestCoverageRate' => $this->rate($request, $opportunity),
-                    'impressionConversionRate' => $this->rate($impression, $request),
-                ];
-            })->sortByDesc('dauUsers')->values();
+            $dimensionLabel = [
+                'app_version' => '应用版本',
+                'country_code' => '国家',
+                'platform' => '平台',
+            ][$dimension];
 
             return [
                 'rows' => $rows->all(),
-                'suggestedBaseline' => $rows->first()['versionLabel'] ?? null,
+                'dimension' => $dimension,
+                'dimensionLabel' => $dimensionLabel,
+                'suggestedBaseline' => $rows->first()['dimensionLabel'] ?? null,
                 'source' => 'dws_app_funnel_stage_daily',
                 'scope' => 'users',
                 'domain' => $domain,
-                'notice' => '同项目、同日期、同平台和国家下按 app_version/build_number 对比；比例使用同版本分子分母。样本量过小的版本仅作观察。',
+                'notice' => "同项目、同日期、同平台和国家下按 {$dimensionLabel} 对比；比例使用同组分子分母。样本量过小的组仅作观察。",
             ];
         } catch (Throwable $exception) {
             Log::warning('jkcl_version_comparison_dws_failed', ['message' => $exception->getMessage()]);
-            return ['rows' => [], 'source' => 'dws_app_funnel_stage_daily', 'domain' => $domain];
+            return ['rows' => [], 'dimension' => $dimension, 'source' => 'dws_app_funnel_stage_daily', 'domain' => $domain];
         }
+    }
+
+    /**
+     * @param array<int, string> $groupColumns
+     * @return array<string, mixed>
+     */
+    private function versionComparisonDimensionRow(string $dimension, object $stage, array $groupColumns): array
+    {
+        $values = array_map(fn (string $column): string => trim((string) ($stage->{$column} ?? '')), $groupColumns);
+
+        if ($dimension === 'country_code') {
+            $code = $values[0] !== '' ? $values[0] : 'unknown';
+            return [
+                'dimensionKey' => $code,
+                'dimensionLabel' => $code,
+                'countryCode' => $code,
+                'stages' => [],
+            ];
+        }
+        if ($dimension === 'platform') {
+            $platform = $values[0] !== '' ? strtolower($values[0]) : 'unknown';
+            return [
+                'dimensionKey' => $platform,
+                'dimensionLabel' => $platform,
+                'platform' => $platform,
+                'stages' => [],
+            ];
+        }
+
+        $version = $values[0] !== '' ? $values[0] : 'unknown';
+        $build = $values[1] ?? '';
+        return [
+            'dimensionKey' => $version . '|' . $build,
+            'dimensionLabel' => $build !== '' ? "{$version} ({$build})" : $version,
+            'appVersion' => $version,
+            'buildNumber' => $build !== '' ? $build : null,
+            'versionLabel' => $build !== '' ? "{$version} ({$build})" : $version,
+            'stages' => [],
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $group
+     * @return array<string, mixed>
+     */
+    private function formatVersionComparisonMetrics(array $group, string $domain): array
+    {
+        $stage = $group['stages'] ?? [];
+        $dau = (int) ($stage['dau'] ?? 0);
+        unset($group['stages']);
+
+        if ($domain === 'vpn') {
+            $attempt = (int) ($stage['connect_attempt'] ?? 0);
+            $success = (int) ($stage['connect_success'] ?? 0);
+            return $group + [
+                'dauUsers' => $dau,
+                'connectAttemptUsers' => $attempt,
+                'connectSuccessUsers' => $success,
+                'connectAttemptRate' => $this->rate($attempt, $dau),
+                'connectSuccessRate' => $this->rate($success, $attempt),
+            ];
+        }
+
+        $check = (int) ($stage['eligibility'] ?? 0);
+        $eligible = (int) ($stage['eligible'] ?? 0);
+        $opportunity = (int) ($stage['opportunity'] ?? 0);
+        $request = (int) ($stage['request'] ?? 0);
+        $impression = (int) ($stage['impression'] ?? 0);
+        $paid = (int) ($stage['paid'] ?? 0);
+        return $group + [
+            'dauUsers' => $dau,
+            'eligibilityCheckUsers' => $check,
+            'eligibleUsers' => $eligible,
+            'opportunityUsers' => $opportunity,
+            'requestUsers' => $request,
+            'impressionUsers' => $impression,
+            'paidUsers' => $paid,
+            'viewerRatio' => $this->rate($impression, $dau),
+            'eligibilityPassRate' => $this->rate($eligible, $check),
+            'opportunityCoverageRate' => $this->rate($opportunity, $eligible),
+            'requestCoverageRate' => $this->rate($request, $opportunity),
+            'impressionConversionRate' => $this->rate($impression, $request),
+        ];
     }
 
     /**
@@ -4717,6 +4790,21 @@ class FunnelAnalyticsService
             ->orderByDesc('events')
             ->limit(20)
             ->get();
+    }
+
+    /**
+     * Return the version comparison as a standalone page so the AdMob-style
+     * comparison view can fetch it on demand with its own dimension and date.
+     *
+     * @param array<string, mixed> $params
+     * @return array<string, mixed>
+     */
+    private function versionComparisonPage(array $params): array
+    {
+        return [
+            'context' => $this->context($params),
+            'versionComparison' => $this->versionComparisonFromDws($params),
+        ];
     }
 
     /**
