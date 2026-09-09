@@ -1692,6 +1692,13 @@ class FunnelAnalyticsService
             }
         }
 
+        if (($params['domain'] ?? 'ads') === 'ads') {
+            $summaryWorkbench = $this->adsSummaryWorkbench($params);
+            if ($summaryWorkbench !== null) {
+                return $summaryWorkbench;
+            }
+        }
+
         $aggregate = $this->aggregateQuery($params)->first();
         $aggregate = $aggregate ?: $this->emptyAggregate();
         $comparisonParams = $this->comparisonParams($params);
@@ -1781,6 +1788,352 @@ class FunnelAnalyticsService
                 'quality' => 6,
             ],
             'freshness' => $this->freshness($params),
+        ];
+    }
+
+    /**
+     * Build the ads workbench from DWS aggregate tables.
+     *
+     * The ads analysis used to scan DWD event detail with a multi-subquery
+     * aggregate on every first-screen query. The operational page only needs
+     * daily fulfillment and funnel-stage aggregates, so this path reads
+     * dws_ad_fulfillment_daily + dws_app_funnel_stage_daily and keeps DWD for
+     * evidence and deep-diagnosis pages.
+     *
+     * @param array<string, mixed> $params
+     * @return array<string, mixed>|null
+     */
+    private function adsSummaryWorkbench(array $params): ?array
+    {
+        try {
+            $aggregate = $this->adsSummaryAggregate($params);
+            $comparisonParams = $this->comparisonParams($params);
+            $comparisonAggregate = $comparisonParams ? $this->adsSummaryAggregate($comparisonParams) : null;
+            $comparisonAvailable = $comparisonAggregate !== null && $comparisonAggregate->latest_event_at !== null;
+            $metrics = $this->attachMetricComparison(
+                $this->adsSummaryMetrics($params, $aggregate),
+                $comparisonAggregate ? $this->adsSummaryMetrics($comparisonParams, $comparisonAggregate) : [],
+                $comparisonAvailable
+            );
+            $daily = $params['dateFrom'] === $params['dateTo']
+                ? collect([['date' => $params['dateFrom']] + $this->formatSummary($aggregate)])
+                : $this->adsSummaryDailyTrend($params);
+            $quality = $this->summaryQualityFromDws($params);
+            $qualityGates = $this->summaryQualityGatesFromQuality($quality);
+            $funnel = $this->contextStages($aggregate, $params);
+            $adSupplemental = $this->adSupplementalPanels($aggregate, $daily->all(), $qualityGates);
+
+            return [
+                'context' => $this->context($params),
+                'summary' => $this->formatSummary($aggregate),
+                'funnel' => $funnel,
+                'funnelSummary' => $this->funnelSummary($funnel, $aggregate, $params),
+                'comparisonFunnel' => $comparisonAvailable
+                    ? $this->contextStages($comparisonAggregate, $comparisonParams)
+                    : [],
+                'metrics' => $metrics,
+                'vpnStageHealth' => [],
+                'fulfillment' => $this->formatFulfillment($aggregate),
+                'dailyTrend' => $daily,
+                'screens' => $this->summaryScreens($params),
+                'quality' => $quality,
+                'qualityGates' => $qualityGates,
+                'vpnNetworkChanges' => [],
+                'vpnProtocolNodeRanking' => [],
+                'adNetworkFailureMatrix' => [],
+                'vpnTrend' => [],
+                'adPrechecks' => $adSupplemental['prechecks'] ?? [],
+                'adTrend' => $adSupplemental['trend'] ?? [],
+                'technicalChecks' => $adSupplemental['technicalChecks'] ?? [],
+                'versionComparison' => $this->versionComparisonFromDws($params),
+                'topReasons' => [],
+                'comparison' => [
+                    'type' => $params['compareType'] ?? 'yesterday_same_period',
+                    'dateFrom' => $comparisonParams['dateFrom'] ?? null,
+                    'dateTo' => $comparisonParams['dateTo'] ?? null,
+                    'available' => $comparisonAvailable,
+                ],
+                'domainMetricCounts' => [
+                    'vpn' => 9,
+                    'adsUsers' => 11,
+                    'adsEvents' => 7,
+                    'quality' => 6,
+                ],
+                'freshness' => $this->summaryFreshnessFromAggregate($aggregate),
+                'querySource' => 'dws_ad_summary',
+                'cacheTtlSeconds' => $this->summaryWorkbenchCacheSeconds($params),
+                'dataNotice' => '广告页面已优先读取 dws_ad_fulfillment_daily、dws_app_funnel_stage_daily、dws_screen_path_daily 和 dws_app_event_quality_daily 汇总表；DWD 明细仅在证据/深度诊断页按需使用。',
+            ];
+        } catch (Throwable $exception) {
+            Log::warning('jkcl_ads_summary_workbench_failed', [
+                'message' => $exception->getMessage(),
+                'projectCode' => $params['projectCode'] ?? null,
+                'dateFrom' => $params['dateFrom'] ?? null,
+                'dateTo' => $params['dateTo'] ?? null,
+            ]);
+
+            return null;
+        }
+    }
+
+    /**
+     * Build one synthetic aggregate object from DWS ad fulfillment + funnel
+     * stage tables, exposing the same field names the shared formatters expect.
+     *
+     * @param array<string, mixed> $params
+     */
+    private function adsSummaryAggregate(array $params): object
+    {
+        $row = (array) $this->emptyAggregate();
+
+        foreach ($this->adsSummaryFulfillment($params) as $field => $value) {
+            $row[$field] = $value;
+        }
+        foreach ($this->adsSummaryStageCounts($params) as $field => $value) {
+            $row[$field] = $value;
+        }
+
+        return (object) $row;
+    }
+
+    /**
+     * @param array<string, mixed> $params
+     * @return array<string, int|float|string|null>
+     */
+    private function adsSummaryFulfillment(array $params): array
+    {
+        try {
+            $query = DB::connection('adb')->table('dws_ad_fulfillment_daily')
+                ->whereBetween('stat_date', [$params['dateFrom'], $params['dateTo']]);
+            $this->applySummaryFilters($query, $params, 'dws_ad_fulfillment_daily');
+            $row = $query
+                ->selectRaw('SUM(opportunity_count) AS opportunity_count')
+                ->selectRaw('SUM(request_count) AS request_count')
+                ->selectRaw('SUM(request_count) AS request_id_count')
+                ->selectRaw('SUM(impression_count) AS impression_count')
+                ->selectRaw('SUM(paid_event_count) AS paid_event_count')
+                ->selectRaw('SUM(revenue_micros) AS revenue_micros')
+                ->selectRaw('SUM(cache_hit_count) AS cache_hit_count')
+                ->selectRaw('SUM(cache_miss_count) AS cache_miss_count')
+                ->selectRaw('SUM(cache_put_count) AS cache_put_count')
+                ->selectRaw('SUM(cache_take_count) AS cache_take_count')
+                ->selectRaw('SUM(cache_expired_count) AS cache_expired_count')
+                ->selectRaw('SUM(cache_discard_count) AS cache_discard_count')
+                ->selectRaw('SUM(load_success_count) AS load_success_count')
+                ->selectRaw('SUM(load_failed_count) AS load_failed_count')
+                ->selectRaw('SUM(load_success_count) AS load_success_request_count')
+                ->selectRaw('SUM(terminal_request_count) AS load_terminal_request_count')
+                ->selectRaw('SUM(show_attempt_count) AS show_attempt_count')
+                ->selectRaw('SUM(show_success_count) AS show_success_count')
+                ->selectRaw('SUM(show_failed_count) AS show_failed_count')
+                ->selectRaw('SUM(show_blocked_count) AS show_blocked_count')
+                ->selectRaw('SUM(on_demand_request_count) AS realtime_request_count')
+                ->selectRaw('SUM(preload_request_count) AS preload_request_count')
+                ->selectRaw('SUM(api_event_count) AS api_event_count')
+                ->selectRaw('SUM(firebase_event_count) AS firebase_event_count')
+                ->selectRaw('SUM(both_source_event_count) AS both_source_event_count')
+                ->selectRaw('MAX(computed_at) AS latest_event_at')
+                ->selectRaw('MAX(computed_at) AS latest_loaded_at')
+                ->first();
+        } catch (Throwable $exception) {
+            Log::warning('jkcl_ads_summary_fulfillment_failed', ['message' => $exception->getMessage()]);
+
+            return [];
+        }
+
+        return $row ? (array) $row : [];
+    }
+
+    /**
+     * Session-scope ad funnels only exist in the newer _v18 aggregate table;
+     * the legacy daily table carries user-scope funnels only.
+     *
+     * @param array<string, mixed> $params
+     */
+    private function adsSummaryStageTable(array $params): string
+    {
+        return ($params['unit'] ?? 'users') === 'sessions'
+            ? 'dws_app_funnel_stage_daily_v18'
+            : 'dws_app_funnel_stage_daily';
+    }
+
+    /**
+     * Read the ads user/session funnel step counts from the DWS stage table.
+     *
+     * @param array<string, mixed> $params
+     * @return array<string, int>
+     */
+    private function adsSummaryStageCounts(array $params): array
+    {
+        try {
+            $unit = ($params['unit'] ?? 'users') === 'sessions' ? 'sessions' : 'users';
+            $funnelCode = $unit === 'sessions' ? 'ad_session_coverage' : 'ad_user_coverage';
+            $table = $this->adsSummaryStageTable($params);
+            $query = DB::connection('adb')->table($table)
+                ->whereBetween('stat_date', [$params['dateFrom'], $params['dateTo']])
+                ->where('scope_type', $unit)
+                ->where('funnel_code', $funnelCode);
+            $this->applySummaryFilters($query, $params, $table);
+            $stages = $query
+                ->select('step_code')
+                ->selectRaw('SUM(subject_count) AS subjects')
+                ->groupBy('step_code')
+                ->get()
+                ->keyBy('step_code');
+        } catch (Throwable $exception) {
+            Log::warning('jkcl_ads_summary_stage_counts_failed', ['message' => $exception->getMessage()]);
+
+            return [];
+        }
+
+        $fieldByStep = [
+            'dau' => 'dau_users',
+            'eligibility' => 'eligibility_users',
+            'eligible' => 'eligible_users',
+            'opportunity' => 'opportunity_users',
+            'request' => 'request_users',
+            'show_attempt' => 'show_attempt_users',
+            'impression' => 'impression_users',
+            'paid' => 'paid_users',
+        ];
+
+        $result = [];
+        foreach ($fieldByStep as $stepCode => $field) {
+            if ($stages->has($stepCode)) {
+                $result[$field] = (int) ($stages[$stepCode]->subjects ?? 0);
+            }
+        }
+
+        return $result;
+    }
+
+    /**
+     * Read the ads daily trend from DWS instead of rebuilding it from DWD.
+     *
+     * @param array<string, mixed> $params
+     */
+    private function adsSummaryDailyTrend(array $params)
+    {
+        try {
+            $fulfillmentQuery = DB::connection('adb')->table('dws_ad_fulfillment_daily')
+                ->whereBetween('stat_date', [$params['dateFrom'], $params['dateTo']]);
+            $this->applySummaryFilters($fulfillmentQuery, $params, 'dws_ad_fulfillment_daily');
+            $fulfillment = $fulfillmentQuery
+                ->selectRaw('stat_date')
+                ->selectRaw('SUM(opportunity_count) AS opportunity_count')
+                ->selectRaw('SUM(request_count) AS request_count')
+                ->selectRaw('SUM(impression_count) AS impression_count')
+                ->selectRaw('SUM(paid_event_count) AS paid_event_count')
+                ->selectRaw('SUM(revenue_micros) AS revenue_micros')
+                ->selectRaw('SUM(cache_hit_count) AS cache_hit_count')
+                ->selectRaw('SUM(load_success_count) AS load_success_count')
+                ->selectRaw('SUM(show_attempt_count) AS show_attempt_count')
+                ->selectRaw('SUM(show_success_count) AS show_success_count')
+                ->selectRaw('SUM(show_failed_count) AS show_failed_count')
+                ->selectRaw('SUM(show_blocked_count) AS show_blocked_count')
+                ->selectRaw('SUM(on_demand_request_count) AS realtime_request_count')
+                ->selectRaw('MAX(computed_at) AS latest_event_at')
+                ->groupBy('stat_date')
+                ->get()
+                ->keyBy('stat_date');
+
+            $unit = ($params['unit'] ?? 'users') === 'sessions' ? 'sessions' : 'users';
+            $funnelCode = $unit === 'sessions' ? 'ad_session_coverage' : 'ad_user_coverage';
+            $stageTable = $this->adsSummaryStageTable($params);
+            $stageQuery = DB::connection('adb')->table($stageTable)
+                ->whereBetween('stat_date', [$params['dateFrom'], $params['dateTo']])
+                ->where('scope_type', $unit)
+                ->where('funnel_code', $funnelCode);
+            $this->applySummaryFilters($stageQuery, $params, $stageTable);
+            $stages = $stageQuery
+                ->selectRaw('stat_date')
+                ->selectRaw('step_code')
+                ->selectRaw('SUM(subject_count) AS subjects')
+                ->groupBy('stat_date', 'step_code')
+                ->get();
+
+            $fieldByStep = [
+                'dau' => 'dau_users',
+                'eligibility' => 'eligibility_users',
+                'eligible' => 'eligible_users',
+                'opportunity' => 'opportunity_users',
+                'request' => 'request_users',
+                'show_attempt' => 'show_attempt_users',
+                'impression' => 'impression_users',
+                'paid' => 'paid_users',
+            ];
+
+            $byDate = [];
+            foreach ($fulfillment as $date => $row) {
+                $byDate[$date] = (array) $row;
+            }
+            foreach ($stages as $stage) {
+                $field = $fieldByStep[$stage->step_code] ?? null;
+                if ($field !== null) {
+                    $byDate[$stage->stat_date][$field] = (int) ($stage->subjects ?? 0);
+                }
+            }
+            ksort($byDate);
+
+            return collect($byDate)
+                ->map(fn (array $row, string $date): array => ['date' => $date] + $this->formatSummary((object) $row))
+                ->values();
+        } catch (Throwable $exception) {
+            Log::warning('jkcl_ads_summary_daily_trend_failed', ['message' => $exception->getMessage()]);
+
+            return collect();
+        }
+    }
+
+    /**
+     * Metric cards for the ads summary path, sourced from the DWS aggregate
+     * object. Cross-event correlations (request->impression latency, paid
+     * completion) are not available in the summary tables, so those cards are
+     * marked unavailable instead of scanning DWD detail.
+     *
+     * @param array<string, mixed> $params
+     * @return array<int, array<string, mixed>>
+     */
+    private function adsSummaryMetrics(array $params, object $row): array
+    {
+        $summary = $this->formatSummary($row);
+        $fulfillment = $this->formatFulfillment($row);
+        $requests = (int) ($row->request_id_count ?? 0);
+        $loadSuccesses = (int) ($row->load_success_request_count ?? 0);
+        $loadTerminal = (int) ($row->load_terminal_request_count ?? 0);
+        $unavailableReason = '汇总快路径不计算跨事件关联，请到证据明细下钻';
+
+        if (($params['unit'] ?? 'users') === 'events') {
+            return [
+                $this->ratioMetric('ad_cache_hit_rate', '缓存命中率', $fulfillment['cacheHitCount'], $fulfillment['cacheHitCount'] + $fulfillment['cacheMissCount'], 'cache_hit / (cache_hit + cache_miss)'),
+                $this->unavailableMetric('ad_realtime_request_rate', 'Miss 后实时请求率', '有实时请求的 miss opportunity_id / cache_miss opportunity_id', $unavailableReason, 'ratio'),
+                $this->ratioMetric('ad_request_terminal_rate', '请求终态完整率', $loadTerminal, $requests, '有加载终态的 request_id / ad_request request_id'),
+                $this->ratioMetric('ad_load_success_rate', '加载成功率', $loadSuccesses, $loadTerminal, 'load_success request_id / load_terminal request_id'),
+                $this->ratioMetric('ad_show_success_rate', '展示成功率', (int) ($row->impression_count ?? 0), (int) ($row->show_attempt_count ?? 0), 'ad_impression / ad_show_attempt', 95),
+                $this->unavailableMetric('ad_paid_complete_rate', 'Paid 回调完整率', '按 opportunity_id / request_id / ad_instance_id 关联的 Paid Event / Impression', $unavailableReason, 'ratio'),
+                $summary['impressionsPerViewerAvailable']
+                    ? $this->metric('ad_impressions_per_viewer', '人均展示次数', $summary['impressionsPerViewer'], 'decimal', 'impression_count / impression_uv')
+                    : $this->unavailableMetric('ad_impressions_per_viewer', '人均展示次数', 'impression_count / impression_uv', '当前切片没有广告展示独立用户', 'decimal'),
+            ];
+        }
+
+        return [
+            $this->ratioMetric('ad_eligibility_pass_rate', '广告资格通过率', $summary['eligibleUsers'], $summary['eligibilityUsers'], 'eligible_uv / eligibility_uv'),
+            $this->ratioMetric('ad_opportunity_complete_rate', '资格后机会完整率', $summary['opportunityUsers'], $summary['eligibleUsers'], 'opportunity_uv / eligible_uv'),
+            $this->ratioMetric('ad_cache_hit_rate', '缓存命中率', $fulfillment['cacheHitCount'], $fulfillment['cacheHitCount'] + $fulfillment['cacheMissCount'], 'cache_hit / (cache_hit + cache_miss)'),
+            $this->unavailableMetric('ad_realtime_request_rate', '实时请求启动率', '有实时请求的 miss opportunity_id / cache_miss opportunity_id', $unavailableReason, 'ratio'),
+            $this->ratioMetric('ad_request_load_success_rate', '请求加载成功率', $loadSuccesses, $requests, 'load_success request_id / ad_request request_id'),
+            $this->ratioMetric('ad_request_terminal_rate', '请求终态完整率', $loadTerminal, $requests, '有加载终态的 request_id / ad_request request_id'),
+            $this->unavailableMetric('ad_load_success_without_impression_rate', '加载成功未展示率', '无 Impression 的 ad_instance_id / load_success 的 ad_instance_id', $unavailableReason, 'ratio'),
+            $this->ratioMetric('ad_viewer_rate', '广告浏览者比例', $summary['impressionUsers'], $summary['dauUsers'], 'impression_uv / dau_uv'),
+            $summary['impressionsPerViewerAvailable']
+                ? array_replace(
+                    $this->metric('ad_impressions_per_viewer', '人均广告展示次数', $summary['impressionsPerViewer'], 'decimal', 'impression_count / impression_uv'),
+                    ['detail' => number_format($summary['impressionCount']) . ' / ' . number_format($summary['impressionUsers'])]
+                )
+                : $this->unavailableMetric('ad_impressions_per_viewer', '人均广告展示次数', 'impression_count / impression_uv', '当前切片没有广告展示独立用户', 'decimal'),
+            $this->unavailableMetric('ad_request_to_impression_p95', '请求→展示 P95', 'impression_time - request_time', $unavailableReason, 'duration'),
+            $this->unavailableMetric('ad_load_to_impression_p95', '加载→展示 P95', 'impression_time - load_success_time', $unavailableReason, 'duration'),
         ];
     }
 
@@ -4043,6 +4396,8 @@ class FunnelAnalyticsService
             'dws_app_event_quality_daily' => ['project_code', 'app_identifier', 'platform', 'country_code', 'app_version', 'build_number', 'event_name', 'schema_version'],
             'dws_screen_path_daily' => ['project_code', 'app_identifier', 'platform', 'country_code', 'app_version', 'build_number', 'network_type'],
             'dws_app_funnel_stage_daily' => ['project_code', 'app_identifier', 'platform', 'country_code', 'app_version', 'build_number', 'network_type', 'placement', 'ad_format', 'ad_source', 'protocol', 'server_id'],
+            'dws_ad_fulfillment_daily' => ['project_code', 'app_identifier', 'platform', 'country_code', 'app_version', 'build_number', 'network_type', 'device_model', 'ad_format', 'placement', 'ad_source', 'request_type'],
+            'dws_app_funnel_stage_daily_v18' => ['project_code', 'app_identifier', 'platform', 'country_code', 'app_version', 'build_number', 'network_type', 'placement', 'ad_format', 'ad_source', 'protocol', 'server_id'],
         ];
         $availableColumns = $tableColumns[$table] ?? [];
 
