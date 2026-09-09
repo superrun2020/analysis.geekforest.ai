@@ -2719,6 +2719,18 @@ body {
   background: #fbfdff;
 }
 
+.version-compare-header .surface-title { align-items: center; }
+.version-compare-header label { display: flex; align-items: center; gap: 10px; color: #52606d; font-weight: 700; }
+.version-compare-header select { min-width: 190px; border: 1px solid #cfd8e3; border-radius: 8px; padding: 9px 12px; background: #fff; }
+.version-compare-notice { margin-top: 12px; padding: 12px 14px; border-radius: 8px; background: #f4f8ff; color: #496078; line-height: 1.6; }
+.version-compare-table { min-width: 1380px; }
+.version-compare-table td { vertical-align: top; }
+.version-compare-table td strong, .version-compare-table td small { display: block; }
+.version-compare-table td small { margin-top: 4px; color: #7b8794; }
+.version-delta { display: block; margin-top: 4px; color: #7b8794; font-size: 12px; font-weight: 700; }
+.version-delta.good { color: #16845b; }
+.version-delta.bad { color: #d64545; }
+
 @media (max-width: 1440px) {
   .topbar {
     padding-inline: 18px;

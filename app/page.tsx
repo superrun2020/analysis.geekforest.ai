@@ -23,7 +23,7 @@ import { ShareAlertsPage } from "./share-alerts-page";
 import { trackingApiBaseUrl } from "./api-base-url";
 import { createCodexQueryLinks } from "./codex-query-links-api";
 
-const APP_VERSION = "V115";
+const APP_VERSION = "V118";
 const VERSION_MANIFEST_PATH = "/version.json";
 
 type PageKey =
@@ -1324,7 +1324,7 @@ export default function Home() {
   const sourceStatus: Record<ModuleKey, { title: string; detail: string; note: string }> = {
     global: { title: "混合时效", detail: "Firebase T+0 · AdMob T+3 · 刷新", note: "DAU和用户行为使用Firebase实时预估；收入、消耗和ROAS使用最近已结算日期，卡片必须标注数据日。" },
     project: { title: "项目诊断", detail: "Firebase延迟约8分钟 · AdMob T+3", note: "用户与产品指标可看当天；收入和AdMob效率使用已结算日期，不参与当天实时结论。" },
-    funnel: { title: "每日问题快照", detail: isFunnelOverview ? "每日05:00 · 全项目问题预览" : "默认昨日DWS汇总 · 今天实时补查", note: isFunnelOverview ? "多项目漏斗预览只展示全项目问题榜，不做项目筛选；需要筛选、页面路径、流失原因和证据时，点击项目进入单项目分析。" : "漏斗默认读取前一天已完成汇总；只有筛选包含今天时才补查实时数据。不可计算指标显示暂无数据，收入最终以AdMob结算为准。" },
+    funnel: { title: "每日问题快照", detail: isFunnelOverview ? "每日08:00 · 09:30补数 · 全项目问题预览" : "默认昨日DWS汇总 · 今天实时补查", note: isFunnelOverview ? "多项目漏斗预览只展示全项目问题榜，不做项目筛选；需要筛选、页面路径、流失原因、版本差异和证据时，点击项目进入单项目分析。" : "漏斗默认读取前一天已完成汇总；只有筛选包含今天时才补查实时数据。不可计算指标显示暂无数据，收入最终以AdMob结算为准。" },
     vpn: { title: "V1.8 弱网专项", detail: "Firebase T+0 · 会话/连接/阶段关联", note: "本页以 vpn_session_id 串联用户会话，以 connection_id 区分每次真实连接尝试；俄罗斯/伊朗须按 ASN、网络、协议、端口和限制信号联合判断。" },
     admob: { title: "AdMob+Firebase", detail: "AdMob T+3结算 · Firebase T+0 AV", note: "本页默认按AdMob结算口径展示收入、请求、匹配和展示；当天广告浏览人数AV可用Firebase jk_ad_impression先看趋势。" },
     firebase: { title: "实时数据", detail: "BigQuery intraday · 延迟约8分钟", note: "本页展示Firebase实时预估、事件质量与同步水位；中台数字仅用于差异诊断。" },
@@ -1675,7 +1675,7 @@ export default function Home() {
           </section>}
 
           {module !== "firebaseSetup" && <section className={`filter-bar ${isFunnelOverview ? "overview-filter-bar" : ""}`}>
-            {isFunnelOverview ? <div className="overview-no-project-filter"><span>项目</span><strong>全部项目问题预览</strong><small>不做项目筛选；每天 05:00 自动产出前一天快照，点击项目进入单项目分析。</small>{(projectLoadError || projectSourceWarning) && <small className="filter-error">{projectLoadError || projectSourceWarning}</small>}</div> : <label>项目<select value={draftProject} disabled={projectLoading || onlineProjects.length === 0} onChange={(event) => {
+            {isFunnelOverview ? <div className="overview-no-project-filter"><span>项目</span><strong>全部项目问题预览</strong><small>不做项目筛选；每天 08:00 汇总前一天数据，09:30 补充延迟入库数据，点击项目进入单项目分析。</small>{(projectLoadError || projectSourceWarning) && <small className="filter-error">{projectLoadError || projectSourceWarning}</small>}</div> : <label>项目<select value={draftProject} disabled={projectLoading || onlineProjects.length === 0} onChange={(event) => {
               const nextProject = event.target.value;
               setDraftProject(nextProject);
               setProject(nextProject);
@@ -1759,7 +1759,7 @@ export default function Home() {
           </section>}
 
           {module !== "firebaseSetup" && <section className="context-toolbar">
-            <div className="context-summary"><Badge tone="blue">{module === "funnel" ? currentPage.hint : currentModule.title}</Badge><span>{isFunnelOverview ? "全部项目" : project}</span><i /> <span>{isFunnelOverview ? "每日05:00快照" : range}</span><i /> <span>{platform} · {appVersion}</span><i /> <span>{country}</span><i /> <span>口径 V1.8</span></div>
+            <div className="context-summary"><Badge tone="blue">{module === "funnel" ? currentPage.hint : currentModule.title}</Badge><span>{isFunnelOverview ? "全部项目" : project}</span><i /> <span>{isFunnelOverview ? "每日08:00汇总 · 09:30补数" : range}</span><i /> <span>{platform} · {appVersion}</span><i /> <span>{country}</span><i /> <span>口径 V1.8</span></div>
             {module !== "tracking" && <div className="context-actions"><button onClick={() => notify("当前分析视图已保存")}>保存视图</button><button onClick={() => setDialog(module === "admob" ? "admob-report" : "project-report")}>导出报表</button></div>}
           </section>}
           {["tracking", "config", "tasks"].includes(module) && <section className="governance-flow-strip">

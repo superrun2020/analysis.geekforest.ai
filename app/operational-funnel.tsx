@@ -2397,6 +2397,34 @@ function Overview({ data, onPageChange, onProjectSelect, context }: { data: AnyR
   </div>;
 }
 
+function VersionComparison({ data, domain }: { data: AnyRow; domain: string }) {
+  const rows: AnyRow[] = data.versionComparison?.rows ?? [];
+  const suggested = text(data.versionComparison?.suggestedBaseline);
+  const [baselineLabel, setBaselineLabel] = useState(suggested || text(rows[0]?.versionLabel));
+  useEffect(() => { setBaselineLabel(suggested || text(rows[0]?.versionLabel)); }, [data, suggested, rows]);
+  const baseline = rows.find((row) => text(row.versionLabel) === baselineLabel) ?? rows[0];
+  const rateDelta = (value: unknown, base: unknown) => {
+    const delta = Number(value ?? 0) - Number(base ?? 0);
+    return <span className={delta < -3 ? "version-delta bad" : delta > 3 ? "version-delta good" : "version-delta"}>{delta > 0 ? "+" : ""}{delta.toFixed(2)}pp</span>;
+  };
+  if (!rows.length) return <section className="surface"><div className="empty-table-state"><strong>当前筛选范围没有可对比版本</strong><span>至少需要两个带 app_version 的版本汇总。请确认版本字段已上报，并选择包含多个版本的日期范围。</span></div></section>;
+  return <div className="page-stack">
+    <section className="surface version-compare-header">
+      <div className="surface-title"><div><h2>App 版本核心指标对比</h2><p>固定同一项目、日期、平台和国家，只改变 App 版本；差异均相对所选基准版本。</p></div><label>基准版本<select value={baselineLabel} onChange={(event) => setBaselineLabel(event.target.value)}>{rows.map((row) => <option key={text(row.versionLabel)} value={text(row.versionLabel)}>{text(row.versionLabel)} · DAU {number(row.dauUsers)}</option>)}</select></label></div>
+      <div className="version-compare-notice"><strong>判断顺序：</strong>先看 DAU 样本量，再看覆盖率/成功率差异；低于 100 UV 的版本标记为“小样本”，不直接判定版本异常。数据源：{text(data.versionComparison?.source)}。</div>
+    </section>
+    <section className="surface"><div className="table-wrap"><table className="version-compare-table"><thead><tr><th>版本</th><th>DAU</th>{domain === "vpn" ? <><th>连接点击/尝试UV</th><th>连接发起率</th><th>连接成功UV</th><th>连接成功率</th></> : <><th>资格检查UV</th><th>资格通过率</th><th>广告机会UV</th><th>机会完整率</th><th>请求UV</th><th>请求覆盖率</th><th>AV</th><th>浏览者比例</th><th>请求→展示</th></>}<th>版本结论</th></tr></thead><tbody>{rows.map((row) => {
+        const sampleSmall = Number(row.dauUsers ?? 0) < 100;
+        const isBaseline = text(row.versionLabel) === text(baseline?.versionLabel);
+        const primaryRate = domain === "vpn" ? Number(row.connectSuccessRate ?? 0) : Number(row.viewerRatio ?? 0);
+        const baselineRate = domain === "vpn" ? Number(baseline?.connectSuccessRate ?? 0) : Number(baseline?.viewerRatio ?? 0);
+        const delta = primaryRate - baselineRate;
+        const conclusion = isBaseline ? "基准版本" : sampleSmall ? "小样本，仅观察" : delta <= -5 ? "明显下降，优先排查" : delta >= 5 ? "明显提升" : "基本持平";
+        return <tr key={text(row.versionLabel)} className={delta <= -5 && !sampleSmall ? "row-bad" : ""}><td><strong>{text(row.versionLabel)}</strong>{isBaseline && <small>当前基准</small>}</td><td>{number(row.dauUsers)}{sampleSmall && <small>小样本</small>}</td>{domain === "vpn" ? <><td>{number(row.connectAttemptUsers)}</td><td>{percent(row.connectAttemptRate)}{!isBaseline && rateDelta(row.connectAttemptRate, baseline?.connectAttemptRate)}</td><td>{number(row.connectSuccessUsers)}</td><td>{percent(row.connectSuccessRate)}{!isBaseline && rateDelta(row.connectSuccessRate, baseline?.connectSuccessRate)}</td></> : <><td>{number(row.eligibilityCheckUsers)}</td><td>{percent(row.eligibilityPassRate)}{!isBaseline && rateDelta(row.eligibilityPassRate, baseline?.eligibilityPassRate)}</td><td>{number(row.opportunityUsers)}</td><td>{percent(row.opportunityCoverageRate)}{!isBaseline && rateDelta(row.opportunityCoverageRate, baseline?.opportunityCoverageRate)}</td><td>{number(row.requestUsers)}</td><td>{percent(row.requestCoverageRate)}{!isBaseline && rateDelta(row.requestCoverageRate, baseline?.requestCoverageRate)}</td><td>{number(row.impressionUsers)}</td><td>{percent(row.viewerRatio)}{!isBaseline && rateDelta(row.viewerRatio, baseline?.viewerRatio)}</td><td>{percent(row.impressionConversionRate)}{!isBaseline && rateDelta(row.impressionConversionRate, baseline?.impressionConversionRate)}</td></>}<td><strong>{conclusion}</strong><small>{!isBaseline && !sampleSmall ? `核心率较基准 ${delta > 0 ? "+" : ""}${delta.toFixed(2)}pp` : "同口径比较"}</small></td></tr>;
+      })}</tbody></table></div></section>
+  </div>;
+}
+
 function Workbench({ data, domain, setDomain, unit, setUnit, pageData, diagnosisData, pageProgress, diagnosisProgress, lockDomain }: { data: AnyRow; domain: string; setDomain: (domain: "ads" | "vpn" | "quality") => void; unit: FunnelUnit; setUnit: (unit: FunnelUnit) => void; pageData?: AnyRow | null; diagnosisData?: AnyRow | null; pageProgress?: QueryProgressItem; diagnosisProgress?: QueryProgressItem; lockDomain?: boolean }) {
   const isVpnProduct = data.isVpnProduct === true;
   const baseMetrics: AnyRow[] = data.metrics ?? [];
@@ -2637,7 +2665,7 @@ export function OperationalFunnel(props: Props) {
   const initialOperationalView = readInitialOperationalView();
   const [domain, setDomain] = useState<"ads" | "vpn" | "quality">(props.initialDomain ?? initialOperationalView.domain);
   const [unit, setUnit] = useState<FunnelUnit>(props.initialDomain === "vpn" ? "sessions" : initialOperationalView.unit);
-  const [workbenchSection, setWorkbenchSection] = useState<"workbench" | "diagnosis" | "path">("workbench");
+  const [workbenchSection, setWorkbenchSection] = useState<"workbench" | "diagnosis" | "path" | "versions">("workbench");
   const dates = useMemo(() => dateRange(props.range), [props.range]);
   const queryUnit: FunnelUnit = domain === "vpn" ? "sessions" : domain === "ads" ? unit : "users";
   const scope = props.page === "overview" ? "overview" : "project";
@@ -2876,6 +2904,6 @@ export function OperationalFunnel(props: Props) {
   const diagnosisProgress = progressItems.find((item) => item.key === diagnosisKey);
   if (!hasRows) return <div className="page-stack">{status}{progress}<StatePanel kind="empty" message="数据包已加载，但当前筛选范围没有可计算的标准事件。" /></div>;
   if (props.page === "overview") return <div className="page-stack">{status}{progress}<Overview data={data} onPageChange={props.onPageChange} onProjectSelect={props.onProjectSelect} context={{ projectCode: "全部项目", range: props.range, dates, loadedAt }} /></div>;
-  if (props.page === "workbench") return <div className="page-stack">{status}{progress}<nav className="operational-tabs workbench-tabs"><button className={workbenchSection === "workbench" ? "active" : ""} onClick={() => setWorkbenchSection("workbench")}>核心漏斗</button><button className={workbenchSection === "diagnosis" ? "active" : ""} onClick={() => setWorkbenchSection("diagnosis")}>流失诊断</button><button className={workbenchSection === "path" ? "active" : ""} onClick={() => setWorkbenchSection("path")}>页面路径</button></nav>{workbenchSection === "workbench" ? <Workbench data={data} domain={domain} setDomain={setDomain} unit={unit} setUnit={setUnit} pageData={pageData} diagnosisData={diagnosisData} pageProgress={pageProgress} diagnosisProgress={diagnosisProgress} lockDomain={props.lockDomain} /> : <GenericPage page={workbenchSection} data={data} workbenchData={workbenchData} onOpenWorkbench={() => setWorkbenchSection("workbench")} />}</div>;
+  if (props.page === "workbench") return <div className="page-stack">{status}{progress}<nav className="operational-tabs workbench-tabs"><button className={workbenchSection === "workbench" ? "active" : ""} onClick={() => setWorkbenchSection("workbench")}>核心漏斗</button><button className={workbenchSection === "diagnosis" ? "active" : ""} onClick={() => setWorkbenchSection("diagnosis")}>流失诊断</button><button className={workbenchSection === "path" ? "active" : ""} onClick={() => setWorkbenchSection("path")}>页面路径</button><button className={workbenchSection === "versions" ? "active" : ""} onClick={() => setWorkbenchSection("versions")}>版本对比</button></nav>{workbenchSection === "workbench" ? <Workbench data={data} domain={domain} setDomain={setDomain} unit={unit} setUnit={setUnit} pageData={pageData} diagnosisData={diagnosisData} pageProgress={pageProgress} diagnosisProgress={diagnosisProgress} lockDomain={props.lockDomain} /> : workbenchSection === "versions" ? <VersionComparison data={workbenchData ?? data} domain={domain} /> : <GenericPage page={workbenchSection} data={data} workbenchData={workbenchData} onOpenWorkbench={() => setWorkbenchSection("workbench")} />}</div>;
   return <div className="page-stack">{status}{progress}<GenericPage page={props.page} data={data} workbenchData={workbenchData} /></div>;
 }
