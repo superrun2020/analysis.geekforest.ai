@@ -666,7 +666,38 @@ class FunnelAnalyticsService
             $params['projectCode'] = $this->resolveProjectCode((string) $params['projectCode']);
         }
 
-        return match ($params['page']) {
+        $page = (string) ($params['page'] ?? 'overview');
+        // The VPN workbench already caches its DWS summary internally; avoid
+        // double-caching it under a second key.
+        $skipCache = $page === 'workbench' && ($params['domain'] ?? 'ads') === 'vpn';
+        if (in_array($page, $this->cacheableQueryPages(), true) && !$skipCache) {
+            return $this->cacheAnalysisResult($page, $params, function () use ($page, $params): array {
+                return $this->dispatchQuery($page, $params);
+            });
+        }
+
+        return $this->dispatchQuery($page, $params);
+    }
+
+    /**
+     * Pages whose result is deterministic for one filter snapshot and is safe to
+     * cache. These previously re-scanned ADB DWD event detail on every request;
+     * caching them removes the repeated full-table scans behind the dashboard.
+     *
+     * @return array<int, string>
+     */
+    private function cacheableQueryPages(): array
+    {
+        return ['overview', 'workbench', 'diagnosis', 'path', 'evidence'];
+    }
+
+    /**
+     * @param array<string, mixed> $params
+     * @return array<string, mixed>
+     */
+    private function dispatchQuery(string $page, array $params): array
+    {
+        return match ($page) {
             'overview' => $this->overview($params),
             'workbench' => $this->workbench($params),
             'diagnosis' => $this->diagnosis($params),
@@ -677,6 +708,64 @@ class FunnelAnalyticsService
             'snapshot' => $this->snapshot(),
             default => throw new InvalidArgumentException('不支持的漏斗分析页面'),
         };
+    }
+
+    /**
+     * Cache a full page result keyed on the normalized filter snapshot. Historical
+     * dates (dateTo < today) are stable after the daily aggregate window and stay
+     * warm for 12h; today refreshes every 2 minutes. Raw evidence detail keeps a
+     * short TTL because late-arriving rows can still land.
+     *
+     * @param array<string, mixed> $params
+     * @param callable(): array<string, mixed> $builder
+     * @return array<string, mixed>
+     */
+    private function cacheAnalysisResult(string $namespace, array $params, callable $builder): array
+    {
+        return Cache::remember(
+            $this->analysisPageCacheKey($namespace, $params),
+            $this->analysisPageCacheSeconds($namespace, $params),
+            $builder
+        );
+    }
+
+    /**
+     * @param array<string, mixed> $params
+     */
+    private function analysisPageCacheKey(string $namespace, array $params): string
+    {
+        return 'jkcl_funnel:page:' . $namespace . ':' . md5(json_encode(
+            $this->sortForCacheKey($params),
+            JSON_UNESCAPED_UNICODE
+        ));
+    }
+
+    /**
+     * @param array<string, mixed> $params
+     */
+    private function analysisPageCacheSeconds(string $page, array $params): int
+    {
+        if ($page === 'evidence') {
+            return 300;
+        }
+
+        return $this->summaryWorkbenchCacheSeconds($params);
+    }
+
+    /**
+     * Drop cached results for a filter snapshot so a --force warm run rebuilds
+     * them from ADB instead of reusing stale entries.
+     *
+     * @param array<string, mixed> $params
+     */
+    private function forgetAnalysisPageCaches(array $params): void
+    {
+        foreach ($this->cacheableQueryPages() as $page) {
+            Cache::forget($this->analysisPageCacheKey($page, array_replace($params, ['page' => $page])));
+        }
+        if (($params['page'] ?? 'workbench') === 'workbench' && ($params['domain'] ?? 'vpn') === 'vpn') {
+            Cache::forget($this->vpnSummaryWorkbenchCacheKey($params));
+        }
     }
 
     /**
@@ -699,8 +788,8 @@ class FunnelAnalyticsService
             $query['projectCode'] = $this->resolveProjectCode((string) $query['projectCode']);
         }
 
-        if ($force && ($query['page'] ?? null) === 'workbench' && ($query['domain'] ?? null) === 'vpn') {
-            Cache::forget($this->vpnSummaryWorkbenchCacheKey($query));
+        if ($force) {
+            $this->forgetAnalysisPageCaches($query);
         }
 
         $startedAt = microtime(true);

@@ -9,7 +9,7 @@ User=root
 WorkingDirectory=/opt/jkcl-funnel-api/current
 Environment=PLUGIN_INITIALIZATION_ENABLED=false
 ExecStart=/bin/bash -lc '/usr/bin/php artisan funnel-analysis:aggregate --start-date="$(date -d "7 days ago" +%%F)" --end-date="$(date -d yesterday +%%F)" --force --no-interaction'
-ExecStartPost=/bin/bash -lc '/usr/bin/php artisan cache:clear; for offset in 7 6 5 4 3 2 1; do day="$(date -d "$offset days ago" +%%F)"; /usr/bin/php artisan funnel-analysis:warm-workbench-cache --date="$day" --domain=all --platform=all --limit=200 --no-interaction || true; done'
+ExecStartPost=/bin/bash -lc '/usr/bin/php artisan cache:clear; for offset in 7 6 5 4 3 2 1; do day="$(date -d "$offset days ago" +%%F)"; /usr/bin/php artisan funnel-analysis:warm-workbench-cache --date="$day" --domain=all --platform=android --limit=200 --no-interaction || true; done'
 TimeoutStartSec=43200
 StandardOutput=journal
 StandardError=journal

@@ -11,6 +11,7 @@
 - App 版本及 Build 版本核心指标对比。
 - 每日 08:00 汇总昨天数据，09:30 补充延迟入库数据。
 - 汇总失败后每 30 分钟自动重试；成功后预热工作台缓存。
+- 页面级结果缓存：overview / workbench(ads) / diagnosis / path / evidence 按筛选快照缓存，历史日期 12h、今日 2min（evidence 固定 5min）；`--force` 预热会先清除同快照旧缓存。
 
 ## 目录说明
 
