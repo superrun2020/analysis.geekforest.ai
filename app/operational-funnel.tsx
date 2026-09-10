@@ -580,6 +580,8 @@ function normalizeBlockedReasons(diagnosisData: AnyRow | null | undefined, isEli
 }
 
 function dateRange(range: string) {
+  const customRange = range.match(/^(\d{4}-\d{2}-\d{2})~(\d{4}-\d{2}-\d{2})$/);
+  if (customRange) return { dateFrom: customRange[1], dateTo: customRange[2] };
   const exactDate = range.match(/^\d{4}-\d{2}-\d{2}$/)?.[0];
   if (exactDate) return { dateFrom: exactDate, dateTo: exactDate };
   const end = new Date();
@@ -2030,6 +2032,7 @@ function VpnPrerequisiteInsight({ rows, data }: { rows: AnyRow[]; data: AnyRow }
 }
 
 const MATRIX_DIMENSIONS: Array<{ key: string; label: string }> = [
+  { key: "event_date", label: "日期" },
   { key: "country_code", label: "国家" },
   { key: "asn", label: "ASN" },
   { key: "server_id", label: "节点" },
@@ -2055,7 +2058,7 @@ function matrixDimensionLabel(key: string): string {
   return MATRIX_DIMENSIONS.find((dimension) => dimension.key === key)?.label ?? key;
 }
 
-function AdNetworkFailureMatrix({ data, dimensions, querying, queryError, onQuery }: { data: AnyRow; dimensions: string[]; querying: boolean; queryError: string; onQuery: (dimensions: string[]) => void }) {
+function AdNetworkFailureMatrix({ data, dimensions, dates, projectCode, platform, country, appVersion, querying, queryError, onQuery }: { data: AnyRow; dimensions: string[]; dates: { dateFrom: string; dateTo: string }; projectCode: string; platform: string; country: string; appVersion: string; querying: boolean; queryError: string; onQuery: (dimensions: string[]) => void }) {
   const matrix = data.adNetworkFailureMatrix ?? {};
   const rows = Array.isArray(matrix.rows) ? matrix.rows : [];
   const totals = matrix.totals ?? {};
@@ -2082,40 +2085,37 @@ function AdNetworkFailureMatrix({ data, dimensions, querying, queryError, onQuer
 
   const renderDimensionCell = (dimension: string, value: unknown) => {
     if (dimension === "server_id") return <code>{text(value)}</code>;
+    if (dimension === "event_date") return <strong>{text(value)}</strong>;
     return <strong>{text(value)}</strong>;
   };
 
-  return <section className="surface ad-network-failure-matrix">
-    <div className="surface-title">
-      <div>
-        <h2>广告网络失败横向报表</h2>
-        <p>按所选维度横向看广告请求、加载失败、展示失败和展示拦截的成功率与失败率；去掉某个维度即向上聚合。</p>
+  return <div className="vpn-overall-report">
+    <section className="surface matrix-overall-config">
+      <div className="overall-config-row dimension-row">
+        <span className="overall-config-label">维度</span>
+        {MATRIX_DIMENSIONS.map((dimension) => <label key={dimension.key} className={`overall-chip ${draftDimensions.includes(dimension.key) ? "active" : ""}`} title={draftDimensions.includes(dimension.key) ? "取消勾选即向上聚合" : "勾选后按此维度细分"}><input type="checkbox" checked={draftDimensions.includes(dimension.key)} onChange={() => toggleDimension(dimension.key)} disabled={draftDimensions.includes(dimension.key) && draftDimensions.length <= 1} /><span>{dimension.label}</span></label>)}
       </div>
-      <span>{matrix.available === false ? "等待网络上下文" : `${rows.length} 个组合`}</span>
-    </div>
-    {matrix.available === false ? <div className="diagnosis-no-reasons compact warn"><strong>当前没有可聚合的网络维度广告事件</strong><p>{text(matrix.reason)}。需要广告事件携带 <code>country_code</code>、<code>asn</code>、<code>server_id</code>、<code>protocol</code>，否则只能看到普通广告漏斗，不能定位到具体网络出口。</p></div> : <>
-      <div className="matrix-summary-grid">
-        <article><span>请求数</span><strong>{number(totals.requestCount)}</strong><small>ad_request · request_id 去重</small></article>
-        <article><span>加载成功率</span><strong>{percent(totals.loadSuccessRate)}</strong><small>{number(totals.loadSuccessCount)} 成功 / {number(totals.requestCount)} 请求</small></article>
-        <article><span>失败率</span><strong>{percent(totals.failureRate)}</strong><small>加载失败 + 展示失败 + 展示拦截</small></article>
-        <article><span>Impression</span><strong>{number(totals.impressionCount)}</strong><small>展示率 {percent(totals.impressionRate)}</small></article>
+      <div className="overall-config-row metric-row">
+        <span className="overall-config-label">统计字段</span>
+        {MATRIX_METRIC_COLUMNS.map((column) => <label key={column.key} className={`overall-chip ${shows(column.key) ? "active" : ""}`}><input type="checkbox" checked={shows(column.key)} onChange={() => toggleColumn(column.key)} /><span>{column.label}</span></label>)}
       </div>
-      <div className="matrix-builder">
-        <div className="matrix-builder-section matrix-filter-guide"><span>筛选区</span><strong>使用页面顶部全局筛选栏</strong><small>日期、平台、国家、App版本</small></div>
-        <div className="matrix-builder-section"><span>聚合区</span><div className="matrix-option-list matrix-dimension-picker">
-          {MATRIX_DIMENSIONS.map((dimension) => <label key={dimension.key} className={draftDimensions.includes(dimension.key) ? "active" : ""} title={draftDimensions.includes(dimension.key) ? "取消勾选即向上聚合" : "勾选后按此维度细分"}><input type="checkbox" checked={draftDimensions.includes(dimension.key)} onChange={() => toggleDimension(dimension.key)} disabled={draftDimensions.includes(dimension.key) && draftDimensions.length <= 1} /><span>{dimension.label}</span></label>)}
-        </div><small>至少保留一个维度；去掉维度 = 向上聚合</small></div>
-        <div className="matrix-builder-section"><span>展示列</span><div className="matrix-option-list">
-          {MATRIX_METRIC_COLUMNS.map((column) => <label key={column.key} className={shows(column.key) ? "active" : ""}><input type="checkbox" checked={shows(column.key)} onChange={() => toggleColumn(column.key)} /><span>{column.label}</span></label>)}
-        </div><small>只影响当前结果表格，不会发起后端查询</small></div>
-        <div className="matrix-query-action"><button type="button" onClick={() => onQuery(draftDimensions)} disabled={querying}>{querying ? "查询中…" : "查询"}</button><small>当前生效：{activeDimensions.map(matrixDimensionLabel).join(" × ")}</small></div>
+      <div className="overall-filter-row">
+        <div className="overall-filter-item"><span>日期范围：</span><strong>{dates.dateFrom} → {dates.dateTo}</strong></div>
+        <div className="overall-filter-item"><span>项目代号：</span><strong>{projectCode}</strong></div>
+        <div className="overall-filter-item"><span>国家：</span><strong>{country}</strong></div>
+        <div className="overall-filter-item"><span>平台：</span><strong>{platform}</strong></div>
+        <div className="overall-filter-item"><span>App版本：</span><strong>{appVersion}</strong></div>
       </div>
+      <div className="overall-action-row">
+        <div className="overall-view-actions"><button type="button">选择视图</button><button type="button">＋ 新增</button></div>
+        <div className="overall-query-actions"><button type="button">导出 CSV</button><button type="button" onClick={() => setVisibleColumns(MATRIX_METRIC_COLUMNS.map((column) => column.key))}>重置</button><button type="button" className="primary" onClick={() => onQuery(draftDimensions)} disabled={querying}>⌕ {querying ? "查询中…" : "查询"}</button></div>
+      </div>
+      <div className="overall-active-hint">当前生效：{activeDimensions.map(matrixDimensionLabel).join(" × ")} · 展示 {visibleColumns.length} 个字段；展示列只影响当前结果表格，不发起后端查询。</div>
+    </section>
+    <section className="surface ad-network-failure-matrix overall-result-card">
+      <div className="overall-result-tools"><div><strong>VPN诊断结果</strong><span>{matrix.available === false ? "等待网络上下文" : `${rows.length} 个组合`}</span></div><div><button type="button" onClick={() => onQuery(draftDimensions)} disabled={querying}>刷新</button><button type="button">设置</button></div></div>
+    {matrix.available === false ? <div className="diagnosis-no-reasons compact warn"><strong>当前没有可聚合的网络维度广告事件</strong><p>{text(matrix.reason)}。需要广告事件携带 <code>event_date</code>、<code>country_code</code>、<code>asn</code>、<code>server_id</code>、<code>protocol</code>，否则只能看到普通广告漏斗，不能定位到具体网络出口。</p></div> : <>
       {queryError && <div className="diagnosis-no-reasons compact warn"><strong>查询失败</strong><p>{queryError}</p></div>}
-      {topBad && <div className={`matrix-risk-card ${topBad.status === "bad" ? "bad" : topBad.status === "warn" ? "warn" : "good"}`}>
-        <div><span>优先排查组合</span><strong>{activeDimensions.map((dimension) => `${matrixDimensionLabel(dimension)} ${text((topBad.dimensions ?? {})[dimension] ?? "unknown")}`).join(" × ")}</strong></div>
-        <div><span>主要问题</span><strong>{statusLabel[String(topBad.status)] ?? text(topBad.status)} · 失败 {number(topBad.failureCount)} · {percent(topBad.failureRate)}</strong></div>
-        <div><span>建议动作</span><strong>{text(topBad.suggestion)}</strong></div>
-      </div>}
       <div className="table-wrap">
         <table className="ad-network-failure-table">
           <thead><tr>
@@ -2143,7 +2143,8 @@ function AdNetworkFailureMatrix({ data, dimensions, querying, queryError, onQuer
       </div>
       <div className="matrix-footnote">字段来源：{text(matrix.source)}；口径：仅统计携带 VPN/网络上下文的广告事件，当前维度为 {activeDimensions.map((dimension) => <code key={dimension}>{dimension}</code>)}。去掉维度即向上聚合，成功率/失败率按所选维度组合重算。</div>
     </>}
-  </section>;
+    </section>
+  </div>;
 }
 
 function AdSessionBaselineWarning({ rows, rawRows }: { rows: AnyRow[]; rawRows: AnyRow[] }) {
@@ -2491,10 +2492,13 @@ function versionCompareColumns(domain: string): VersionCompareColumn[] {
 }
 
 const versionCompareDimensions = [
+  { key: "stat_date", label: "日期" },
   { key: "app_version", label: "应用版本" },
   { key: "country_code", label: "国家" },
   { key: "platform", label: "平台" },
 ];
+
+const versionCompareDimensionLabel = (key: string) => versionCompareDimensions.find((item) => item.key === key)?.label ?? key;
 
 /** Compare dimension labels naturally: version parts as numbers, rest lexically. */
 function compareDimensionLabels(a: string, b: string): number {
@@ -2527,8 +2531,9 @@ function VersionComparison({ data, domain, projectCode, appIdentifier, platform,
   refreshKey: number;
 }) {
   const allColumns = useMemo(() => versionCompareColumns(domain), [domain]);
-  const [dimension, setDimension] = useState<string>("app_version");
+  const [dimensions, setDimensions] = useState<string[]>(["app_version"]);
   const [range, setRange] = useState<string>(initialRange);
+  const [versionFilter, setVersionFilter] = useState<string>(appVersion === "全部版本" ? "" : appVersion.split(" ")[0]);
   const [visible, setVisible] = useState<Record<string, boolean>>(() => {
     const map: Record<string, boolean> = {};
     allColumns.forEach((column) => { map[column.key] = true; });
@@ -2538,7 +2543,8 @@ function VersionComparison({ data, domain, projectCode, appIdentifier, platform,
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const isDefault = dimension === "app_version" && range === initialRange;
+  const dimensionKey = dimensions.join("|");
+  const isDefault = dimensions.length === 1 && dimensions[0] === "app_version" && range === initialRange && !versionFilter;
   useEffect(() => {
     if (isDefault) {
       setComparison(data.versionComparison ?? {});
@@ -2557,43 +2563,62 @@ function VersionComparison({ data, domain, projectCode, appIdentifier, platform,
       appIdentifier,
       platform: platform === "全部" ? undefined : platform.toLowerCase() as "android" | "ios",
       country: country === "全部国家" ? undefined : country,
-      appVersion: appVersion === "全部版本" ? undefined : appVersion.split(" ")[0],
+      appVersion: !dimensions.includes("app_version") && versionFilter ? versionFilter : undefined,
     };
-    queryFunnel<AnyRow>({ ...baseQuery, page: "version_comparison", domain, unit: "users", dimension }, controller.signal)
+    queryFunnel<AnyRow>({ ...baseQuery, page: "version_comparison", domain, unit: "users", dimension: dimensions[0], dimensions }, controller.signal)
       .then((result) => { if (active) setComparison(result.versionComparison ?? {}); })
       .catch((reason) => { if (active) setError(reason instanceof Error ? reason.message : "查询失败"); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; controller.abort(); };
-  }, [dimension, range, isDefault, projectCode, appIdentifier, platform, country, appVersion, refreshKey, data]);
+  }, [dimensionKey, range, isDefault, projectCode, appIdentifier, platform, country, versionFilter, refreshKey, data]);
 
   const rows: AnyRow[] = comparison.rows ?? [];
   const selectedColumns = allColumns.filter((column) => visible[column.key] !== false);
-  const dimensionLabel = text(comparison.dimensionLabel ?? "应用版本");
+  const activeDimensions: string[] = Array.isArray(comparison.dimensions) && comparison.dimensions.length ? comparison.dimensions : dimensions;
+  const dimensionLabel = text(comparison.dimensionLabel ?? activeDimensions.map(versionCompareDimensionLabel).join(" × "));
+  const versionOptions: AnyRow[] = comparison.versionOptions ?? [];
   const suggested = text(comparison.suggestedBaseline) || text(rows[0]?.dimensionLabel);
   const [baselineLabel, setBaselineLabel] = useState(suggested);
   useEffect(() => { setBaselineLabel(suggested); }, [suggested]);
   const baseline = rows.find((row) => text(row.dimensionLabel) === baselineLabel) ?? rows[0];
 
-  const [sortKey, setSortKey] = useState<string>("");
+  const [sortKey, setSortKey] = useState<string>("dauUsers");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
+  const setDimensionSortDesc = (key: string) => {
+    setSortKey(`dimension:${key}`);
+    setSortDirection("desc");
+  };
   const toggleSort = (key: string) => {
     if (sortKey === key) {
       setSortDirection((direction) => (direction === "asc" ? "desc" : "asc"));
       return;
     }
     setSortKey(key);
-    setSortDirection(key === "__dimension" ? "asc" : "desc");
+    setSortDirection(key.startsWith("dimension:") && !key.endsWith("stat_date") && !key.endsWith("app_version") ? "asc" : "desc");
+  };
+  const toggleDimension = (key: string) => {
+    setDimensions((current) => {
+      if (current.includes(key)) {
+        return current.length === 1 ? current : current.filter((item) => item !== key);
+      }
+      return [...current, key];
+    });
   };
   const sortedRows = useMemo(() => {
     if (!sortKey) return rows;
     const direction = sortDirection === "asc" ? 1 : -1;
     return [...rows].sort((a, b) => {
-      if (sortKey === "__dimension") {
-        return direction * compareDimensionLabels(text(a.dimensionLabel), text(b.dimensionLabel));
+      if (sortKey.startsWith("dimension:")) {
+        const key = sortKey.slice("dimension:".length);
+        const left = text(a.dimensionLabels?.[key] ?? a.dimensionValues?.[key] ?? a.dimensionLabel);
+        const right = text(b.dimensionLabels?.[key] ?? b.dimensionValues?.[key] ?? b.dimensionLabel);
+        return direction * compareDimensionLabels(left, right);
       }
       return direction * (Number(a[sortKey] ?? 0) - Number(b[sortKey] ?? 0));
     });
   }, [rows, sortKey, sortDirection]);
+
+  const renderDimensionValue = (row: AnyRow, key: string) => text(row.dimensionLabels?.[key] ?? row.dimensionValues?.[key] ?? (activeDimensions.length === 1 ? row.dimensionLabel : "—"));
 
   const rateDelta = (value: unknown, base: unknown) => {
     const delta = Number(value ?? 0) - Number(base ?? 0);
@@ -2623,7 +2648,7 @@ function VersionComparison({ data, domain, projectCode, appIdentifier, platform,
 
   return <div className="page-stack version-compare-page">
     <section className="surface version-compare-header">
-      <div className="surface-title"><div><h2>App 版本核心指标对比</h2><p>固定同一项目、平台和国家，按「{dimensionLabel}」对比核心漏斗指标；右侧可选展示列、维度和日期范围，差异相对所选基准。</p></div></div>
+      <div className="surface-title"><div><h2>App 版本核心指标对比</h2><p>按「{dimensionLabel}」对比核心漏斗指标；日期和版本都可加入维度。日期未加入维度时聚合日期，版本未加入维度时可筛选单个版本逐日查看。</p></div></div>
     </section>
     <div className="version-compare-layout">
       <div className="version-compare-main">
@@ -2631,14 +2656,14 @@ function VersionComparison({ data, domain, projectCode, appIdentifier, platform,
         {error && <div className="version-compare-loading warn">{error}</div>}
         {!rows.length && !loading ? <section className="surface"><div className="empty-table-state"><strong>当前筛选范围没有可对比数据</strong><span>请确认所选维度字段已上报，并选择包含多个分组的日期范围。</span></div></section> : <section className="surface"><div className="table-wrap"><table className="version-compare-table">
           <thead><tr>
-            <th className="sortable" onClick={() => toggleSort("__dimension")}><span>{dimensionLabel}</span>{sortKey === "__dimension" && <span className="sort-indicator">{sortDirection === "asc" ? "▲" : "▼"}</span>}</th>
+            {activeDimensions.map((item) => <th key={item} className="sortable dimension-sortable" onClick={() => toggleSort(`dimension:${item}`)}><span>{versionCompareDimensionLabel(item)}</span>{(item === "stat_date" || item === "app_version") && <button type="button" className="inline-sort-desc" onClick={(event) => { event.stopPropagation(); setDimensionSortDesc(item); }}>降序</button>}{sortKey === `dimension:${item}` && <span className="sort-indicator">{sortDirection === "asc" ? "▲" : "▼"}</span>}</th>)}
             {selectedColumns.map((column) => <th key={column.key} className="sortable" onClick={() => toggleSort(column.key)}><span>{column.label}</span>{column.unit === "ratio" && <small title="同组分子分母计算的比例">%</small>}{sortKey === column.key && <span className="sort-indicator">{sortDirection === "asc" ? "▲" : "▼"}</span>}</th>)}
           </tr></thead>
           <tbody>{sortedRows.map((row) => {
             const sampleSmall = Number(row.dauUsers ?? 0) < 100;
             const isBaseline = text(row.dimensionLabel) === text(baseline?.dimensionLabel);
-            return <tr key={text(row.dimensionLabel)} className={isBaseline ? "row-baseline" : ""}>
-              <td><strong>{text(row.dimensionLabel)}</strong>{isBaseline && <small>当前基准</small>}{sampleSmall && <small className="sample-small">小样本</small>}</td>
+            return <tr key={text(row.dimensionKey ?? row.dimensionLabel)} className={isBaseline ? "row-baseline" : ""}>
+              {activeDimensions.map((item, index) => <td key={item}><strong>{renderDimensionValue(row, item)}</strong>{index === 0 && isBaseline && <small>当前基准</small>}{index === 0 && sampleSmall && <small className="sample-small">小样本</small>}</td>)}
               {selectedColumns.map((column) => <td key={column.key}>
                 {formatCell(row[column.key], column.unit)}
                 {column.unit === "ratio" && !isBaseline && baseline ? rateDelta(row[column.key], baseline[column.key]) : null}
@@ -2646,7 +2671,7 @@ function VersionComparison({ data, domain, projectCode, appIdentifier, platform,
             </tr>;
           })}</tbody>
           {rows.length > 1 && <tfoot><tr>
-            <td><strong>摘要</strong><small>全部 {rows.length} 组</small></td>
+            <td colSpan={activeDimensions.length}><strong>摘要</strong><small>全部 {rows.length} 组</small></td>
             {selectedColumns.map((column) => <td key={column.key}><strong>{formatCell(totals[column.key], column.unit)}</strong></td>)}
           </tr></tfoot>}
         </table></div><div className="version-compare-footnote">数据源：{text(comparison.source)}；口径：{text(comparison.notice)}</div></section>}
@@ -2654,7 +2679,16 @@ function VersionComparison({ data, domain, projectCode, appIdentifier, platform,
       <aside className="version-compare-config surface">
         <div className="config-group">
           <div className="config-title">维度</div>
-          <div className="config-options">{versionCompareDimensions.map((item) => <button key={item.key} className={dimension === item.key ? "active" : ""} onClick={() => setDimension(item.key)}>{item.label}</button>)}</div>
+          <div className="config-options">{versionCompareDimensions.map((item) => <button key={item.key} className={dimensions.includes(item.key) ? "active" : ""} onClick={() => toggleDimension(item.key)}>{item.label}</button>)}</div>
+          <small className="config-hint">可多选：日期 + 应用版本=逐日看各版本；只选应用版本=聚合日期看所有版本。</small>
+        </div>
+        <div className="config-group">
+          <div className="config-title">版本筛选</div>
+          <select className="config-select" value={dimensions.includes("app_version") ? "" : versionFilter} disabled={dimensions.includes("app_version")} onChange={(event) => setVersionFilter(event.target.value)}>
+            <option value="">全部版本</option>
+            {versionOptions.map((item) => <option key={`${item.appVersion}-${item.buildNumber ?? ""}`} value={text(item.appVersion)}>{text(item.label ?? item.appVersion)}</option>)}
+          </select>
+          <small className="config-hint">未把“应用版本”放进维度时，可指定某个版本看每天数据。</small>
         </div>
         <div className="config-group">
           <div className="config-title">日期范围</div>
@@ -3161,7 +3195,7 @@ export function OperationalFunnel(props: Props) {
     if (matrixLoading && !matrixData) return <StatePanel kind="loading" message="正在读取广告网络失败横向报表，按国家 × ASN × 节点 × 协议横向聚合…" />;
     if (matrixError && !matrixData) return <StatePanel kind="error" message={matrixError} retry={() => setMatrixQueryKey((value) => value + 1)} />;
     if (!matrixData) return <StatePanel kind="empty" message="当前筛选范围没有可聚合的网络维度广告事件。" />;
-    return <div className="page-stack"><AdNetworkFailureMatrix data={matrixData} dimensions={matrixDimensions} querying={matrixLoading} queryError={matrixError} onQuery={(nextDimensions) => { setMatrixDimensions(nextDimensions); setMatrixQueryKey((value) => value + 1); }} /></div>;
+    return <div className="page-stack"><AdNetworkFailureMatrix data={matrixData} dimensions={matrixDimensions} dates={dates} projectCode={props.projectCode} platform={props.platform} country={props.country} appVersion={props.appVersion} querying={matrixLoading} queryError={matrixError} onQuery={(nextDimensions) => { setMatrixDimensions(nextDimensions); setMatrixQueryKey((value) => value + 1); }} /></div>;
   }
 
   if (loading) return <StatePanel kind="loading" message={`正在优先加载当前页面：${packageLabel}。核心页完成后立即展示，其他数据后台继续查询。`}><QueryProgressPanel items={progressItems} compact /></StatePanel>;

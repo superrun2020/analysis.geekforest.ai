@@ -24,7 +24,7 @@ import { DomainReportPage } from "./domain-report";
 import { trackingApiBaseUrl } from "./api-base-url";
 import { createCodexQueryLinks } from "./codex-query-links-api";
 
-const APP_VERSION = "V120";
+const APP_VERSION = "V122";
 const VERSION_MANIFEST_PATH = "/version.json";
 
 type PageKey =
@@ -85,6 +85,8 @@ function isoDate(offsetDays = 0) {
 }
 
 function queryDateRange(range: string) {
+  const customRange = range.match(/^(\d{4}-\d{2}-\d{2})~(\d{4}-\d{2}-\d{2})$/);
+  if (customRange) return { dateFrom: customRange[1], dateTo: customRange[2] };
   const exactDate = range.match(/^\d{4}-\d{2}-\d{2}$/)?.[0];
   if (exactDate) return { dateFrom: exactDate, dateTo: exactDate };
   if (range === "今天") return { dateFrom: isoDate(0), dateTo: isoDate(0) };
@@ -1025,6 +1027,8 @@ export default function Home() {
   const [appVersion, setAppVersion] = useState("全部版本");
   const [draftProject, setDraftProject] = useState(initialProjectCode);
   const [draftRange, setDraftRange] = useState("昨天");
+  const [customDateFrom, setCustomDateFrom] = useState(isoDate(-6));
+  const [customDateTo, setCustomDateTo] = useState(isoDate(0));
   const [draftPlatform, setDraftPlatform] = useState("Android");
   const [draftCountry, setDraftCountry] = useState("全部国家");
   const [draftAppVersion, setDraftAppVersion] = useState("全部版本");
@@ -1111,6 +1115,7 @@ export default function Home() {
   }, null);
   const exactDateOptions = dateRows.slice(0, 30);
   const selectedDateRow = /^\d{4}-\d{2}-\d{2}$/.test(draftRange) ? dateRows.find((row) => row.date === draftRange) : null;
+  const selectedCustomRange = draftRange.match(/^(\d{4}-\d{2}-\d{2})~(\d{4}-\d{2}-\d{2})$/);
   const dateInputValue = /^\d{4}-\d{2}-\d{2}$/.test(draftRange)
     ? draftRange
     : draftRange === "今天"
@@ -1131,9 +1136,11 @@ export default function Home() {
       isSelected: dateInputValue === date,
     };
   }).reverse();
-  const selectedSessionLabel = dateInputValue
-    ? `${dateInputValue}：${shortCount(selectedDateRow?.sessionCount ?? 0)} sessions`
-    : `${draftRange}：${shortCount(draftRange === "近7天" ? sevenDaySessionCount : draftRange === "近30天" ? thirtyDaySessionCount : 0)} sessions`;
+  const selectedSessionLabel = selectedCustomRange
+    ? `${selectedCustomRange[1]} 至 ${selectedCustomRange[2]}：${shortCount(sumSessionCount(dateRows, selectedCustomRange[1], selectedCustomRange[2]))} sessions`
+    : dateInputValue
+      ? `${dateInputValue}：${shortCount(selectedDateRow?.sessionCount ?? 0)} sessions`
+      : `${draftRange}：${shortCount(draftRange === "近7天" ? sevenDaySessionCount : draftRange === "近30天" ? thirtyDaySessionCount : 0)} sessions`;
   const dateSessionHint = dateSessionLoading
     ? `正在读取 ${draftProject || "当前项目"} 最近30天 session 数据量…`
     : dateSessionError
@@ -1718,6 +1725,7 @@ export default function Home() {
                   <option value="昨天">{rangeOptionLabel("昨天", yesterdaySessionCount)}</option>
                   <option value="近7天">{rangeOptionLabel("近7天", sevenDaySessionCount)}</option>
                   <option value="近30天">{rangeOptionLabel("近30天", thirtyDaySessionCount)}</option>
+                  <option value={`${customDateFrom}~${customDateTo}`}>自定义区间 · {customDateFrom} 至 {customDateTo}</option>
                   {bestDateRow && <option value={bestDateRow.date}>推荐 {bestDateRow.date} · {shortCount(bestDateRow.sessionCount)} sessions</option>}
                   <option disabled>──────── 每日 session 数据量 ────────</option>
                   {dateInputValue && !["今天", "昨天"].includes(draftRange) && !exactDateOptions.some((row) => row.date === dateInputValue) && <option value={dateInputValue}>手动选择 {dateInputValue} · {shortCount(selectedDateRow?.sessionCount ?? 0)} sessions</option>}
@@ -1727,19 +1735,46 @@ export default function Home() {
                 </select>
                 <input
                   type="date"
-                  value={dateInputValue}
+                  value={selectedCustomRange ? selectedCustomRange[1] : dateInputValue}
                   min={filterOptions.dateRange?.min ?? undefined}
                   max={filterOptions.dateRange?.max ?? isoDate(0)}
                   onChange={(event) => {
                     if (!event.target.value) return;
-                    setDraftRange(event.target.value);
-                    setRange(event.target.value);
+                    if (module === "vpnReport") {
+                      const nextTo = customDateTo < event.target.value ? event.target.value : customDateTo;
+                      setCustomDateFrom(event.target.value);
+                      setCustomDateTo(nextTo);
+                      const nextRange = `${event.target.value}~${nextTo}`;
+                      setDraftRange(nextRange);
+                      setRange(nextRange);
+                      notify(`${draftProject} · ${event.target.value} 至 ${nextTo} 已开始查询`);
+                    } else {
+                      setDraftRange(event.target.value);
+                      setRange(event.target.value);
+                      notify(`${draftProject} · ${event.target.value} 已开始查询`);
+                    }
                     setReportSnapshot(null);
                     setFiltersApplied((value) => value + 1);
-                    notify(`${draftProject} · ${event.target.value} 已开始查询`);
                   }}
-                  title="直接选择某一天查询"
+                  title={module === "vpnReport" ? "选择起始日期" : "直接选择某一天查询"}
                 />
+                {module === "vpnReport" && <input
+                  type="date"
+                  value={selectedCustomRange ? selectedCustomRange[2] : customDateTo}
+                  min={selectedCustomRange ? selectedCustomRange[1] : customDateFrom}
+                  max={filterOptions.dateRange?.max ?? isoDate(0)}
+                  onChange={(event) => {
+                    if (!event.target.value) return;
+                    setCustomDateTo(event.target.value);
+                    const nextRange = `${customDateFrom}~${event.target.value}`;
+                    setDraftRange(nextRange);
+                    setRange(nextRange);
+                    setReportSnapshot(null);
+                    setFiltersApplied((value) => value + 1);
+                    notify(`${draftProject} · ${customDateFrom} 至 ${event.target.value} 已开始查询`);
+                  }}
+                  title="选择结束日期"
+                />}
               </div>
               <small className={dateSessionError ? "filter-error" : "filter-hint"}>{dateSessionHint}</small>
             </label>

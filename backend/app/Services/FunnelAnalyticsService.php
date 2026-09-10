@@ -2190,18 +2190,33 @@ class FunnelAnalyticsService
     {
         $domain = (string) ($params['domain'] ?? 'ads');
         $funnelCode = $domain === 'vpn' ? 'vpn_user_coverage' : 'ad_user_coverage';
-        $dimension = in_array($params['dimension'] ?? null, ['country_code', 'platform'], true)
+        $allowedDimensions = ['stat_date', 'app_version', 'country_code', 'platform'];
+        $requestedDimensions = array_values(array_filter(
+            (array) ($params['dimensions'] ?? []),
+            static fn ($dimension): bool => in_array($dimension, $allowedDimensions, true)
+        ));
+        $fallbackDimension = in_array($params['dimension'] ?? null, $allowedDimensions, true)
             ? (string) $params['dimension']
             : 'app_version';
+        $dimensions = count($requestedDimensions) > 0 ? $requestedDimensions : [$fallbackDimension];
+        $dimensions = array_values(array_unique($dimensions));
+        $dimension = count($dimensions) === 1 ? $dimensions[0] : implode('__', $dimensions);
 
         try {
-            $groupColumns = $dimension === 'country_code'
-                ? ['country_code']
-                : ($dimension === 'platform' ? ['platform'] : ['app_version', 'build_number']);
+            $groupColumns = [];
+            foreach ($dimensions as $item) {
+                if ($item === 'app_version') {
+                    $groupColumns[] = 'app_version';
+                    $groupColumns[] = 'build_number';
+                    continue;
+                }
+                $groupColumns[] = $item;
+            }
+            $groupColumns = array_values(array_unique($groupColumns));
 
             // When comparing BY version we must not also filter TO a single
             // version, otherwise the comparison collapses to one row.
-            if ($dimension === 'app_version') {
+            if (in_array('app_version', $dimensions, true)) {
                 unset($params['appVersion']);
             }
 
@@ -2211,16 +2226,24 @@ class FunnelAnalyticsService
                 ->where('scope_type', 'users');
             $this->applySummaryProjectFilters($query, $params);
 
-            // Only the primary dimension column must be present; a secondary
+            // Primary dimension columns must be present; a secondary
             // column such as build_number may legitimately be empty and is
             // coalesced to '' in the SELECT below.
-            $query->whereNotNull($groupColumns[0])->where($groupColumns[0], '!=', '');
-            if ($dimension !== 'platform' && !empty($params['platform'])) {
+            foreach ($dimensions as $item) {
+                $requiredColumn = $item === 'app_version' ? 'app_version' : $item;
+                $query->whereNotNull($requiredColumn)->where($requiredColumn, '!=', '');
+            }
+            if (!in_array('platform', $dimensions, true) && !empty($params['platform'])) {
                 $query->where('platform', strtolower((string) $params['platform']));
             }
-            if ($dimension !== 'country_code' && !empty($params['country'])) {
+            if (!in_array('country_code', $dimensions, true) && !empty($params['country'])) {
                 $query->where('country_code', (string) $params['country']);
             }
+            if (!in_array('app_version', $dimensions, true) && !empty($params['appVersion'])) {
+                $query->where('app_version', (string) $params['appVersion']);
+            }
+
+            $versionOptions = $this->versionComparisonVersionOptions($params);
 
             $columnsSql = implode(', ', array_map(
                 static fn (string $column): string => "COALESCE({$column}, '') AS {$column}",
@@ -2239,7 +2262,7 @@ class FunnelAnalyticsService
                 );
                 $key = implode('|', $keyParts);
                 if (!isset($groups[$key])) {
-                    $groups[$key] = $this->versionComparisonDimensionRow($dimension, $stage, $groupColumns);
+                    $groups[$key] = $this->versionComparisonDimensionRow($dimensions, $stage, $groupColumns);
                 }
                 $groups[$key]['stages'][(string) $stage->step_code] = (int) ($stage->users ?? 0);
             }
@@ -2249,21 +2272,29 @@ class FunnelAnalyticsService
                 ->sortByDesc('dauUsers')
                 ->values();
 
-            $dimensionLabel = [
+            $dimensionLabelsMap = [
+                'stat_date' => '日期',
                 'app_version' => '应用版本',
                 'country_code' => '国家',
                 'platform' => '平台',
-            ][$dimension];
+            ];
+            $dimensionLabel = implode(' × ', array_map(
+                static fn (string $item): string => $dimensionLabelsMap[$item] ?? $item,
+                $dimensions
+            ));
 
             return [
                 'rows' => $rows->all(),
                 'dimension' => $dimension,
+                'dimensions' => $dimensions,
+                'dimensionLabels' => array_map(static fn (string $item): string => $dimensionLabelsMap[$item] ?? $item, $dimensions),
                 'dimensionLabel' => $dimensionLabel,
                 'suggestedBaseline' => $rows->first()['dimensionLabel'] ?? null,
                 'source' => 'dws_app_funnel_stage_daily',
                 'scope' => 'users',
                 'domain' => $domain,
-                'notice' => "同项目、同日期、同平台和国家下按 {$dimensionLabel} 对比；比例使用同组分子分母。样本量过小的组仅作观察。",
+                'versionOptions' => $versionOptions,
+                'notice' => "同项目、同日期范围、同平台和国家下按 {$dimensionLabel} 对比；日期未加入维度时自动聚合日期，版本未加入维度时可筛选单个版本。比例使用同组分子分母。样本量过小的组仅作观察。",
             ];
         } catch (Throwable $exception) {
             Log::warning('jkcl_version_comparison_dws_failed', ['message' => $exception->getMessage()]);
@@ -2275,39 +2306,78 @@ class FunnelAnalyticsService
      * @param array<int, string> $groupColumns
      * @return array<string, mixed>
      */
-    private function versionComparisonDimensionRow(string $dimension, object $stage, array $groupColumns): array
+    private function versionComparisonDimensionRow(array $dimensions, object $stage, array $groupColumns): array
     {
-        $values = array_map(fn (string $column): string => trim((string) ($stage->{$column} ?? '')), $groupColumns);
-
-        if ($dimension === 'country_code') {
-            $code = $values[0] !== '' ? $values[0] : 'unknown';
-            return [
-                'dimensionKey' => $code,
-                'dimensionLabel' => $code,
-                'countryCode' => $code,
-                'stages' => [],
-            ];
-        }
-        if ($dimension === 'platform') {
-            $platform = $values[0] !== '' ? strtolower($values[0]) : 'unknown';
-            return [
-                'dimensionKey' => $platform,
-                'dimensionLabel' => $platform,
-                'platform' => $platform,
-                'stages' => [],
-            ];
+        $values = [];
+        foreach ($groupColumns as $column) {
+            $values[$column] = trim((string) ($stage->{$column} ?? ''));
         }
 
-        $version = $values[0] !== '' ? $values[0] : 'unknown';
-        $build = $values[1] ?? '';
-        return [
-            'dimensionKey' => $version . '|' . $build,
-            'dimensionLabel' => $build !== '' ? "{$version} ({$build})" : $version,
-            'appVersion' => $version,
-            'buildNumber' => $build !== '' ? $build : null,
-            'versionLabel' => $build !== '' ? "{$version} ({$build})" : $version,
-            'stages' => [],
-        ];
+        $dimensionValues = [];
+        $dimensionLabels = [];
+        $row = ['stages' => []];
+
+        foreach ($dimensions as $dimension) {
+            if ($dimension === 'stat_date') {
+                $date = $values['stat_date'] !== '' ? $values['stat_date'] : 'unknown';
+                $dimensionValues[$dimension] = $date;
+                $dimensionLabels[$dimension] = $date;
+                $row['statDate'] = $date;
+                continue;
+            }
+            if ($dimension === 'country_code') {
+                $code = $values['country_code'] !== '' ? $values['country_code'] : 'unknown';
+                $dimensionValues[$dimension] = $code;
+                $dimensionLabels[$dimension] = $code;
+                $row['countryCode'] = $code;
+                continue;
+            }
+            if ($dimension === 'platform') {
+                $platform = $values['platform'] !== '' ? strtolower($values['platform']) : 'unknown';
+                $dimensionValues[$dimension] = $platform;
+                $dimensionLabels[$dimension] = $platform;
+                $row['platform'] = $platform;
+                continue;
+            }
+
+            $version = $values['app_version'] !== '' ? $values['app_version'] : 'unknown';
+            $build = $values['build_number'] ?? '';
+            $versionLabel = $build !== '' ? "{$version} ({$build})" : $version;
+            $dimensionValues[$dimension] = $version . '|' . $build;
+            $dimensionLabels[$dimension] = $versionLabel;
+            $row['appVersion'] = $version;
+            $row['buildNumber'] = $build !== '' ? $build : null;
+            $row['versionLabel'] = $versionLabel;
+        }
+
+        $row['dimensionValues'] = $dimensionValues;
+        $row['dimensionLabels'] = $dimensionLabels;
+        $row['dimensionKey'] = implode('|', array_map(static fn ($value): string => (string) $value, $dimensionValues));
+        $row['dimensionLabel'] = implode(' × ', array_map(static fn ($value): string => (string) $value, $dimensionLabels));
+
+        return $row;
+    }
+
+    /**
+     * @param array<string, mixed> $params
+     * @return array<int, array<string, mixed>>
+     */
+    private function versionComparisonVersionOptions(array $params): array
+    {
+        return DB::connection('adb')->table('dws_app_funnel_stage_daily')
+            ->whereBetween('stat_date', [$params['dateFrom'], $params['dateTo']])
+            ->whereNotNull('app_version')->where('app_version', '!=', '')
+            ->when(!empty($params['projectCode']), fn ($query) => $query->where('project_code', (string) $params['projectCode']))
+            ->when(!empty($params['appIdentifier']), fn ($query) => $query->where('app_identifier', (string) $params['appIdentifier']))
+            ->when(!empty($params['platform']), fn ($query) => $query->where('platform', strtolower((string) $params['platform'])))
+            ->when(!empty($params['country']), fn ($query) => $query->where('country_code', (string) $params['country']))
+            ->select(['app_version', 'build_number'])->distinct()
+            ->orderByDesc('app_version')->orderByDesc('build_number')->limit(200)->get()
+            ->map(fn ($row) => [
+                'appVersion' => (string) $row->app_version,
+                'buildNumber' => $row->build_number === null ? null : (int) $row->build_number,
+                'label' => $row->build_number === null || $row->build_number === '' ? (string) $row->app_version : (string) $row->app_version . ' (' . (string) $row->build_number . ')',
+            ])->values()->all();
     }
 
     /**
@@ -5018,7 +5088,7 @@ class FunnelAnalyticsService
 
     /**
      * Resolve which dimensions the matrix aggregates by. The frontend sends a
-     * subset of the four network dimensions; anything omitted rolls up into the
+     * subset of the date/network dimensions; anything omitted rolls up into the
      * remaining ones (aggregation). Unknown values fall back to the full set.
      *
      * @param array<string, mixed> $params
@@ -5026,7 +5096,7 @@ class FunnelAnalyticsService
      */
     private function adNetworkFailureDimensions(array $params): array
     {
-        $allowed = ['country_code', 'asn', 'server_id', 'protocol'];
+        $allowed = ['event_date', 'country_code', 'asn', 'server_id', 'protocol'];
         $requested = $params['dimensions'] ?? null;
         if (is_array($requested)) {
             $dimensions = array_values(array_unique(array_filter(
@@ -5062,7 +5132,7 @@ class FunnelAnalyticsService
                     return [
                         'available' => false,
                         'source' => $this->eventTable(),
-                        'reason' => '当前筛选范围没有携带 country/asn/server_id/protocol 网络上下文的广告事件。',
+                        'reason' => '当前筛选范围没有携带 date/country/asn/server_id/protocol 网络上下文的广告事件。',
                         'dimensions' => $dimensions,
                         'rows' => [],
                         'totals' => $this->emptyAdNetworkFailureTotals(),
@@ -5088,7 +5158,7 @@ class FunnelAnalyticsService
                     'dimensions' => $dimensions,
                     'rows' => $rows,
                     'totals' => $totals,
-                    'queryHint' => '按所选维度（国家/ASN/节点/协议）横向聚合广告请求、加载和展示的成功率与失败率；去掉某个维度即向上聚合。',
+                    'queryHint' => '按所选维度（日期/国家/ASN/节点/协议）横向聚合广告请求、加载和展示的成功率与失败率；去掉某个维度即向上聚合。',
                 ];
             } catch (Throwable $exception) {
                 Log::warning('jkcl_ad_network_failure_matrix_failed', [
@@ -5113,6 +5183,7 @@ class FunnelAnalyticsService
     private function adNetworkFailureSummaryRows(array $params, array $dimensions)
     {
         $dimensionSql = [
+            'event_date' => "ad.event_date",
             'country_code' => "COALESCE(NULLIF(ad.country_code, ''), NULLIF(vpn_ctx.ctx_country_code, ''), 'unknown')",
             'asn' => "COALESCE(CAST(ad.asn AS CHAR), CAST(vpn_ctx.ctx_asn AS CHAR), 'unknown')",
             'server_id' => "COALESCE(NULLIF(ad.server_id, ''), NULLIF(vpn_ctx.ctx_server_id, ''), 'unknown')",
@@ -5163,6 +5234,7 @@ class FunnelAnalyticsService
     private function adNetworkFailureReasonRows(array $params, array $dimensions)
     {
         $dimensionSql = [
+            'event_date' => "ad.event_date",
             'country_code' => "COALESCE(NULLIF(ad.country_code, ''), NULLIF(vpn_ctx.ctx_country_code, ''), 'unknown')",
             'asn' => "COALESCE(CAST(ad.asn AS CHAR), CAST(vpn_ctx.ctx_asn AS CHAR), 'unknown')",
             'server_id' => "COALESCE(NULLIF(ad.server_id, ''), NULLIF(vpn_ctx.ctx_server_id, ''), 'unknown')",
