@@ -2740,6 +2740,7 @@ body {
 .overall-result-card .ad-network-failure-table th::before { content: "⋮⋮"; margin-right: 7px; color: #c4ccd8; letter-spacing: -3px; }
 .overall-result-card .ad-network-failure-table th::after { content: "↕"; margin-left: 6px; color: #c4ccd8; font-size: 10px; }
 .overall-result-card .ad-network-failure-table td { background: #fff; }
+.overall-empty-state { min-height: 180px; display: grid; place-items: center; color: #9aa5b5; font-size: 14px; }
 .overall-result-card .matrix-footnote { margin: 12px 18px 16px; }
 .matrix-builder { display: none; }
 .matrix-builder-section { min-width: 0; padding: 12px; border: 1px solid #e3eaf3; border-radius: 10px; background: #fff; }

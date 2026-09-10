@@ -2122,7 +2122,7 @@ function AdNetworkFailureMatrix({ data, dimensions, dates, projectCode, platform
             {activeDimensions.map((dimension) => <th key={dimension}>{matrixDimensionLabel(dimension)}</th>)}
             {shows("requestCount") && <th>请求数</th>}{shows("loadSuccessRate") && <th>加载成功率</th>}{shows("loadFailedCount") && <th>加载失败</th>}{shows("showFailedBlocked") && <th>展示失败/拦截</th>}{shows("impressionCount") && <th>Impression</th>}{shows("failureRate") && <th>失败率</th>}{shows("revenue") && <th>收入</th>}{shows("users") && <th>用户数</th>}{shows("topReasons") && <th>Top原因</th>}{shows("suggestion") && <th>建议</th>}
           </tr></thead>
-          <tbody>{rows.slice(0, 50).map((row: AnyRow, index: number) => {
+          <tbody>{rows.length === 0 && <tr><td colSpan={activeDimensions.length + visibleColumns.length}><div className="overall-empty-state">{querying ? "正在查询数据，配置区可先调整维度和统计字段…" : "暂无数据"}</div></td></tr>}{rows.slice(0, 50).map((row: AnyRow, index: number) => {
             const reasons = Array.isArray(row.topReasons) ? row.topReasons : [];
             const dimValues: AnyRow = row.dimensions ?? {};
             return <tr key={`${activeDimensions.map((dimension) => text(dimValues[dimension] ?? "unknown")).join("-")}-${index}`} className={row.status === "bad" ? "row-bad" : row.status === "warn" ? "row-warn" : ""}>
@@ -3192,10 +3192,16 @@ export function OperationalFunnel(props: Props) {
   }, [props.enabled, props.initialDomain, props.page, props.projectCode, props.appIdentifier, props.range, props.platform, props.country, props.appVersion, activePage, activeKey, dates, domain, queryUnit, loadedAt, progressItems, packageErrors, dataPackage, props.onSnapshotChange]);
 
   if (props.page === "network_failure_matrix") {
-    if (matrixLoading && !matrixData) return <StatePanel kind="loading" message="正在读取广告网络失败横向报表，按国家 × ASN × 节点 × 协议横向聚合…" />;
-    if (matrixError && !matrixData) return <StatePanel kind="error" message={matrixError} retry={() => setMatrixQueryKey((value) => value + 1)} />;
-    if (!matrixData) return <StatePanel kind="empty" message="当前筛选范围没有可聚合的网络维度广告事件。" />;
-    return <div className="page-stack"><AdNetworkFailureMatrix data={matrixData} dimensions={matrixDimensions} dates={dates} projectCode={props.projectCode} platform={props.platform} country={props.country} appVersion={props.appVersion} querying={matrixLoading} queryError={matrixError} onQuery={(nextDimensions) => { setMatrixDimensions(nextDimensions); setMatrixQueryKey((value) => value + 1); }} /></div>;
+    const loadingMatrixData = matrixData ?? {
+      adNetworkFailureMatrix: {
+        available: true,
+        source: "查询中",
+        dimensions: matrixDimensions,
+        rows: [],
+        totals: {},
+      },
+    };
+    return <div className="page-stack"><AdNetworkFailureMatrix data={loadingMatrixData} dimensions={matrixDimensions} dates={dates} projectCode={props.projectCode} platform={props.platform} country={props.country} appVersion={props.appVersion} querying={matrixLoading} queryError={matrixError} onQuery={(nextDimensions) => { setMatrixDimensions(nextDimensions); setMatrixQueryKey((value) => value + 1); }} /></div>;
   }
 
   if (loading) return <StatePanel kind="loading" message={`正在优先加载当前页面：${packageLabel}。核心页完成后立即展示，其他数据后台继续查询。`}><QueryProgressPanel items={progressItems} compact /></StatePanel>;
