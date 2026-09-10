@@ -74,6 +74,7 @@ CREATE TABLE IF NOT EXISTS jkcl_a003_vpn_network_daily (
     platform VARCHAR(32) NOT NULL DEFAULT '',
     app_version VARCHAR(64) NOT NULL DEFAULT '',
     country_code VARCHAR(64) NOT NULL DEFAULT 'unknown',
+    user_country_code VARCHAR(64) NOT NULL DEFAULT 'unknown',
     asn VARCHAR(32) NOT NULL DEFAULT 'unknown',
     asn_name VARCHAR(191) NULL,
     server_id VARCHAR(255) NOT NULL DEFAULT 'unknown',
@@ -114,7 +115,7 @@ CREATE TABLE IF NOT EXISTS jkcl_a003_vpn_network_daily (
     latest_event_at DATETIME NULL,
     created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    UNIQUE KEY uq_a003_vpn_dims (stat_date, project_code, app_identifier, platform, app_version, country_code, asn, server_id, protocol),
+    UNIQUE KEY uq_a003_vpn_dims (stat_date, project_code, app_identifier, platform, app_version, country_code, user_country_code, asn, server_id, protocol),
     KEY idx_a003_vpn_query (project_code, stat_date, platform, country_code, app_version),
     KEY idx_a003_vpn_asn (asn),
     KEY idx_a003_vpn_server (server_id)
@@ -131,6 +132,17 @@ SQL);
             'vpn_ip_probe_success_count', 'vpn_ip_probe_failed_count', 'vpn_fallback_count',
             'vpn_quality_sample_count', 'vpn_quality_poor_count', 'vpn_latency_sum_ms', 'vpn_latency_sample_count',
         ];
+        if (!Schema::hasColumn('jkcl_a003_vpn_network_daily', 'user_country_code')) {
+            DB::statement("ALTER TABLE jkcl_a003_vpn_network_daily ADD COLUMN user_country_code VARCHAR(64) NOT NULL DEFAULT 'unknown' AFTER country_code");
+        }
+        try {
+            DB::statement('ALTER TABLE jkcl_a003_vpn_network_daily DROP INDEX uq_a003_vpn_dims');
+        } catch (Throwable $ignored) {
+        }
+        try {
+            DB::statement('ALTER TABLE jkcl_a003_vpn_network_daily ADD UNIQUE KEY uq_a003_vpn_dims (stat_date, project_code, app_identifier, platform, app_version, country_code, user_country_code, asn, server_id, protocol)');
+        } catch (Throwable $ignored) {
+        }
         foreach ($columns as $column) {
             if (!Schema::hasColumn('jkcl_a003_vpn_network_daily', $column)) {
                 DB::statement(sprintf('ALTER TABLE jkcl_a003_vpn_network_daily ADD COLUMN %s BIGINT UNSIGNED NOT NULL DEFAULT 0 AFTER vpn_session_count', $column));
@@ -167,6 +179,7 @@ SQL);
                 'platform' => strtolower($this->cleanDimension($row->platform ?? null, '', 32)),
                 'app_version' => $this->cleanDimension($row->app_version ?? null, '', 64),
                 'country_code' => $this->vpnExitCountry($resolved->country ?? null, $row->vpn_country_code ?? null),
+                'user_country_code' => $this->cleanDimension($row->user_country_code ?? null, 'unknown', 64),
                 'asn' => $this->normalizeAsn($resolved->asn ?? $row->asn ?? null),
                 'asn_name' => $this->nullableString($resolved->asn_name ?? null, 191),
                 'server_id' => $serverId,
@@ -181,7 +194,7 @@ SQL);
 
             $key = implode("\x1f", [
                 $item['stat_date'], $item['project_code'], $item['app_identifier'], $item['platform'],
-                $item['app_version'], $item['country_code'], $item['asn'], $item['server_id'], $item['protocol'],
+                $item['app_version'], $item['country_code'], $item['user_country_code'], $item['asn'], $item['server_id'], $item['protocol'],
             ]);
 
             if (!isset($aggregated[$key])) {
@@ -238,6 +251,18 @@ SQL);
             ->selectRaw("MAX(NULLIF(protocol, '')) AS ctx_protocol")
             ->groupBy('project_code', 'app_identifier', 'platform', 'my_user_id', 'session_id');
 
+        $userCountry = DB::connection('adb')->table($table)
+            ->where('project_code', 'A003')
+            ->whereBetween('event_date', [$contextStart, $date])
+            ->where('event_name', 'app_once_params')
+            ->whereNotNull('my_user_id')->where('my_user_id', '!=', '')
+            ->selectRaw('project_code AS uc_project_code')
+            ->selectRaw('app_identifier AS uc_app_identifier')
+            ->selectRaw('platform AS uc_platform')
+            ->selectRaw('my_user_id AS uc_user_id')
+            ->selectRaw("MAX(NULLIF(country_code, '')) AS uc_country_code")
+            ->groupBy('project_code', 'app_identifier', 'platform', 'my_user_id');
+
         return DB::connection('adb')->table($table . ' as ad')
             ->leftJoinSub($context, 'vpn_ctx', function ($join): void {
                 $join->on('vpn_ctx.ctx_project_code', '=', 'ad.project_code')
@@ -246,10 +271,16 @@ SQL);
                     ->on('vpn_ctx.ctx_user_id', '=', 'ad.my_user_id')
                     ->on('vpn_ctx.ctx_session_id', '=', 'ad.session_id');
             })
+            ->leftJoinSub($userCountry, 'user_country', function ($join): void {
+                $join->on('user_country.uc_project_code', '=', 'ad.project_code')
+                    ->on('user_country.uc_app_identifier', '=', 'ad.app_identifier')
+                    ->on('user_country.uc_platform', '=', 'ad.platform')
+                    ->on('user_country.uc_user_id', '=', 'ad.my_user_id');
+            })
             ->where('ad.project_code', 'A003')
             ->where('ad.event_date', $date)
             ->whereIn('ad.event_name', [
-                'app_first_open', 'first_open', 'app_foreground', 'app_active',
+                'app_first_open', 'first_open', 'app_foreground', 'app_active', 'app_once_params',
                 'vpn_config_fetch_result', 'vpn_connection_start', 'vpn_connection_result',
                 'vpn_server_probe_result', 'vpn_ip_probe_result', 'vpn_protocol_fallback', 'vpn_quality_sample',
                 'ad_opportunity', 'ad_request', 'ad_load_success', 'ad_load_failed',
@@ -261,6 +292,7 @@ SQL);
             ->selectRaw("LOWER(COALESCE(NULLIF(ad.platform, ''), '')) AS platform")
             ->selectRaw("COALESCE(NULLIF(ad.app_version, ''), '') AS app_version")
             ->selectRaw("COALESCE(NULLIF(ad.node_region, ''), NULLIF(vpn_ctx.ctx_node_region, ''), 'unknown') AS vpn_country_code")
+            ->selectRaw("COALESCE(NULLIF(user_country.uc_country_code, ''), 'unknown') AS user_country_code")
             ->selectRaw("COALESCE(CAST(ad.asn AS CHAR), CAST(vpn_ctx.ctx_asn AS CHAR), 'unknown') AS asn")
             ->selectRaw("COALESCE(NULLIF(ad.server_id, ''), NULLIF(vpn_ctx.ctx_server_id, ''), 'unknown') AS server_id")
             ->selectRaw("COALESCE(NULLIF(ad.protocol, ''), NULLIF(vpn_ctx.ctx_protocol, ''), 'unknown') AS protocol")
@@ -297,7 +329,7 @@ SQL);
             ->selectRaw("SUM(CASE WHEN ad.event_name = 'ad_impression' THEN 1 ELSE 0 END) AS impression_count")
             ->selectRaw("SUM(CASE WHEN ad.event_name = 'ad_paid_event' THEN COALESCE(ad.value_micros, 0) ELSE 0 END) AS revenue_micros")
             ->selectRaw('MAX(ad.event_time_utc) AS latest_event_at')
-            ->groupBy('ad.event_date', 'app_identifier', 'platform', 'app_version', 'vpn_country_code', 'asn', 'server_id', 'protocol')
+            ->groupBy('ad.event_date', 'app_identifier', 'platform', 'app_version', 'vpn_country_code', 'user_country_code', 'asn', 'server_id', 'protocol')
             ->get();
     }
 

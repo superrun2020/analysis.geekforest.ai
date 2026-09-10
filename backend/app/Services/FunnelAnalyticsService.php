@@ -5099,7 +5099,7 @@ class FunnelAnalyticsService
      */
     private function adNetworkFailureDimensions(array $params): array
     {
-        $allowed = ['event_date', 'country_code', 'asn', 'server_id', 'protocol'];
+        $allowed = ['event_date', 'user_country_code', 'country_code', 'asn', 'server_id', 'protocol'];
         $requested = $params['dimensions'] ?? null;
         if (is_array($requested)) {
             $dimensions = array_values(array_unique(array_filter(
@@ -5179,7 +5179,7 @@ class FunnelAnalyticsService
                 'dimensions' => $dimensions,
                 'rows' => $rows,
                 'totals' => $totals,
-                'queryHint' => '按所选维度（日期/国家/ASN/节点/协议）横向聚合广告请求、加载和展示的成功率与失败率；去掉某个维度即向上聚合。',
+                'queryHint' => '按所选维度（日期/用户国家/VPN出口国家/ASN/节点/协议）横向聚合广告请求、加载和展示的成功率与失败率；去掉某个维度即向上聚合。',
             ];
         } catch (Throwable $exception) {
             Log::warning('jkcl_ad_network_failure_matrix_failed', [
@@ -5204,6 +5204,7 @@ class FunnelAnalyticsService
     {
         $dimensionSql = [
             'event_date' => "ad.event_date",
+            'user_country_code' => "COALESCE(NULLIF(ad.country_code, ''), 'unknown')",
             'country_code' => "COALESCE(NULLIF(ad.country_code, ''), NULLIF(vpn_ctx.ctx_country_code, ''), 'unknown')",
             'asn' => "COALESCE(CAST(ad.asn AS CHAR), CAST(vpn_ctx.ctx_asn AS CHAR), 'unknown')",
             'server_id' => "COALESCE(NULLIF(ad.server_id, ''), NULLIF(vpn_ctx.ctx_server_id, ''), 'unknown')",
@@ -5267,6 +5268,7 @@ class FunnelAnalyticsService
     {
         $dimensionSql = [
             'event_date' => 'stat_date',
+            'user_country_code' => 'user_country_code',
             'country_code' => 'country_code',
             'asn' => 'asn',
             'server_id' => 'server_id',
@@ -5339,6 +5341,7 @@ class FunnelAnalyticsService
     {
         $dimensionSql = [
             'event_date' => "ad.event_date",
+            'user_country_code' => "COALESCE(NULLIF(ad.country_code, ''), 'unknown')",
             'country_code' => "COALESCE(NULLIF(ad.country_code, ''), NULLIF(vpn_ctx.ctx_country_code, ''), 'unknown')",
             'asn' => "COALESCE(CAST(ad.asn AS CHAR), CAST(vpn_ctx.ctx_asn AS CHAR), 'unknown')",
             'server_id' => "COALESCE(NULLIF(ad.server_id, ''), NULLIF(vpn_ctx.ctx_server_id, ''), 'unknown')",
@@ -5511,6 +5514,7 @@ class FunnelAnalyticsService
 
         return [
             'dimensions' => $dimensionValues,
+            'userCountryCode' => $dimensionValues['user_country_code'] ?? 'unknown',
             'countryCode' => $dimensionValues['country_code'] ?? 'unknown',
             'asn' => $dimensionValues['asn'] ?? 'unknown',
             'serverId' => $dimensionValues['server_id'] ?? 'unknown',
