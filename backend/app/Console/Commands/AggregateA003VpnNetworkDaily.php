@@ -166,7 +166,7 @@ SQL);
                 'app_identifier' => $this->cleanDimension($row->app_identifier ?? null, '', 191),
                 'platform' => strtolower($this->cleanDimension($row->platform ?? null, '', 32)),
                 'app_version' => $this->cleanDimension($row->app_version ?? null, '', 64),
-                'country_code' => $this->cleanDimension($row->country_code ?? null, 'unknown', 64),
+                'country_code' => $this->vpnExitCountry($resolved->country ?? null, $row->vpn_country_code ?? null),
                 'asn' => $this->normalizeAsn($resolved->asn ?? $row->asn ?? null),
                 'asn_name' => $this->nullableString($resolved->asn_name ?? null, 191),
                 'server_id' => $serverId,
@@ -232,7 +232,7 @@ SQL);
             ->selectRaw('platform AS ctx_platform')
             ->selectRaw('my_user_id AS ctx_user_id')
             ->selectRaw('session_id AS ctx_session_id')
-            ->selectRaw("MAX(NULLIF(country_code, '')) AS ctx_country_code")
+            ->selectRaw("MAX(NULLIF(node_region, '')) AS ctx_node_region")
             ->selectRaw('MAX(asn) AS ctx_asn')
             ->selectRaw("MAX(NULLIF(server_id, '')) AS ctx_server_id")
             ->selectRaw("MAX(NULLIF(protocol, '')) AS ctx_protocol")
@@ -260,7 +260,7 @@ SQL);
             ->selectRaw("COALESCE(NULLIF(ad.app_identifier, ''), '') AS app_identifier")
             ->selectRaw("LOWER(COALESCE(NULLIF(ad.platform, ''), '')) AS platform")
             ->selectRaw("COALESCE(NULLIF(ad.app_version, ''), '') AS app_version")
-            ->selectRaw("COALESCE(NULLIF(ad.country_code, ''), NULLIF(vpn_ctx.ctx_country_code, ''), 'unknown') AS country_code")
+            ->selectRaw("COALESCE(NULLIF(ad.node_region, ''), NULLIF(vpn_ctx.ctx_node_region, ''), 'unknown') AS vpn_country_code")
             ->selectRaw("COALESCE(CAST(ad.asn AS CHAR), CAST(vpn_ctx.ctx_asn AS CHAR), 'unknown') AS asn")
             ->selectRaw("COALESCE(NULLIF(ad.server_id, ''), NULLIF(vpn_ctx.ctx_server_id, ''), 'unknown') AS server_id")
             ->selectRaw("COALESCE(NULLIF(ad.protocol, ''), NULLIF(vpn_ctx.ctx_protocol, ''), 'unknown') AS protocol")
@@ -297,7 +297,7 @@ SQL);
             ->selectRaw("SUM(CASE WHEN ad.event_name = 'ad_impression' THEN 1 ELSE 0 END) AS impression_count")
             ->selectRaw("SUM(CASE WHEN ad.event_name = 'ad_paid_event' THEN COALESCE(ad.value_micros, 0) ELSE 0 END) AS revenue_micros")
             ->selectRaw('MAX(ad.event_time_utc) AS latest_event_at')
-            ->groupBy('ad.event_date', 'app_identifier', 'platform', 'app_version', 'country_code', 'asn', 'server_id', 'protocol')
+            ->groupBy('ad.event_date', 'app_identifier', 'platform', 'app_version', 'vpn_country_code', 'asn', 'server_id', 'protocol')
             ->get();
     }
 
@@ -308,6 +308,19 @@ SQL);
             ->get()
             ->keyBy('domain')
             ->all();
+    }
+
+
+    private function vpnExitCountry(mixed $resolvedCountry, mixed $nodeRegion): string
+    {
+        $country = trim((string) ($resolvedCountry ?? ''));
+        if ($country === '') {
+            $country = trim((string) ($nodeRegion ?? ''));
+            if (preg_match('/^([A-Z]{2})[-_].+$/i', $country, $matches) === 1) {
+                $country = strtoupper($matches[1]);
+            }
+        }
+        return $this->cleanDimension($country, 'unknown', 64);
     }
 
     private function cleanDimension(mixed $value, string $fallback, int $maxLength): string
