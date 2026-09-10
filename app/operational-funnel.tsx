@@ -2500,11 +2500,20 @@ type VersionCompareColumn = { key: string; label: string; unit: "count" | "ratio
 function versionCompareColumns(domain: string): VersionCompareColumn[] {
   if (domain === "vpn") {
     return [
+      { key: "newUsers", label: "新增用户", unit: "count" },
       { key: "dauUsers", label: "DAU", unit: "count" },
-      { key: "connectAttemptUsers", label: "连接点击/尝试UV", unit: "count" },
-      { key: "connectAttemptRate", label: "连接发起率", unit: "ratio", num: "connectAttemptUsers", den: "dauUsers" },
-      { key: "connectSuccessUsers", label: "连接成功UV", unit: "count" },
+      { key: "vpnSessionCount", label: "VPN session", unit: "count" },
+      { key: "connectAttemptUsers", label: "连接发起", unit: "count" },
+      { key: "connectSuccessUsers", label: "连接成功", unit: "count" },
       { key: "connectSuccessRate", label: "连接成功率", unit: "ratio", num: "connectSuccessUsers", den: "connectAttemptUsers" },
+      { key: "vpnProbeSuccessRate", label: "节点探测成功率", unit: "ratio" },
+      { key: "vpnIpProbeSuccessRate", label: "出口IP探测成功率", unit: "ratio" },
+      { key: "vpnFallbackCount", label: "协议回退", unit: "count" },
+      { key: "vpnAvgLatencyMs", label: "平均延迟ms", unit: "count" },
+      { key: "requestCount", label: "广告请求", unit: "count" },
+      { key: "loadSuccessRate", label: "加载成功率", unit: "ratio", num: "loadSuccessCount", den: "requestCount" },
+      { key: "impressionCount", label: "Impression", unit: "count" },
+      { key: "revenue", label: "收入", unit: "count" },
     ];
   }
   return [
@@ -2572,11 +2581,13 @@ function VersionComparison({ data, domain, projectCode, appIdentifier, platform,
     return map;
   });
   const [comparison, setComparison] = useState<AnyRow>(data.versionComparison ?? {});
+  const versionDimensionOptions = useMemo(() => domain === "vpn" ? versionCompareDimensions : versionCompareDimensions.filter((item) => item.key !== "user_country_code"), [domain]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
   const dimensionKey = dimensions.join("|");
-  const isDefault = dimensions.length === 1 && dimensions[0] === "app_version" && range === initialRange && !versionFilter;
+  const hasInitialComparison = Array.isArray(data.versionComparison?.rows) && data.versionComparison.rows.length > 0;
+  const isDefault = hasInitialComparison && dimensions.length === 1 && dimensions[0] === "app_version" && range === initialRange && !versionFilter;
   useEffect(() => {
     if (isDefault) {
       setComparison(data.versionComparison ?? {});
@@ -2720,7 +2731,7 @@ function VersionComparison({ data, domain, projectCode, appIdentifier, platform,
       <aside className="version-compare-config surface">
         <div className="config-group">
           <div className="config-title">维度</div>
-          <div className="config-options">{versionCompareDimensions.map((item) => <button key={item.key} className={dimensions.includes(item.key) ? "active" : ""} onClick={() => toggleDimension(item.key)}>{item.label}</button>)}</div>
+          <div className="config-options">{versionDimensionOptions.map((item) => <button key={item.key} className={dimensions.includes(item.key) ? "active" : ""} onClick={() => toggleDimension(item.key)}>{item.label}</button>)}</div>
           <small className="config-hint">可多选：日期 + 应用版本=逐日看各版本；只选应用版本=聚合日期看所有版本。</small>
         </div>
         <div className="config-group">
@@ -2998,6 +3009,7 @@ export function OperationalFunnel(props: Props) {
   const [matrixLoading, setMatrixLoading] = useState(false);
   const [matrixError, setMatrixError] = useState("");
   const [matrixDimensions, setMatrixDimensions] = useState<string[]>(["user_country_code", "asn", "server_id", "protocol"]);
+  const [vpnReportSection, setVpnReportSection] = useState<"matrix" | "versions">("matrix");
   const [matrixQueryKey, setMatrixQueryKey] = useState(0);
   const dates = useMemo(() => dateRange(props.range), [props.range]);
   const queryUnit: FunnelUnit = domain === "vpn" ? "sessions" : domain === "ads" ? unit : "users";
@@ -3251,7 +3263,10 @@ export function OperationalFunnel(props: Props) {
         totals: {},
       },
     };
-    return <div className="page-stack"><AdNetworkFailureMatrix data={loadingMatrixData} dimensions={matrixDimensions} dates={dates} projectCode={props.projectCode} platform={props.platform} country={props.country} appVersion={props.appVersion} projectOptions={props.projectOptions} countryOptions={props.countryOptions} appVersionOptions={props.appVersionOptions} querying={matrixLoading} queryError={matrixError} onQuery={(nextDimensions) => { setMatrixDimensions(nextDimensions); setMatrixQueryKey((value) => value + 1); }} onProjectSelect={props.onProjectSelect} onRangeChange={props.onRangeChange} onCountryChange={props.onCountryChange} onAppVersionChange={props.onAppVersionChange} onPlatformChange={props.onPlatformChange} /></div>;
+    return <div className="page-stack">
+      <nav className="operational-tabs workbench-tabs"><button className={vpnReportSection === "matrix" ? "active" : ""} onClick={() => setVpnReportSection("matrix")}>诊断明细</button><button className={vpnReportSection === "versions" ? "active" : ""} onClick={() => setVpnReportSection("versions")}>版本对比</button></nav>
+      {vpnReportSection === "versions" ? <VersionComparison data={{}} domain="vpn" projectCode={props.projectCode} appIdentifier={props.appIdentifier} platform={props.platform} country={props.country} appVersion={props.appVersion} initialRange={props.range} refreshKey={props.refreshKey + matrixQueryKey} /> : <AdNetworkFailureMatrix data={loadingMatrixData} dimensions={matrixDimensions} dates={dates} projectCode={props.projectCode} platform={props.platform} country={props.country} appVersion={props.appVersion} projectOptions={props.projectOptions} countryOptions={props.countryOptions} appVersionOptions={props.appVersionOptions} querying={matrixLoading} queryError={matrixError} onQuery={(nextDimensions) => { setMatrixDimensions(nextDimensions); setMatrixQueryKey((value) => value + 1); }} onProjectSelect={props.onProjectSelect} onRangeChange={props.onRangeChange} onCountryChange={props.onCountryChange} onAppVersionChange={props.onAppVersionChange} onPlatformChange={props.onPlatformChange} />}
+    </div>;
   }
 
   if (loading) return <StatePanel kind="loading" message={`正在优先加载当前页面：${packageLabel}。核心页完成后立即展示，其他数据后台继续查询。`}><QueryProgressPanel items={progressItems} compact /></StatePanel>;

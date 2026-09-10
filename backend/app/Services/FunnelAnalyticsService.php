@@ -2190,7 +2190,9 @@ class FunnelAnalyticsService
     {
         $domain = (string) ($params['domain'] ?? 'ads');
         $funnelCode = $domain === 'vpn' ? 'vpn_user_coverage' : 'ad_user_coverage';
-        $allowedDimensions = ['stat_date', 'app_version', 'country_code', 'platform'];
+        $allowedDimensions = ($domain === 'vpn' && strtoupper((string) ($params['projectCode'] ?? '')) === 'A003')
+            ? ['stat_date', 'app_version', 'user_country_code', 'country_code', 'platform']
+            : ['stat_date', 'app_version', 'country_code', 'platform'];
         $requestedDimensions = array_values(array_filter(
             (array) ($params['dimensions'] ?? []),
             static fn ($dimension): bool => in_array($dimension, $allowedDimensions, true)
@@ -2201,6 +2203,10 @@ class FunnelAnalyticsService
         $dimensions = count($requestedDimensions) > 0 ? $requestedDimensions : [$fallbackDimension];
         $dimensions = array_values(array_unique($dimensions));
         $dimension = count($dimensions) === 1 ? $dimensions[0] : implode('__', $dimensions);
+
+        if ($domain === 'vpn' && strtoupper((string) ($params['projectCode'] ?? '')) === 'A003') {
+            return $this->versionComparisonFromA003VpnSummary($params, $dimensions, $dimension);
+        }
 
         try {
             $groupColumns = [];
@@ -2302,6 +2308,150 @@ class FunnelAnalyticsService
         } catch (Throwable $exception) {
             Log::warning('jkcl_version_comparison_dws_failed', ['message' => $exception->getMessage()]);
             return ['rows' => [], 'dimension' => $dimension, 'source' => 'dws_app_funnel_stage_daily', 'domain' => $domain];
+        }
+    }
+
+
+    private function versionComparisonFromA003VpnSummary(array $params, array $dimensions, string $dimension): array
+    {
+        $dimensionSql = [
+            'stat_date' => 'stat_date',
+            'app_version' => 'app_version',
+            'user_country_code' => 'user_country_code',
+            'country_code' => 'country_code',
+            'platform' => 'platform',
+        ];
+        $dimensionLabelsMap = [
+            'stat_date' => '日期',
+            'app_version' => '应用版本',
+            'user_country_code' => '入口国家',
+            'country_code' => 'VPN出口国家',
+            'platform' => '平台',
+        ];
+
+        try {
+            if (in_array('app_version', $dimensions, true)) {
+                unset($params['appVersion']);
+            }
+            $query = DB::table('jkcl_a003_vpn_network_daily')
+                ->where('project_code', 'A003')
+                ->whereBetween('stat_date', [$params['dateFrom'], $params['dateTo']]);
+            if (!empty($params['appIdentifier'])) {
+                $query->where('app_identifier', (string) $params['appIdentifier']);
+            }
+            if (!empty($params['platform']) && !in_array('platform', $dimensions, true)) {
+                $query->where('platform', strtolower((string) $params['platform']));
+            }
+            if (!empty($params['country']) && !in_array('user_country_code', $dimensions, true)) {
+                $query->where('user_country_code', (string) $params['country']);
+            }
+            if (!empty($params['countryCode']) && !in_array('user_country_code', $dimensions, true)) {
+                $query->where('user_country_code', (string) $params['countryCode']);
+            }
+            if (!empty($params['appVersion']) && !in_array('app_version', $dimensions, true)) {
+                $query->where('app_version', (string) $params['appVersion']);
+            }
+
+            foreach ($dimensions as $item) {
+                $query->selectRaw($dimensionSql[$item] . " AS {$item}");
+            }
+
+            $rows = $query
+                ->selectRaw('SUM(dau_users) AS dau_users')
+                ->selectRaw('SUM(new_users) AS new_users')
+                ->selectRaw('SUM(vpn_session_count) AS vpn_session_count')
+                ->selectRaw('SUM(vpn_connect_start_count) AS connect_attempt_users')
+                ->selectRaw('SUM(vpn_connect_success_count) AS connect_success_users')
+                ->selectRaw('SUM(vpn_connect_failed_count) AS connect_failed_count')
+                ->selectRaw('SUM(vpn_probe_success_count) AS vpn_probe_success_count')
+                ->selectRaw('SUM(vpn_probe_failed_count) AS vpn_probe_failed_count')
+                ->selectRaw('SUM(vpn_ip_probe_success_count) AS vpn_ip_probe_success_count')
+                ->selectRaw('SUM(vpn_ip_probe_failed_count) AS vpn_ip_probe_failed_count')
+                ->selectRaw('SUM(vpn_fallback_count) AS vpn_fallback_count')
+                ->selectRaw('SUM(vpn_quality_sample_count) AS vpn_quality_sample_count')
+                ->selectRaw('SUM(vpn_quality_poor_count) AS vpn_quality_poor_count')
+                ->selectRaw('SUM(vpn_latency_sum_ms) AS vpn_latency_sum_ms')
+                ->selectRaw('SUM(vpn_latency_sample_count) AS vpn_latency_sample_count')
+                ->selectRaw('SUM(request_count) AS request_count')
+                ->selectRaw('SUM(load_success_count) AS load_success_count')
+                ->selectRaw('SUM(load_failed_count) AS load_failed_count')
+                ->selectRaw('SUM(impression_count) AS impression_count')
+                ->selectRaw('SUM(revenue_micros) AS revenue_micros')
+                ->groupBy($dimensions)
+                ->get()
+                ->map(function (object $row) use ($dimensions): array {
+                    $dimensionValues = [];
+                    $dimensionLabels = [];
+                    foreach ($dimensions as $item) {
+                        $value = trim((string) ($row->{$item} ?? '')) ?: 'unknown';
+                        $dimensionValues[$item] = $value;
+                        $dimensionLabels[$item] = $value;
+                    }
+                    $attempt = (int) ($row->connect_attempt_users ?? 0);
+                    $success = (int) ($row->connect_success_users ?? 0);
+                    $probeSuccess = (int) ($row->vpn_probe_success_count ?? 0);
+                    $probeFailed = (int) ($row->vpn_probe_failed_count ?? 0);
+                    $ipProbeSuccess = (int) ($row->vpn_ip_probe_success_count ?? 0);
+                    $ipProbeFailed = (int) ($row->vpn_ip_probe_failed_count ?? 0);
+                    $qualitySamples = (int) ($row->vpn_quality_sample_count ?? 0);
+                    $poorSamples = (int) ($row->vpn_quality_poor_count ?? 0);
+                    $latencySamples = (int) ($row->vpn_latency_sample_count ?? 0);
+                    $requestCount = (int) ($row->request_count ?? 0);
+                    $loadSuccess = (int) ($row->load_success_count ?? 0);
+                    return [
+                        'dimensionValues' => $dimensionValues,
+                        'dimensionLabels' => $dimensionLabels,
+                        'dimensionKey' => implode('|', $dimensionValues),
+                        'dimensionLabel' => implode(' × ', $dimensionLabels),
+                        'dauUsers' => (int) ($row->dau_users ?? 0),
+                        'newUsers' => (int) ($row->new_users ?? 0),
+                        'vpnSessionCount' => (int) ($row->vpn_session_count ?? 0),
+                        'connectAttemptUsers' => $attempt,
+                        'connectSuccessUsers' => $success,
+                        'connectFailedCount' => (int) ($row->connect_failed_count ?? 0),
+                        'connectAttemptRate' => $this->rate($attempt, (int) ($row->dau_users ?? 0)),
+                        'connectSuccessRate' => $this->rate($success, $attempt),
+                        'vpnProbeSuccessRate' => $this->rate($probeSuccess, $probeSuccess + $probeFailed),
+                        'vpnIpProbeSuccessRate' => $this->rate($ipProbeSuccess, $ipProbeSuccess + $ipProbeFailed),
+                        'vpnFallbackCount' => (int) ($row->vpn_fallback_count ?? 0),
+                        'vpnQualityPoorRate' => $this->rate($poorSamples, $qualitySamples),
+                        'vpnAvgLatencyMs' => $latencySamples > 0 ? round(((int) ($row->vpn_latency_sum_ms ?? 0)) / $latencySamples, 1) : 0,
+                        'requestCount' => $requestCount,
+                        'loadSuccessCount' => $loadSuccess,
+                        'loadFailedCount' => (int) ($row->load_failed_count ?? 0),
+                        'loadSuccessRate' => $this->rate($loadSuccess, $requestCount),
+                        'impressionCount' => (int) ($row->impression_count ?? 0),
+                        'revenue' => round(((int) ($row->revenue_micros ?? 0)) / 1000000, 6),
+                    ];
+                })
+                ->sortByDesc('dauUsers')
+                ->values();
+
+            $versionOptions = DB::table('jkcl_a003_vpn_network_daily')
+                ->where('project_code', 'A003')
+                ->whereBetween('stat_date', [$params['dateFrom'], $params['dateTo']])
+                ->whereNotNull('app_version')->where('app_version', '!=', '')
+                ->select('app_version')->distinct()->orderByDesc('app_version')->limit(200)->get()
+                ->map(fn ($row) => ['appVersion' => (string) $row->app_version, 'buildNumber' => null, 'label' => (string) $row->app_version])
+                ->values()->all();
+
+            $dimensionLabel = implode(' × ', array_map(static fn (string $item): string => $dimensionLabelsMap[$item] ?? $item, $dimensions));
+            return [
+                'rows' => $rows->all(),
+                'dimension' => $dimension,
+                'dimensions' => $dimensions,
+                'dimensionLabels' => array_map(static fn (string $item): string => $dimensionLabelsMap[$item] ?? $item, $dimensions),
+                'dimensionLabel' => $dimensionLabel,
+                'suggestedBaseline' => $rows->first()['dimensionLabel'] ?? null,
+                'source' => 'jkcl_a003_vpn_network_daily',
+                'scope' => 'users',
+                'domain' => 'vpn',
+                'versionOptions' => $versionOptions,
+                'notice' => "A003 VPN 版本对比读取日汇总表；可选应用版本/日期/入口国家/VPN出口国家/平台聚合，新增用户=app_first_open 去重，日活=app_foreground/app_active 去重。",
+            ];
+        } catch (Throwable $exception) {
+            Log::warning('jkcl_a003_vpn_version_comparison_failed', ['message' => $exception->getMessage()]);
+            return ['rows' => [], 'dimension' => $dimension, 'source' => 'jkcl_a003_vpn_network_daily', 'domain' => 'vpn'];
         }
     }
 

@@ -24,7 +24,7 @@ import { DomainReportPage } from "./domain-report";
 import { trackingApiBaseUrl } from "./api-base-url";
 import { createCodexQueryLinks } from "./codex-query-links-api";
 
-const APP_VERSION = "V129";
+const APP_VERSION = "V130";
 const VERSION_MANIFEST_PATH = "/version.json";
 
 type PageKey =
