@@ -2231,7 +2231,10 @@ class FunnelAnalyticsService
             // coalesced to '' in the SELECT below.
             foreach ($dimensions as $item) {
                 $requiredColumn = $item === 'app_version' ? 'app_version' : $item;
-                $query->whereNotNull($requiredColumn)->where($requiredColumn, '!=', '');
+                $query->whereNotNull($requiredColumn);
+                if ($requiredColumn !== 'stat_date') {
+                    $query->where($requiredColumn, '!=', '');
+                }
             }
             if (!in_array('platform', $dimensions, true) && !empty($params['platform'])) {
                 $query->where('platform', strtolower((string) $params['platform']));
@@ -2246,7 +2249,7 @@ class FunnelAnalyticsService
             $versionOptions = $this->versionComparisonVersionOptions($params);
 
             $columnsSql = implode(', ', array_map(
-                static fn (string $column): string => "COALESCE({$column}, '') AS {$column}",
+                static fn (string $column): string => $column === 'stat_date' ? 'stat_date AS stat_date' : "COALESCE({$column}, '') AS {$column}",
                 $groupColumns
             ));
             $stageRows = $query
