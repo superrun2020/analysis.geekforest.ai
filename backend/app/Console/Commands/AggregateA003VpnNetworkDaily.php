@@ -7,6 +7,7 @@ use Carbon\CarbonPeriod;
 use Illuminate\Console\Command;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use InvalidArgumentException;
 use Throwable;
 
@@ -83,6 +84,20 @@ CREATE TABLE IF NOT EXISTS jkcl_a003_vpn_network_daily (
     new_users BIGINT UNSIGNED NOT NULL DEFAULT 0,
     dau_users BIGINT UNSIGNED NOT NULL DEFAULT 0,
     vpn_session_count BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    vpn_connect_start_count BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    vpn_connect_success_count BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    vpn_connect_failed_count BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    vpn_config_success_count BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    vpn_config_failed_count BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    vpn_probe_success_count BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    vpn_probe_failed_count BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    vpn_ip_probe_success_count BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    vpn_ip_probe_failed_count BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    vpn_fallback_count BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    vpn_quality_sample_count BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    vpn_quality_poor_count BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    vpn_latency_sum_ms BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    vpn_latency_sample_count BIGINT UNSIGNED NOT NULL DEFAULT 0,
     opportunity_users BIGINT UNSIGNED NOT NULL DEFAULT 0,
     opportunity_count BIGINT UNSIGNED NOT NULL DEFAULT 0,
     request_users BIGINT UNSIGNED NOT NULL DEFAULT 0,
@@ -105,6 +120,22 @@ CREATE TABLE IF NOT EXISTS jkcl_a003_vpn_network_daily (
     KEY idx_a003_vpn_server (server_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 SQL);
+        $this->ensureMetricColumns();
+    }
+
+    private function ensureMetricColumns(): void
+    {
+        $columns = [
+            'vpn_connect_start_count', 'vpn_connect_success_count', 'vpn_connect_failed_count',
+            'vpn_config_success_count', 'vpn_config_failed_count', 'vpn_probe_success_count', 'vpn_probe_failed_count',
+            'vpn_ip_probe_success_count', 'vpn_ip_probe_failed_count', 'vpn_fallback_count',
+            'vpn_quality_sample_count', 'vpn_quality_poor_count', 'vpn_latency_sum_ms', 'vpn_latency_sample_count',
+        ];
+        foreach ($columns as $column) {
+            if (!Schema::hasColumn('jkcl_a003_vpn_network_daily', $column)) {
+                DB::statement(sprintf('ALTER TABLE jkcl_a003_vpn_network_daily ADD COLUMN %s BIGINT UNSIGNED NOT NULL DEFAULT 0 AFTER vpn_session_count', $column));
+            }
+        }
     }
 
     private function aggregateDate(string $date): int
@@ -116,6 +147,10 @@ SQL);
         $aggregated = [];
         $sumFields = [
             'event_count', 'users', 'new_users', 'dau_users', 'vpn_session_count',
+            'vpn_connect_start_count', 'vpn_connect_success_count', 'vpn_connect_failed_count',
+            'vpn_config_success_count', 'vpn_config_failed_count', 'vpn_probe_success_count', 'vpn_probe_failed_count',
+            'vpn_ip_probe_success_count', 'vpn_ip_probe_failed_count', 'vpn_fallback_count',
+            'vpn_quality_sample_count', 'vpn_quality_poor_count', 'vpn_latency_sum_ms', 'vpn_latency_sample_count',
             'opportunity_users', 'opportunity_count', 'request_users', 'request_count',
             'load_success_count', 'load_failed_count', 'show_attempt_count', 'show_success_count',
             'show_failed_count', 'show_blocked_count', 'impression_users', 'impression_count',
@@ -215,6 +250,8 @@ SQL);
             ->where('ad.event_date', $date)
             ->whereIn('ad.event_name', [
                 'app_first_open', 'first_open', 'app_foreground', 'app_active',
+                'vpn_config_fetch_result', 'vpn_connection_start', 'vpn_connection_result',
+                'vpn_server_probe_result', 'vpn_ip_probe_result', 'vpn_protocol_fallback', 'vpn_quality_sample',
                 'ad_opportunity', 'ad_request', 'ad_load_success', 'ad_load_failed',
                 'ad_show_attempt', 'ad_show_success', 'ad_show_failed', 'ad_show_blocked',
                 'ad_impression', 'ad_paid_event',
@@ -232,6 +269,20 @@ SQL);
             ->selectRaw("COUNT(DISTINCT CASE WHEN ad.event_name = 'app_first_open' THEN NULLIF(ad.my_user_id, '') END) AS new_users")
             ->selectRaw("COUNT(DISTINCT CASE WHEN ad.event_name IN ('app_foreground', 'app_active') THEN NULLIF(ad.my_user_id, '') END) AS dau_users")
             ->selectRaw("COUNT(DISTINCT CASE WHEN COALESCE(ad.vpn_session_id, '') <> '' THEN ad.vpn_session_id ELSE NULLIF(ad.session_id, '') END) AS vpn_session_count")
+            ->selectRaw("COUNT(DISTINCT CASE WHEN ad.event_name = 'vpn_connection_start' THEN NULLIF(COALESCE(ad.vpn_session_id, ad.session_id), '') END) AS vpn_connect_start_count")
+            ->selectRaw("COUNT(DISTINCT CASE WHEN ad.event_name = 'vpn_connection_result' AND COALESCE(NULLIF(ad.vpn_status, ''), NULLIF(ad.result_status, '')) = 'success' THEN NULLIF(COALESCE(ad.vpn_session_id, ad.session_id), '') END) AS vpn_connect_success_count")
+            ->selectRaw("COUNT(DISTINCT CASE WHEN ad.event_name = 'vpn_connection_result' AND COALESCE(NULLIF(ad.vpn_status, ''), NULLIF(ad.result_status, '')) <> 'success' THEN NULLIF(COALESCE(ad.vpn_session_id, ad.session_id), '') END) AS vpn_connect_failed_count")
+            ->selectRaw("SUM(CASE WHEN ad.event_name = 'vpn_config_fetch_result' AND ad.result_status = 'success' THEN 1 ELSE 0 END) AS vpn_config_success_count")
+            ->selectRaw("SUM(CASE WHEN ad.event_name = 'vpn_config_fetch_result' AND COALESCE(ad.result_status, '') <> 'success' THEN 1 ELSE 0 END) AS vpn_config_failed_count")
+            ->selectRaw("SUM(CASE WHEN ad.event_name = 'vpn_server_probe_result' AND ad.probe_result = 'success' THEN 1 ELSE 0 END) AS vpn_probe_success_count")
+            ->selectRaw("SUM(CASE WHEN ad.event_name = 'vpn_server_probe_result' AND COALESCE(ad.probe_result, '') <> 'success' THEN 1 ELSE 0 END) AS vpn_probe_failed_count")
+            ->selectRaw("SUM(CASE WHEN ad.event_name = 'vpn_ip_probe_result' AND ad.probe_result = 'success' THEN 1 ELSE 0 END) AS vpn_ip_probe_success_count")
+            ->selectRaw("SUM(CASE WHEN ad.event_name = 'vpn_ip_probe_result' AND COALESCE(ad.probe_result, '') <> 'success' THEN 1 ELSE 0 END) AS vpn_ip_probe_failed_count")
+            ->selectRaw("SUM(CASE WHEN ad.event_name = 'vpn_protocol_fallback' THEN 1 ELSE 0 END) AS vpn_fallback_count")
+            ->selectRaw("SUM(CASE WHEN ad.event_name = 'vpn_quality_sample' THEN 1 ELSE 0 END) AS vpn_quality_sample_count")
+            ->selectRaw("SUM(CASE WHEN ad.event_name = 'vpn_quality_sample' AND ad.vpn_quality_status IN ('poor', 'bad') THEN 1 ELSE 0 END) AS vpn_quality_poor_count")
+            ->selectRaw("SUM(CASE WHEN ad.event_name = 'vpn_quality_sample' AND ad.latency_ms IS NOT NULL THEN ad.latency_ms ELSE 0 END) AS vpn_latency_sum_ms")
+            ->selectRaw("SUM(CASE WHEN ad.event_name = 'vpn_quality_sample' AND ad.latency_ms IS NOT NULL THEN 1 ELSE 0 END) AS vpn_latency_sample_count")
             ->selectRaw("COUNT(DISTINCT CASE WHEN ad.event_name = 'ad_opportunity' THEN NULLIF(ad.my_user_id, '') END) AS opportunity_users")
             ->selectRaw("COUNT(DISTINCT CASE WHEN ad.event_name = 'ad_opportunity' THEN NULLIF(ad.opportunity_id, '') END) AS opportunity_count")
             ->selectRaw("COUNT(DISTINCT CASE WHEN ad.event_name = 'ad_request' THEN NULLIF(ad.my_user_id, '') END) AS request_users")

@@ -2050,6 +2050,13 @@ const MATRIX_METRIC_COLUMNS = [
   { key: "newUsers", label: "新增用户" },
   { key: "dauUsers", label: "日活用户" },
   { key: "vpnSessionCount", label: "VPN session数量" },
+  { key: "vpnConnectSuccessRate", label: "连接成功率" },
+  { key: "vpnConnectFailedCount", label: "连接失败" },
+  { key: "vpnProbeSuccessRate", label: "节点探测成功率" },
+  { key: "vpnIpProbeSuccessRate", label: "出口IP探测成功率" },
+  { key: "vpnFallbackCount", label: "协议回退" },
+  { key: "vpnAvgLatencyMs", label: "平均延迟" },
+  { key: "vpnQualityPoorRate", label: "劣质样本率" },
   { key: "requestCount", label: "请求数" },
   { key: "loadSuccessRate", label: "加载成功率" },
   { key: "loadFailedCount", label: "加载失败" },
@@ -2133,7 +2140,7 @@ function AdNetworkFailureMatrix({ data, dimensions, dates, projectCode, platform
         <table className="ad-network-failure-table">
           <thead><tr>
             {activeDimensions.map((dimension) => <th key={dimension}>{matrixDimensionLabel(dimension)}</th>)}
-            {shows("newUsers") && <th>新增用户</th>}{shows("dauUsers") && <th>日活用户</th>}{shows("vpnSessionCount") && <th>VPN session数量</th>}{shows("requestCount") && <th>请求数</th>}{shows("loadSuccessRate") && <th>加载成功率</th>}{shows("loadFailedCount") && <th>加载失败</th>}{shows("showFailedBlocked") && <th>展示失败/拦截</th>}{shows("impressionCount") && <th>Impression</th>}{shows("failureRate") && <th>失败率</th>}{shows("revenue") && <th>收入</th>}{shows("users") && <th>用户数</th>}{shows("topReasons") && <th>Top原因</th>}{shows("suggestion") && <th>建议</th>}
+            {shows("newUsers") && <th>新增用户</th>}{shows("dauUsers") && <th>日活用户</th>}{shows("vpnSessionCount") && <th>VPN session数量</th>}{shows("vpnConnectSuccessRate") && <th>连接成功率</th>}{shows("vpnConnectFailedCount") && <th>连接失败</th>}{shows("vpnProbeSuccessRate") && <th>节点探测</th>}{shows("vpnIpProbeSuccessRate") && <th>出口IP探测</th>}{shows("vpnFallbackCount") && <th>协议回退</th>}{shows("vpnAvgLatencyMs") && <th>平均延迟</th>}{shows("vpnQualityPoorRate") && <th>劣质样本率</th>}{shows("requestCount") && <th>请求数</th>}{shows("loadSuccessRate") && <th>加载成功率</th>}{shows("loadFailedCount") && <th>加载失败</th>}{shows("showFailedBlocked") && <th>展示失败/拦截</th>}{shows("impressionCount") && <th>Impression</th>}{shows("failureRate") && <th>失败率</th>}{shows("revenue") && <th>收入</th>}{shows("users") && <th>用户数</th>}{shows("topReasons") && <th>Top原因</th>}{shows("suggestion") && <th>建议</th>}
           </tr></thead>
           <tbody>{rows.length === 0 && <tr><td colSpan={activeDimensions.length + visibleColumns.length}><div className="overall-empty-state">{querying ? "正在查询数据，配置区可先调整维度和统计字段…" : "暂无数据"}</div></td></tr>}{rows.slice(0, 50).map((row: AnyRow, index: number) => {
             const reasons = Array.isArray(row.topReasons) ? row.topReasons : [];
@@ -2143,6 +2150,13 @@ function AdNetworkFailureMatrix({ data, dimensions, dates, projectCode, platform
               {shows("newUsers") && <td>{number(row.newUsers)}</td>}
               {shows("dauUsers") && <td>{number(row.dauUsers ?? row.users)}</td>}
               {shows("vpnSessionCount") && <td>{number(row.vpnSessionCount)}</td>}
+              {shows("vpnConnectSuccessRate") && <td><strong>{percent(row.vpnConnectSuccessRate)}</strong><small>{number(row.vpnConnectSuccessCount)} 成功 / {number(row.vpnConnectStartCount)} 发起</small></td>}
+              {shows("vpnConnectFailedCount") && <td>{number(row.vpnConnectFailedCount)}</td>}
+              {shows("vpnProbeSuccessRate") && <td><strong>{percent(row.vpnProbeSuccessRate)}</strong><small>{number(row.vpnProbeSuccessCount)} 成功 / {number(row.vpnProbeFailedCount)} 失败</small></td>}
+              {shows("vpnIpProbeSuccessRate") && <td><strong>{percent(row.vpnIpProbeSuccessRate)}</strong><small>{number(row.vpnIpProbeSuccessCount)} 成功 / {number(row.vpnIpProbeFailedCount)} 失败</small></td>}
+              {shows("vpnFallbackCount") && <td>{number(row.vpnFallbackCount)}</td>}
+              {shows("vpnAvgLatencyMs") && <td>{number(row.vpnAvgLatencyMs)} ms</td>}
+              {shows("vpnQualityPoorRate") && <td><strong>{percent(row.vpnQualityPoorRate)}</strong><small>{number(row.vpnQualityPoorCount)} 差 / {number(row.vpnQualitySampleCount)} 样本</small></td>}
               {shows("requestCount") && <td>{number(row.requestCount)}</td>}
               {shows("loadSuccessRate") && <td><strong>{percent(row.loadSuccessRate)}</strong><small>{number(row.loadSuccessCount)} 次成功</small></td>}
               {shows("loadFailedCount") && <td>{number(row.loadFailedCount)}</td>}
@@ -2157,7 +2171,7 @@ function AdNetworkFailureMatrix({ data, dimensions, dates, projectCode, platform
           })}</tbody>
         </table>
       </div>
-      <div className="matrix-footnote">字段来源：{text(matrix.source)}；口径：仅统计携带 VPN/网络上下文的广告事件，当前维度为 {activeDimensions.map((dimension) => <code key={dimension}>{dimension}</code>)}。去掉维度即向上聚合，成功率/失败率按所选维度组合重算。</div>
+      <div className="matrix-footnote">字段来源：{text(matrix.source)}；口径：A003 优先读取 VPN V1.8 日汇总表；新增用户=app_first_open 按 my_user_id 去重；日活=app_foreground/app_active 去重；连接/探测/延迟来自 VPN V1.8 事件，当前维度为 {activeDimensions.map((dimension) => <code key={dimension}>{dimension}</code>)}。去掉维度即向上聚合，成功率/失败率按所选维度组合重算。</div>
     </>}
     </section>
   </div>;

@@ -5300,6 +5300,20 @@ class FunnelAnalyticsService
             ->selectRaw('SUM(new_users) AS new_users')
             ->selectRaw('SUM(dau_users) AS dau_users')
             ->selectRaw('SUM(vpn_session_count) AS vpn_session_count')
+            ->selectRaw('SUM(vpn_connect_start_count) AS vpn_connect_start_count')
+            ->selectRaw('SUM(vpn_connect_success_count) AS vpn_connect_success_count')
+            ->selectRaw('SUM(vpn_connect_failed_count) AS vpn_connect_failed_count')
+            ->selectRaw('SUM(vpn_config_success_count) AS vpn_config_success_count')
+            ->selectRaw('SUM(vpn_config_failed_count) AS vpn_config_failed_count')
+            ->selectRaw('SUM(vpn_probe_success_count) AS vpn_probe_success_count')
+            ->selectRaw('SUM(vpn_probe_failed_count) AS vpn_probe_failed_count')
+            ->selectRaw('SUM(vpn_ip_probe_success_count) AS vpn_ip_probe_success_count')
+            ->selectRaw('SUM(vpn_ip_probe_failed_count) AS vpn_ip_probe_failed_count')
+            ->selectRaw('SUM(vpn_fallback_count) AS vpn_fallback_count')
+            ->selectRaw('SUM(vpn_quality_sample_count) AS vpn_quality_sample_count')
+            ->selectRaw('SUM(vpn_quality_poor_count) AS vpn_quality_poor_count')
+            ->selectRaw('SUM(vpn_latency_sum_ms) AS vpn_latency_sum_ms')
+            ->selectRaw('SUM(vpn_latency_sample_count) AS vpn_latency_sample_count')
             ->selectRaw('SUM(opportunity_users) AS opportunity_users')
             ->selectRaw('SUM(opportunity_count) AS opportunity_count')
             ->selectRaw('SUM(request_users) AS request_users')
@@ -5481,6 +5495,18 @@ class FunnelAnalyticsService
         $failureRate = $this->rate($failureCount, $failureBase);
         $loadSuccessRate = $this->rate($loadSuccessCount, $requestCount);
         $impressionRate = $this->rate($impressionCount, $showAttemptCount);
+        $vpnConnectStartCount = (int) ($row->vpn_connect_start_count ?? 0);
+        $vpnConnectSuccessCount = (int) ($row->vpn_connect_success_count ?? 0);
+        $vpnConnectFailedCount = (int) ($row->vpn_connect_failed_count ?? 0);
+        $vpnConfigSuccessCount = (int) ($row->vpn_config_success_count ?? 0);
+        $vpnConfigFailedCount = (int) ($row->vpn_config_failed_count ?? 0);
+        $vpnProbeSuccessCount = (int) ($row->vpn_probe_success_count ?? 0);
+        $vpnProbeFailedCount = (int) ($row->vpn_probe_failed_count ?? 0);
+        $vpnIpProbeSuccessCount = (int) ($row->vpn_ip_probe_success_count ?? 0);
+        $vpnIpProbeFailedCount = (int) ($row->vpn_ip_probe_failed_count ?? 0);
+        $vpnQualitySampleCount = (int) ($row->vpn_quality_sample_count ?? 0);
+        $vpnQualityPoorCount = (int) ($row->vpn_quality_poor_count ?? 0);
+        $vpnLatencySampleCount = (int) ($row->vpn_latency_sample_count ?? 0);
         $topReason = $topReasons[0]['reason'] ?? '暂无失败原因';
 
         return [
@@ -5497,6 +5523,24 @@ class FunnelAnalyticsService
             'newUsers' => (int) ($row->new_users ?? 0),
             'dauUsers' => (int) ($row->dau_users ?? $row->users ?? 0),
             'vpnSessionCount' => (int) ($row->vpn_session_count ?? 0),
+            'vpnConnectStartCount' => $vpnConnectStartCount,
+            'vpnConnectSuccessCount' => $vpnConnectSuccessCount,
+            'vpnConnectFailedCount' => $vpnConnectFailedCount,
+            'vpnConnectSuccessRate' => $this->rate($vpnConnectSuccessCount, $vpnConnectStartCount),
+            'vpnConfigSuccessCount' => $vpnConfigSuccessCount,
+            'vpnConfigFailedCount' => $vpnConfigFailedCount,
+            'vpnConfigSuccessRate' => $this->rate($vpnConfigSuccessCount, $vpnConfigSuccessCount + $vpnConfigFailedCount),
+            'vpnProbeSuccessCount' => $vpnProbeSuccessCount,
+            'vpnProbeFailedCount' => $vpnProbeFailedCount,
+            'vpnProbeSuccessRate' => $this->rate($vpnProbeSuccessCount, $vpnProbeSuccessCount + $vpnProbeFailedCount),
+            'vpnIpProbeSuccessCount' => $vpnIpProbeSuccessCount,
+            'vpnIpProbeFailedCount' => $vpnIpProbeFailedCount,
+            'vpnIpProbeSuccessRate' => $this->rate($vpnIpProbeSuccessCount, $vpnIpProbeSuccessCount + $vpnIpProbeFailedCount),
+            'vpnFallbackCount' => (int) ($row->vpn_fallback_count ?? 0),
+            'vpnQualitySampleCount' => $vpnQualitySampleCount,
+            'vpnQualityPoorCount' => $vpnQualityPoorCount,
+            'vpnQualityPoorRate' => $this->rate($vpnQualityPoorCount, $vpnQualitySampleCount),
+            'vpnAvgLatencyMs' => $vpnLatencySampleCount > 0 ? round(((int) ($row->vpn_latency_sum_ms ?? 0)) / $vpnLatencySampleCount, 1) : 0,
             'requestCount' => $requestCount,
             'loadSuccessCount' => $loadSuccessCount,
             'loadFailedCount' => $loadFailedCount,
