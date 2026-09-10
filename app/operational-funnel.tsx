@@ -2040,7 +2040,7 @@ function VpnPrerequisiteInsight({ rows, data }: { rows: AnyRow[]; data: AnyRow }
 
 const MATRIX_DIMENSIONS: Array<{ key: string; label: string }> = [
   { key: "event_date", label: "日期" },
-  { key: "user_country_code", label: "用户国家" },
+  { key: "user_country_code", label: "入口国家" },
   { key: "country_code", label: "VPN出口国家" },
   { key: "asn", label: "ASN" },
   { key: "server_id", label: "节点" },
@@ -2123,7 +2123,7 @@ function AdNetworkFailureMatrix({ data, dimensions, dates, projectCode, platform
       <div className="overall-filter-row">
         <label className="overall-filter-item date-range-control"><span>日期范围：</span><input type="date" value={dates.dateFrom} onChange={(event) => { const nextFrom = event.target.value; if (!nextFrom) return; const nextTo = dates.dateTo < nextFrom ? nextFrom : dates.dateTo; onRangeChange?.(`${nextFrom}~${nextTo}`); }} /><b>→</b><input type="date" value={dates.dateTo} min={dates.dateFrom} onChange={(event) => { if (!event.target.value) return; onRangeChange?.(`${dates.dateFrom}~${event.target.value}`); }} /></label>
         <label className="overall-filter-item"><span>项目代号：</span><select value={projectCode} onChange={(event) => onProjectSelect?.(event.target.value)}>{selectableProjects.map((item) => <option key={item.projectCode} value={item.projectCode}>{item.projectCode}{item.appName ? ` · ${item.appName}` : ""}</option>)}</select></label>
-        <label className="overall-filter-item"><span>VPN出口国家：</span><select value={country} onChange={(event) => onCountryChange?.(event.target.value)}>{safeCountryOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+        <label className="overall-filter-item"><span>入口国家：</span><select value={country} onChange={(event) => onCountryChange?.(event.target.value)}>{safeCountryOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
         <label className="overall-filter-item"><span>平台：</span><select value={platform} onChange={(event) => onPlatformChange?.(event.target.value)}><option>Android</option><option>iOS</option><option>全部</option></select></label>
         <label className="overall-filter-item"><span>App版本：</span><select value={appVersion} onChange={(event) => onAppVersionChange?.(event.target.value)}>{safeAppVersionOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
       </div>
@@ -2172,7 +2172,7 @@ function AdNetworkFailureMatrix({ data, dimensions, dates, projectCode, platform
           })}</tbody>
         </table>
       </div>
-      <div className="matrix-footnote">字段来源：{text(matrix.source)}；口径：A003 优先读取 VPN V1.8 日汇总表；新增用户=app_first_open 按 my_user_id 去重；日活=app_foreground/app_active 去重；连接/探测/延迟来自 VPN V1.8 事件，用户国家来自 V1.8 app_once_params.country_code；VPN出口国家来自域名/IP解析后的出口国家或节点区域；当前维度为 {activeDimensions.map((dimension) => <code key={dimension}>{dimension}</code>)}。去掉维度即向上聚合，成功率/失败率按所选维度组合重算。</div>
+      <div className="matrix-footnote">字段来源：{text(matrix.source)}；口径：A003 优先读取 VPN V1.8 日汇总表；新增用户=app_first_open 按 my_user_id 去重；日活=app_foreground/app_active 去重；连接/探测/延迟来自 VPN V1.8 事件，入口国家来自 V1.8 app_once_params.country_code，并按 my_user_id 关联到该用户所有 session；VPN出口国家来自域名/IP解析后的出口国家或节点区域；当前维度为 {activeDimensions.map((dimension) => <code key={dimension}>{dimension}</code>)}。去掉维度即向上聚合，成功率/失败率按所选维度组合重算。</div>
     </>}
     </section>
   </div>;
@@ -2525,7 +2525,7 @@ function versionCompareColumns(domain: string): VersionCompareColumn[] {
 const versionCompareDimensions = [
   { key: "stat_date", label: "日期" },
   { key: "app_version", label: "应用版本" },
-  { key: "user_country_code", label: "用户国家" },
+  { key: "user_country_code", label: "入口国家" },
   { key: "country_code", label: "VPN出口国家" },
   { key: "platform", label: "平台" },
 ];
@@ -2997,7 +2997,7 @@ export function OperationalFunnel(props: Props) {
   const [matrixData, setMatrixData] = useState<AnyRow | null>(null);
   const [matrixLoading, setMatrixLoading] = useState(false);
   const [matrixError, setMatrixError] = useState("");
-  const [matrixDimensions, setMatrixDimensions] = useState<string[]>(["country_code", "asn", "server_id", "protocol"]);
+  const [matrixDimensions, setMatrixDimensions] = useState<string[]>(["user_country_code", "asn", "server_id", "protocol"]);
   const [matrixQueryKey, setMatrixQueryKey] = useState(0);
   const dates = useMemo(() => dateRange(props.range), [props.range]);
   const queryUnit: FunnelUnit = domain === "vpn" ? "sessions" : domain === "ads" ? unit : "users";

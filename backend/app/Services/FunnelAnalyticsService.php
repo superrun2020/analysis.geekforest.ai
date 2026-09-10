@@ -5179,7 +5179,7 @@ class FunnelAnalyticsService
                 'dimensions' => $dimensions,
                 'rows' => $rows,
                 'totals' => $totals,
-                'queryHint' => '按所选维度（日期/用户国家/VPN出口国家/ASN/节点/协议）横向聚合广告请求、加载和展示的成功率与失败率；去掉某个维度即向上聚合。',
+                'queryHint' => '按所选维度（日期/入口国家/VPN出口国家/ASN/节点/协议）横向聚合广告请求、加载和展示的成功率与失败率；去掉某个维度即向上聚合。',
             ];
         } catch (Throwable $exception) {
             Log::warning('jkcl_ad_network_failure_matrix_failed', [
@@ -5286,7 +5286,7 @@ class FunnelAnalyticsService
             $query->where('platform', strtolower((string) $params['platform']));
         }
         if (!empty($params['countryCode'])) {
-            $query->where('country_code', (string) $params['countryCode']);
+            $query->where('user_country_code', (string) $params['countryCode']);
         }
         if (!empty($params['appVersion'])) {
             $query->where('app_version', (string) $params['appVersion']);

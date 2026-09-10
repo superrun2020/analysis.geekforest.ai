@@ -24,7 +24,7 @@ import { DomainReportPage } from "./domain-report";
 import { trackingApiBaseUrl } from "./api-base-url";
 import { createCodexQueryLinks } from "./codex-query-links-api";
 
-const APP_VERSION = "V128";
+const APP_VERSION = "V129";
 const VERSION_MANIFEST_PATH = "/version.json";
 
 type PageKey =
@@ -353,7 +353,7 @@ const pageGuideCopy: Record<PageKey, { purpose: string; source: string; next: st
   cohort: { purpose: "按国家、版本、页面、渠道等维度找异常集中人群。", source: "来自 DWS/DWM 切片聚合。", next: "选择最差切片进入证据明细。" },
   path: { purpose: "按页面看访问、退出和链路到达，定位页面承接流失。", source: "来自 screen_view/screen_exit 和 page × step 聚合。", next: "点击核心漏斗断点查看页面级流失。" },
   snapshot: { purpose: "查看当前执行漏斗口径和步骤定义。", source: "来自已发布漏斗配置快照。", next: "发现口径不对时进入打点测试配置修订。" },
-  network_failure_matrix: { purpose: "按国家 × ASN × 节点 × 协议横向看广告请求、加载失败、展示失败和展示拦截。", source: "来自 V1.8 明细事件携带的网络上下文，独立查询、按需加载。", next: "定位到具体网络出口后回 VPN 功能漏斗分析查看连接与协议回退。" },
+  network_failure_matrix: { purpose: "按入口国家 × ASN × 节点 × 协议横向看 VPN 连接质量、广告请求、加载失败、展示失败和展示拦截。", source: "来自 V1.8 明细事件携带的网络上下文，独立查询、按需加载。", next: "定位到具体网络出口后回 VPN 功能漏斗分析查看连接与协议回退。" },
 };
 
 const projects = [
