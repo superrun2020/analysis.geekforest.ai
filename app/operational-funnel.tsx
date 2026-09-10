@@ -2560,7 +2560,7 @@ function compareDimensionLabels(a: string, b: string): number {
   return 0;
 }
 
-function VersionComparison({ data, domain, projectCode, appIdentifier, platform, country, appVersion, initialRange, refreshKey }: {
+function VersionComparison({ data, domain, projectCode, appIdentifier, platform, country, appVersion, initialRange, refreshKey, projectOptions = [], onProjectSelect, onRangeChange }: {
   data: AnyRow;
   domain: "ads" | "vpn" | "quality";
   projectCode: string;
@@ -2570,11 +2570,20 @@ function VersionComparison({ data, domain, projectCode, appIdentifier, platform,
   appVersion: string;
   initialRange: string;
   refreshKey: number;
+  projectOptions?: Array<{ projectCode: string; appName?: string }>;
+  onProjectSelect?: (projectCode: string) => void;
+  onRangeChange?: (range: string) => void;
 }) {
   const allColumns = useMemo(() => versionCompareColumns(domain), [domain]);
   const [dimensions, setDimensions] = useState<string[]>(["app_version"]);
-  const [range, setRange] = useState<string>(initialRange);
+  const [range, setLocalRange] = useState<string>(initialRange);
   const [versionFilter, setVersionFilter] = useState<string>(appVersion === "全部版本" ? "" : appVersion.split(" ")[0]);
+  const selectableProjects = projectOptions.length ? projectOptions : [{ projectCode }];
+  const currentDates = dateRange(range);
+  const setRange = (nextRange: string) => {
+    setLocalRange(nextRange);
+    onRangeChange?.(nextRange);
+  };
   const [visible, setVisible] = useState<Record<string, boolean>>(() => {
     const map: Record<string, boolean> = {};
     allColumns.forEach((column) => { map[column.key] = true; });
@@ -2632,6 +2641,7 @@ function VersionComparison({ data, domain, projectCode, appIdentifier, platform,
   const suggested = text(comparison.suggestedBaseline) || text(rows[0]?.dimensionLabel);
   const [baselineLabel, setBaselineLabel] = useState(suggested);
   useEffect(() => { setBaselineLabel(suggested); }, [suggested]);
+  useEffect(() => { setLocalRange(initialRange); }, [initialRange]);
   const baseline = rows.find((row) => text(row.dimensionLabel) === baselineLabel) ?? rows[0];
 
   const [sortKey, setSortKey] = useState<string>("dauUsers");
@@ -2729,6 +2739,23 @@ function VersionComparison({ data, domain, projectCode, appIdentifier, platform,
         </table></div><div className="version-compare-footnote">数据源：{text(comparison.source)}；口径：{text(comparison.notice)}</div></section>}
       </div>
       <aside className="version-compare-config surface">
+        {domain === "vpn" && <div className="config-group">
+          <div className="config-title">产品</div>
+          <select className="config-select" value={projectCode} onChange={(event) => onProjectSelect?.(event.target.value)}>
+            {selectableProjects.map((item) => <option key={item.projectCode} value={item.projectCode}>{item.projectCode}{item.appName ? ` · ${item.appName}` : ""}</option>)}
+          </select>
+          <small className="config-hint">切换产品后会按当前日期和维度重新查询版本对比。</small>
+        </div>}
+        <div className="config-group">
+          <div className="config-title">日期范围</div>
+          <div className="overall-filter-item date-range-control version-date-range">
+            <input type="date" value={currentDates.dateFrom} onChange={(event) => { const nextFrom = event.target.value; if (!nextFrom) return; const nextTo = currentDates.dateTo < nextFrom ? nextFrom : currentDates.dateTo; setRange(`${nextFrom}~${nextTo}`); }} />
+            <b>→</b>
+            <input type="date" value={currentDates.dateTo} min={currentDates.dateFrom} onChange={(event) => { if (!event.target.value) return; setRange(`${currentDates.dateFrom}~${event.target.value}`); }} />
+          </div>
+          <div className="config-options">{[initialRange, "昨天", "近7天", "近30天"].filter((item, index, arr) => arr.indexOf(item) === index).map((item) => <button key={item} className={range === item ? "active" : ""} onClick={() => setRange(item)}>{item}</button>)}</div>
+          <small className="config-hint">日期既可作为筛选区间，也可在上方维度中勾选“日期”做日期聚合。</small>
+        </div>
         <div className="config-group">
           <div className="config-title">维度</div>
           <div className="config-options">{versionDimensionOptions.map((item) => <button key={item.key} className={dimensions.includes(item.key) ? "active" : ""} onClick={() => toggleDimension(item.key)}>{item.label}</button>)}</div>
@@ -2751,10 +2778,7 @@ function VersionComparison({ data, domain, projectCode, appIdentifier, platform,
           </select>
           <small className="config-hint">可直接选择版本；若当前按“应用版本”聚合，选择后会自动切到“日期”维度看该版本每天数据。</small>
         </div>
-        <div className="config-group">
-          <div className="config-title">日期范围</div>
-          <div className="config-options">{[initialRange, "近7天", "近30天"].filter((item, index, arr) => arr.indexOf(item) === index).map((item) => <button key={item} className={range === item ? "active" : ""} onClick={() => setRange(item)}>{item}</button>)}</div>
-        </div>
+
         <div className="config-group">
           <div className="config-title">展示列</div>
           <div className="config-checkboxes">{allColumns.map((column) => <label key={column.key}><input type="checkbox" checked={visible[column.key] !== false} onChange={(event) => setVisible((current) => ({ ...current, [column.key]: event.target.checked }))} /><span>{column.label}</span></label>)}</div>
@@ -3265,7 +3289,7 @@ export function OperationalFunnel(props: Props) {
     };
     return <div className="page-stack">
       <nav className="operational-tabs workbench-tabs"><button className={vpnReportSection === "matrix" ? "active" : ""} onClick={() => setVpnReportSection("matrix")}>诊断明细</button><button className={vpnReportSection === "versions" ? "active" : ""} onClick={() => setVpnReportSection("versions")}>版本对比</button></nav>
-      {vpnReportSection === "versions" ? <VersionComparison data={{}} domain="vpn" projectCode={props.projectCode} appIdentifier={props.appIdentifier} platform={props.platform} country={props.country} appVersion={props.appVersion} initialRange={props.range} refreshKey={props.refreshKey + matrixQueryKey} /> : <AdNetworkFailureMatrix data={loadingMatrixData} dimensions={matrixDimensions} dates={dates} projectCode={props.projectCode} platform={props.platform} country={props.country} appVersion={props.appVersion} projectOptions={props.projectOptions} countryOptions={props.countryOptions} appVersionOptions={props.appVersionOptions} querying={matrixLoading} queryError={matrixError} onQuery={(nextDimensions) => { setMatrixDimensions(nextDimensions); setMatrixQueryKey((value) => value + 1); }} onProjectSelect={props.onProjectSelect} onRangeChange={props.onRangeChange} onCountryChange={props.onCountryChange} onAppVersionChange={props.onAppVersionChange} onPlatformChange={props.onPlatformChange} />}
+      {vpnReportSection === "versions" ? <VersionComparison data={{}} domain="vpn" projectCode={props.projectCode} appIdentifier={props.appIdentifier} platform={props.platform} country={props.country} appVersion={props.appVersion} initialRange={props.range} refreshKey={props.refreshKey + matrixQueryKey} projectOptions={props.projectOptions} onProjectSelect={props.onProjectSelect} onRangeChange={props.onRangeChange} /> : <AdNetworkFailureMatrix data={loadingMatrixData} dimensions={matrixDimensions} dates={dates} projectCode={props.projectCode} platform={props.platform} country={props.country} appVersion={props.appVersion} projectOptions={props.projectOptions} countryOptions={props.countryOptions} appVersionOptions={props.appVersionOptions} querying={matrixLoading} queryError={matrixError} onQuery={(nextDimensions) => { setMatrixDimensions(nextDimensions); setMatrixQueryKey((value) => value + 1); }} onProjectSelect={props.onProjectSelect} onRangeChange={props.onRangeChange} onCountryChange={props.onCountryChange} onAppVersionChange={props.onAppVersionChange} onPlatformChange={props.onPlatformChange} />}
     </div>;
   }
 
@@ -3288,6 +3312,6 @@ export function OperationalFunnel(props: Props) {
   const diagnosisProgress = progressItems.find((item) => item.key === diagnosisKey);
   if (!hasRows) return <div className="page-stack">{status}{progress}<StatePanel kind="empty" message="数据包已加载，但当前筛选范围没有可计算的标准事件。" /></div>;
   if (props.page === "overview") return <div className="page-stack">{status}{progress}<Overview data={data} onPageChange={props.onPageChange} onProjectSelect={props.onProjectSelect} context={{ projectCode: "全部项目", range: props.range, dates, loadedAt }} /></div>;
-  if (props.page === "workbench") return <div className="page-stack">{status}{progress}<nav className="operational-tabs workbench-tabs"><button className={workbenchSection === "workbench" ? "active" : ""} onClick={() => setWorkbenchSection("workbench")}>核心漏斗</button><button className={workbenchSection === "diagnosis" ? "active" : ""} onClick={() => setWorkbenchSection("diagnosis")}>流失诊断</button><button className={workbenchSection === "path" ? "active" : ""} onClick={() => setWorkbenchSection("path")}>页面路径</button><button className={workbenchSection === "versions" ? "active" : ""} onClick={() => setWorkbenchSection("versions")}>版本对比</button></nav>{workbenchSection === "workbench" ? <Workbench data={data} domain={domain} setDomain={setDomain} unit={unit} setUnit={setUnit} pageData={pageData} diagnosisData={diagnosisData} pageProgress={pageProgress} diagnosisProgress={diagnosisProgress} lockDomain={props.lockDomain} /> : workbenchSection === "versions" ? <VersionComparison data={workbenchData ?? data} domain={domain} projectCode={props.projectCode} appIdentifier={props.appIdentifier} platform={props.platform} country={props.country} appVersion={props.appVersion} initialRange={props.range} refreshKey={props.refreshKey} /> : <GenericPage page={workbenchSection} data={data} workbenchData={workbenchData} onOpenWorkbench={() => setWorkbenchSection("workbench")} />}</div>;
+  if (props.page === "workbench") return <div className="page-stack">{status}{progress}<nav className="operational-tabs workbench-tabs"><button className={workbenchSection === "workbench" ? "active" : ""} onClick={() => setWorkbenchSection("workbench")}>核心漏斗</button><button className={workbenchSection === "diagnosis" ? "active" : ""} onClick={() => setWorkbenchSection("diagnosis")}>流失诊断</button><button className={workbenchSection === "path" ? "active" : ""} onClick={() => setWorkbenchSection("path")}>页面路径</button><button className={workbenchSection === "versions" ? "active" : ""} onClick={() => setWorkbenchSection("versions")}>版本对比</button></nav>{workbenchSection === "workbench" ? <Workbench data={data} domain={domain} setDomain={setDomain} unit={unit} setUnit={setUnit} pageData={pageData} diagnosisData={diagnosisData} pageProgress={pageProgress} diagnosisProgress={diagnosisProgress} lockDomain={props.lockDomain} /> : workbenchSection === "versions" ? <VersionComparison data={workbenchData ?? data} domain={domain} projectCode={props.projectCode} appIdentifier={props.appIdentifier} platform={props.platform} country={props.country} appVersion={props.appVersion} initialRange={props.range} refreshKey={props.refreshKey} projectOptions={props.projectOptions} onProjectSelect={props.onProjectSelect} onRangeChange={props.onRangeChange} /> : <GenericPage page={workbenchSection} data={data} workbenchData={workbenchData} onOpenWorkbench={() => setWorkbenchSection("workbench")} />}</div>;
   return <div className="page-stack">{status}{progress}<GenericPage page={props.page} data={data} workbenchData={workbenchData} /></div>;
 }
