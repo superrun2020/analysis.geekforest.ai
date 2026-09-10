@@ -16,8 +16,15 @@ type Props = {
   country: string;
   appVersion: string;
   refreshKey: number;
+  projectOptions?: Array<{ projectCode: string; appName?: string }>;
+  countryOptions?: string[];
+  appVersionOptions?: string[];
   onPageChange: (page: FunnelPageKey) => void;
   onProjectSelect?: (projectCode: string) => void;
+  onRangeChange?: (range: string) => void;
+  onCountryChange?: (country: string) => void;
+  onAppVersionChange?: (appVersion: string) => void;
+  onPlatformChange?: (platform: string) => void;
   initialDomain?: "ads" | "vpn" | "quality";
   lockDomain?: boolean;
   softFailure?: boolean;
@@ -2040,6 +2047,9 @@ const MATRIX_DIMENSIONS: Array<{ key: string; label: string }> = [
 ];
 
 const MATRIX_METRIC_COLUMNS = [
+  { key: "newUsers", label: "新增用户" },
+  { key: "dauUsers", label: "日活用户" },
+  { key: "vpnSessionCount", label: "VPN session数量" },
   { key: "requestCount", label: "请求数" },
   { key: "loadSuccessRate", label: "加载成功率" },
   { key: "loadFailedCount", label: "加载失败" },
@@ -2058,13 +2068,16 @@ function matrixDimensionLabel(key: string): string {
   return MATRIX_DIMENSIONS.find((dimension) => dimension.key === key)?.label ?? key;
 }
 
-function AdNetworkFailureMatrix({ data, dimensions, dates, projectCode, platform, country, appVersion, querying, queryError, onQuery }: { data: AnyRow; dimensions: string[]; dates: { dateFrom: string; dateTo: string }; projectCode: string; platform: string; country: string; appVersion: string; querying: boolean; queryError: string; onQuery: (dimensions: string[]) => void }) {
+function AdNetworkFailureMatrix({ data, dimensions, dates, projectCode, platform, country, appVersion, projectOptions = [], countryOptions = ["全部国家"], appVersionOptions = ["全部版本"], querying, queryError, onQuery, onProjectSelect, onRangeChange, onCountryChange, onAppVersionChange, onPlatformChange }: { data: AnyRow; dimensions: string[]; dates: { dateFrom: string; dateTo: string }; projectCode: string; platform: string; country: string; appVersion: string; projectOptions?: Array<{ projectCode: string; appName?: string }>; countryOptions?: string[]; appVersionOptions?: string[]; querying: boolean; queryError: string; onQuery: (dimensions: string[]) => void; onProjectSelect?: (projectCode: string) => void; onRangeChange?: (range: string) => void; onCountryChange?: (country: string) => void; onAppVersionChange?: (appVersion: string) => void; onPlatformChange?: (platform: string) => void }) {
   const matrix = data.adNetworkFailureMatrix ?? {};
   const rows = Array.isArray(matrix.rows) ? matrix.rows : [];
   const totals = matrix.totals ?? {};
   const activeDimensions: string[] = Array.isArray(matrix.dimensions) && matrix.dimensions.length ? (matrix.dimensions as string[]) : dimensions;
   const [draftDimensions, setDraftDimensions] = useState<string[]>(dimensions);
   const [visibleColumns, setVisibleColumns] = useState<MatrixMetricColumnKey[]>(MATRIX_METRIC_COLUMNS.map((column) => column.key));
+  const selectableProjects = projectOptions.length ? projectOptions : [{ projectCode }];
+  const safeCountryOptions = countryOptions.length ? countryOptions : ["全部国家"];
+  const safeAppVersionOptions = appVersionOptions.length ? appVersionOptions : ["全部版本"];
   const topBad = rows.find((row: AnyRow) => row.status === "bad") ?? rows[0];
   const statusLabel: Record<string, string> = { bad: "严重", warn: "关注", good: "正常", unavailable: "暂无数据" };
 
@@ -2100,11 +2113,11 @@ function AdNetworkFailureMatrix({ data, dimensions, dates, projectCode, platform
         {MATRIX_METRIC_COLUMNS.map((column) => <label key={column.key} className={`overall-chip ${shows(column.key) ? "active" : ""}`}><input type="checkbox" checked={shows(column.key)} onChange={() => toggleColumn(column.key)} /><span>{column.label}</span></label>)}
       </div>
       <div className="overall-filter-row">
-        <div className="overall-filter-item"><span>日期范围：</span><strong>{dates.dateFrom} → {dates.dateTo}</strong></div>
-        <div className="overall-filter-item"><span>项目代号：</span><strong>{projectCode}</strong></div>
-        <div className="overall-filter-item"><span>国家：</span><strong>{country}</strong></div>
-        <div className="overall-filter-item"><span>平台：</span><strong>{platform}</strong></div>
-        <div className="overall-filter-item"><span>App版本：</span><strong>{appVersion}</strong></div>
+        <label className="overall-filter-item date-range-control"><span>日期范围：</span><input type="date" value={dates.dateFrom} onChange={(event) => { const nextFrom = event.target.value; if (!nextFrom) return; const nextTo = dates.dateTo < nextFrom ? nextFrom : dates.dateTo; onRangeChange?.(`${nextFrom}~${nextTo}`); }} /><b>→</b><input type="date" value={dates.dateTo} min={dates.dateFrom} onChange={(event) => { if (!event.target.value) return; onRangeChange?.(`${dates.dateFrom}~${event.target.value}`); }} /></label>
+        <label className="overall-filter-item"><span>项目代号：</span><select value={projectCode} onChange={(event) => onProjectSelect?.(event.target.value)}>{selectableProjects.map((item) => <option key={item.projectCode} value={item.projectCode}>{item.projectCode}{item.appName ? ` · ${item.appName}` : ""}</option>)}</select></label>
+        <label className="overall-filter-item"><span>国家：</span><select value={country} onChange={(event) => onCountryChange?.(event.target.value)}>{safeCountryOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+        <label className="overall-filter-item"><span>平台：</span><select value={platform} onChange={(event) => onPlatformChange?.(event.target.value)}><option>Android</option><option>iOS</option><option>全部</option></select></label>
+        <label className="overall-filter-item"><span>App版本：</span><select value={appVersion} onChange={(event) => onAppVersionChange?.(event.target.value)}>{safeAppVersionOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
       </div>
       <div className="overall-action-row">
         <div className="overall-view-actions"><button type="button">选择视图</button><button type="button">＋ 新增</button></div>
@@ -2120,13 +2133,16 @@ function AdNetworkFailureMatrix({ data, dimensions, dates, projectCode, platform
         <table className="ad-network-failure-table">
           <thead><tr>
             {activeDimensions.map((dimension) => <th key={dimension}>{matrixDimensionLabel(dimension)}</th>)}
-            {shows("requestCount") && <th>请求数</th>}{shows("loadSuccessRate") && <th>加载成功率</th>}{shows("loadFailedCount") && <th>加载失败</th>}{shows("showFailedBlocked") && <th>展示失败/拦截</th>}{shows("impressionCount") && <th>Impression</th>}{shows("failureRate") && <th>失败率</th>}{shows("revenue") && <th>收入</th>}{shows("users") && <th>用户数</th>}{shows("topReasons") && <th>Top原因</th>}{shows("suggestion") && <th>建议</th>}
+            {shows("newUsers") && <th>新增用户</th>}{shows("dauUsers") && <th>日活用户</th>}{shows("vpnSessionCount") && <th>VPN session数量</th>}{shows("requestCount") && <th>请求数</th>}{shows("loadSuccessRate") && <th>加载成功率</th>}{shows("loadFailedCount") && <th>加载失败</th>}{shows("showFailedBlocked") && <th>展示失败/拦截</th>}{shows("impressionCount") && <th>Impression</th>}{shows("failureRate") && <th>失败率</th>}{shows("revenue") && <th>收入</th>}{shows("users") && <th>用户数</th>}{shows("topReasons") && <th>Top原因</th>}{shows("suggestion") && <th>建议</th>}
           </tr></thead>
           <tbody>{rows.length === 0 && <tr><td colSpan={activeDimensions.length + visibleColumns.length}><div className="overall-empty-state">{querying ? "正在查询数据，配置区可先调整维度和统计字段…" : "暂无数据"}</div></td></tr>}{rows.slice(0, 50).map((row: AnyRow, index: number) => {
             const reasons = Array.isArray(row.topReasons) ? row.topReasons : [];
             const dimValues: AnyRow = row.dimensions ?? {};
             return <tr key={`${activeDimensions.map((dimension) => text(dimValues[dimension] ?? "unknown")).join("-")}-${index}`} className={row.status === "bad" ? "row-bad" : row.status === "warn" ? "row-warn" : ""}>
               {activeDimensions.map((dimension) => <td key={dimension}>{renderDimensionCell(dimension, dimValues[dimension] ?? "unknown")}</td>)}
+              {shows("newUsers") && <td>{number(row.newUsers)}</td>}
+              {shows("dauUsers") && <td>{number(row.dauUsers ?? row.users)}</td>}
+              {shows("vpnSessionCount") && <td>{number(row.vpnSessionCount)}</td>}
               {shows("requestCount") && <td>{number(row.requestCount)}</td>}
               {shows("loadSuccessRate") && <td><strong>{percent(row.loadSuccessRate)}</strong><small>{number(row.loadSuccessCount)} 次成功</small></td>}
               {shows("loadFailedCount") && <td>{number(row.loadFailedCount)}</td>}
@@ -3201,7 +3217,7 @@ export function OperationalFunnel(props: Props) {
         totals: {},
       },
     };
-    return <div className="page-stack"><AdNetworkFailureMatrix data={loadingMatrixData} dimensions={matrixDimensions} dates={dates} projectCode={props.projectCode} platform={props.platform} country={props.country} appVersion={props.appVersion} querying={matrixLoading} queryError={matrixError} onQuery={(nextDimensions) => { setMatrixDimensions(nextDimensions); setMatrixQueryKey((value) => value + 1); }} /></div>;
+    return <div className="page-stack"><AdNetworkFailureMatrix data={loadingMatrixData} dimensions={matrixDimensions} dates={dates} projectCode={props.projectCode} platform={props.platform} country={props.country} appVersion={props.appVersion} projectOptions={props.projectOptions} countryOptions={props.countryOptions} appVersionOptions={props.appVersionOptions} querying={matrixLoading} queryError={matrixError} onQuery={(nextDimensions) => { setMatrixDimensions(nextDimensions); setMatrixQueryKey((value) => value + 1); }} onProjectSelect={props.onProjectSelect} onRangeChange={props.onRangeChange} onCountryChange={props.onCountryChange} onAppVersionChange={props.onAppVersionChange} onPlatformChange={props.onPlatformChange} /></div>;
   }
 
   if (loading) return <StatePanel kind="loading" message={`正在优先加载当前页面：${packageLabel}。核心页完成后立即展示，其他数据后台继续查询。`}><QueryProgressPanel items={progressItems} compact /></StatePanel>;

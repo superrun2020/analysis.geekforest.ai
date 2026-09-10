@@ -5204,6 +5204,8 @@ class FunnelAnalyticsService
                 'ad_show_blocked',
                 'ad_impression',
                 'ad_paid_event',
+                'first_open',
+                'app_first_open',
             ]);
 
         foreach ($dimensions as $dimension) {
@@ -5213,6 +5215,9 @@ class FunnelAnalyticsService
         return $query
             ->selectRaw("COUNT(*) AS event_count")
             ->selectRaw("COUNT(DISTINCT NULLIF(ad.my_user_id, '')) AS users")
+            ->selectRaw("COUNT(DISTINCT CASE WHEN ad.event_name IN ('first_open', 'app_first_open') THEN NULLIF(ad.my_user_id, '') END) AS new_users")
+            ->selectRaw("COUNT(DISTINCT NULLIF(ad.my_user_id, '')) AS dau_users")
+            ->selectRaw("COUNT(DISTINCT NULLIF(COALESCE(ad.vpn_session_id, ad.session_id), '')) AS vpn_session_count")
             ->selectRaw("COUNT(DISTINCT CASE WHEN ad.event_name = 'ad_opportunity' THEN NULLIF(ad.my_user_id, '') END) AS opportunity_users")
             ->selectRaw("COUNT(DISTINCT CASE WHEN ad.event_name = 'ad_opportunity' THEN NULLIF(ad.opportunity_id, '') END) AS opportunity_count")
             ->selectRaw("COUNT(DISTINCT CASE WHEN ad.event_name = 'ad_request' THEN NULLIF(ad.my_user_id, '') END) AS request_users")
@@ -5407,6 +5412,9 @@ class FunnelAnalyticsService
             'opportunityUsers' => (int) ($row->opportunity_users ?? 0),
             'opportunityCount' => (int) ($row->opportunity_count ?? 0),
             'requestUsers' => (int) ($row->request_users ?? 0),
+            'newUsers' => $newUsers,
+            'dauUsers' => $dauUsers,
+            'vpnSessionCount' => $vpnSessionCount,
             'requestCount' => $requestCount,
             'loadSuccessCount' => $loadSuccessCount,
             'loadFailedCount' => $loadFailedCount,
@@ -5434,6 +5442,9 @@ class FunnelAnalyticsService
 
     private function adNetworkFailureTotals($rows): array
     {
+        $newUsers = (int) $rows->sum('new_users');
+        $dauUsers = (int) $rows->sum('dau_users');
+        $vpnSessionCount = (int) $rows->sum('vpn_session_count');
         $requestCount = (int) $rows->sum('request_count');
         $loadSuccessCount = (int) $rows->sum('load_success_count');
         $loadFailedCount = (int) $rows->sum('load_failed_count');
@@ -5444,6 +5455,9 @@ class FunnelAnalyticsService
         $failureCount = $loadFailedCount + $showFailedCount + $showBlockedCount;
 
         return [
+            'newUsers' => $newUsers,
+            'dauUsers' => $dauUsers,
+            'vpnSessionCount' => $vpnSessionCount,
             'requestCount' => $requestCount,
             'loadSuccessCount' => $loadSuccessCount,
             'loadFailedCount' => $loadFailedCount,
@@ -5462,6 +5476,9 @@ class FunnelAnalyticsService
     private function emptyAdNetworkFailureTotals(): array
     {
         return [
+            'newUsers' => 0,
+            'dauUsers' => 0,
+            'vpnSessionCount' => 0,
             'requestCount' => 0,
             'loadSuccessCount' => 0,
             'loadFailedCount' => 0,

@@ -24,7 +24,7 @@ import { DomainReportPage } from "./domain-report";
 import { trackingApiBaseUrl } from "./api-base-url";
 import { createCodexQueryLinks } from "./codex-query-links-api";
 
-const APP_VERSION = "V123";
+const APP_VERSION = "V124";
 const VERSION_MANIFEST_PATH = "/version.json";
 
 type PageKey =
@@ -1700,7 +1700,7 @@ export default function Home() {
             <div><span>下一步建议</span><strong>{pageGuideCopy[page].next}</strong></div>
           </section>}
 
-          {module !== "firebaseSetup" && module !== "report" && <section className={`filter-bar ${isFunnelOverview ? "overview-filter-bar" : ""}`}>
+          {module !== "firebaseSetup" && module !== "report" && module !== "vpnReport" && <section className={`filter-bar ${isFunnelOverview ? "overview-filter-bar" : ""}`}>
             {isFunnelOverview ? <div className="overview-no-project-filter"><span>项目</span><strong>全部项目问题预览</strong><small>不做项目筛选；每天 08:00 汇总前一天数据，09:30 补充延迟入库数据，点击项目进入单项目分析。</small>{(projectLoadError || projectSourceWarning) && <small className="filter-error">{projectLoadError || projectSourceWarning}</small>}</div> : <label>项目<select value={draftProject} disabled={projectLoading || onlineProjects.length === 0} onChange={(event) => {
               const nextProject = event.target.value;
               setDraftProject(nextProject);
@@ -1812,7 +1812,7 @@ export default function Home() {
             <div className="data-state"><span className={`status-dot ${filtersDirty ? "warn" : ""}`} /><strong>{sourceStatus[module].title}</strong><small>{filtersDirty ? "筛选已修改，点击应用后查询" : `${sourceStatus[module].detail} · 刷新#${filtersApplied}`}</small></div>
           </section>}
 
-          {module !== "firebaseSetup" && module !== "report" && <section className="context-toolbar">
+          {module !== "firebaseSetup" && module !== "report" && module !== "vpnReport" && <section className="context-toolbar">
             <div className="context-summary"><Badge tone="blue">{module === "funnel" ? currentPage.hint : currentModule.title}</Badge><span>{isFunnelOverview ? "全部项目" : project}</span><i /> <span>{isFunnelOverview ? "每日08:00汇总 · 09:30补数" : range}</span><i /> <span>{platform} · {appVersion}</span><i /> <span>{country}</span><i /> <span>口径 V1.8</span></div>
             {module !== "tracking" && <div className="context-actions"><button onClick={() => notify("当前分析视图已保存")}>保存视图</button><button onClick={() => setDialog(module === "admob" ? "admob-report" : "project-report")}>导出报表</button></div>}
           </section>}
@@ -1823,7 +1823,7 @@ export default function Home() {
               ["tasks", "任务与告警", "看同步任务、验收失败、告警和处理闭环"],
             ].map(([key, title, desc], index) => <button key={key} className={module === key ? "active" : ""} onClick={() => openModule(key as ModuleKey)}><span>{index + 1}</span><strong>{title}</strong><small>{desc}</small></button>)}
           </section>}
-          <section className="freshness-note"><div><strong>数据使用提示：</strong>{sourceStatus[module].note}</div><button onClick={() => openMetricDefinition(module === "admob" ? "match_rate" : module === "tracking" ? "event_pass_rate" : "dau")}>查看数据口径</button></section>
+          {module !== "vpnReport" && <section className="freshness-note"><div><strong>数据使用提示：</strong>{sourceStatus[module].note}</div><button onClick={() => openMetricDefinition(module === "admob" ? "match_rate" : module === "tracking" ? "event_pass_rate" : "dau")}>查看数据口径</button></section>}
 
           {module === "shareAlerts" && <ShareAlertsPage projectCode={project} notify={notify} />}
 
@@ -1860,8 +1860,15 @@ export default function Home() {
             country={country}
             appVersion={appVersion}
             refreshKey={filtersApplied}
+            projectOptions={onlineProjects.map((item) => ({ projectCode: item.projectCode, appName: item.appName }))}
+            countryOptions={countryOptions}
+            appVersionOptions={appVersionOptions}
             onPageChange={() => undefined}
-            onProjectSelect={(nextProject) => { setProject(nextProject); setDraftProject(nextProject); setFiltersApplied((value) => value + 1); }}
+            onProjectSelect={(nextProject) => { setProject(nextProject); setDraftProject(nextProject); setDateSessionSummary(null); setReportSnapshot(null); setFiltersApplied((value) => value + 1); }}
+            onRangeChange={(nextRange) => { setRange(nextRange); setDraftRange(nextRange); setReportSnapshot(null); setFiltersApplied((value) => value + 1); }}
+            onCountryChange={(nextCountry) => { setCountry(nextCountry); setDraftCountry(nextCountry); setReportSnapshot(null); setFiltersApplied((value) => value + 1); }}
+            onAppVersionChange={(nextVersion) => { setAppVersion(nextVersion); setDraftAppVersion(nextVersion); setReportSnapshot(null); setFiltersApplied((value) => value + 1); }}
+            onPlatformChange={(nextPlatform) => { setPlatform(nextPlatform); setDraftPlatform(nextPlatform); setReportSnapshot(null); setFiltersApplied((value) => value + 1); }}
             initialDomain="vpn"
             lockDomain
             softFailure
@@ -1879,8 +1886,15 @@ export default function Home() {
             country={country}
             appVersion={appVersion}
             refreshKey={filtersApplied}
+            projectOptions={onlineProjects.map((item) => ({ projectCode: item.projectCode, appName: item.appName }))}
+            countryOptions={countryOptions}
+            appVersionOptions={appVersionOptions}
             onPageChange={() => undefined}
-            onProjectSelect={(nextProject) => { setProject(nextProject); setDraftProject(nextProject); setFiltersApplied((value) => value + 1); }}
+            onProjectSelect={(nextProject) => { setProject(nextProject); setDraftProject(nextProject); setDateSessionSummary(null); setReportSnapshot(null); setFiltersApplied((value) => value + 1); }}
+            onRangeChange={(nextRange) => { setRange(nextRange); setDraftRange(nextRange); setReportSnapshot(null); setFiltersApplied((value) => value + 1); }}
+            onCountryChange={(nextCountry) => { setCountry(nextCountry); setDraftCountry(nextCountry); setReportSnapshot(null); setFiltersApplied((value) => value + 1); }}
+            onAppVersionChange={(nextVersion) => { setAppVersion(nextVersion); setDraftAppVersion(nextVersion); setReportSnapshot(null); setFiltersApplied((value) => value + 1); }}
+            onPlatformChange={(nextPlatform) => { setPlatform(nextPlatform); setDraftPlatform(nextPlatform); setReportSnapshot(null); setFiltersApplied((value) => value + 1); }}
             initialDomain="vpn"
             lockDomain
             softFailure

@@ -2724,6 +2724,11 @@ body {
 .overall-filter-row { display: flex; flex-wrap: wrap; align-items: center; gap: 16px 22px; padding: 18px 22px; border-bottom: 1px solid #edf1f6; }
 .overall-filter-item { display: inline-flex; align-items: center; gap: 8px; min-height: 42px; padding: 0 14px; border: 1px solid #dfe6ef; border-radius: 8px; background: #fff; color: #8a94a6; font-size: 13px; }
 .overall-filter-item strong { color: #1f2937; font-size: 14px; font-weight: 650; }
+.overall-filter-item select,
+.overall-filter-item input { height: 30px; min-width: 112px; border: 0; outline: 0; background: transparent; color: #1f2937; font-size: 14px; font-weight: 650; }
+.overall-filter-item select { min-width: 138px; cursor: pointer; }
+.overall-filter-item.date-range-control input { min-width: 122px; }
+.overall-filter-item b { color: #b2bdcb; font-weight: 700; }
 .overall-action-row { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 16px 22px; }
 .overall-view-actions, .overall-query-actions { display: flex; align-items: center; gap: 10px; }
 .overall-action-row button { height: 36px; padding: 0 16px; border: 1px solid #d7e0eb; border-radius: 8px; background: #fff; color: #344054; font-size: 13px; font-weight: 700; cursor: pointer; }
