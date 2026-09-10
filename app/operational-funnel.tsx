@@ -2592,7 +2592,16 @@ function VersionComparison({ data, domain, projectCode, appIdentifier, platform,
   const selectedColumns = allColumns.filter((column) => visible[column.key] !== false);
   const activeDimensions: string[] = Array.isArray(comparison.dimensions) && comparison.dimensions.length ? comparison.dimensions : dimensions;
   const dimensionLabel = text(comparison.dimensionLabel ?? activeDimensions.map(versionCompareDimensionLabel).join(" × "));
-  const versionOptions: AnyRow[] = comparison.versionOptions ?? [];
+  const versionOptions: AnyRow[] = useMemo(() => {
+    const source: AnyRow[] = Array.isArray(comparison.versionOptions) && comparison.versionOptions.length ? comparison.versionOptions : rows;
+    const seen = new Set<string>();
+    return source.map((item) => {
+      const app = text(item.appVersion ?? item.app_version ?? item.dimensionLabels?.app_version ?? item.dimensionLabel).split(" ")[0];
+      if (!app || app === "—" || seen.has(app)) return null;
+      seen.add(app);
+      return { appVersion: app, label: text(item.label ?? item.versionLabel ?? item.dimensionLabels?.app_version ?? app) };
+    }).filter(Boolean) as AnyRow[];
+  }, [comparison.versionOptions, rows]);
   const suggested = text(comparison.suggestedBaseline) || text(rows[0]?.dimensionLabel);
   const [baselineLabel, setBaselineLabel] = useState(suggested);
   useEffect(() => { setBaselineLabel(suggested); }, [suggested]);
@@ -2700,11 +2709,20 @@ function VersionComparison({ data, domain, projectCode, appIdentifier, platform,
         </div>
         <div className="config-group">
           <div className="config-title">版本筛选</div>
-          <select className="config-select" value={dimensions.includes("app_version") ? "" : versionFilter} disabled={dimensions.includes("app_version")} onChange={(event) => setVersionFilter(event.target.value)}>
+          <select className="config-select" value={versionFilter} onChange={(event) => {
+            const nextVersion = event.target.value;
+            setVersionFilter(nextVersion);
+            if (nextVersion && dimensions.includes("app_version")) {
+              setDimensions((current) => {
+                const withoutVersion = current.filter((item) => item !== "app_version");
+                return withoutVersion.includes("stat_date") ? withoutVersion : ["stat_date", ...withoutVersion];
+              });
+            }
+          }}>
             <option value="">全部版本</option>
             {versionOptions.map((item) => <option key={`${item.appVersion}-${item.buildNumber ?? ""}`} value={text(item.appVersion)}>{text(item.label ?? item.appVersion)}</option>)}
           </select>
-          <small className="config-hint">未把“应用版本”放进维度时，可指定某个版本看每天数据。</small>
+          <small className="config-hint">可直接选择版本；若当前按“应用版本”聚合，选择后会自动切到“日期”维度看该版本每天数据。</small>
         </div>
         <div className="config-group">
           <div className="config-title">日期范围</div>
