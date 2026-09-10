@@ -5122,65 +5122,82 @@ class FunnelAnalyticsService
      */
     private function adNetworkFailureMatrix(array $params): array
     {
-        $cacheKey = 'jkcl_funnel:ad_network_failure_matrix:v3:' . md5(json_encode(
+        if ($this->shouldUseA003VpnNetworkSummary($params)) {
+            return $this->buildAdNetworkFailureMatrix($params);
+        }
+
+        $cacheKey = 'jkcl_funnel:ad_network_failure_matrix:v4:' . md5(json_encode(
             $this->sortForCacheKey($params),
             JSON_UNESCAPED_UNICODE
         ));
 
-        return Cache::remember($cacheKey, $this->adNetworkFailureCacheSeconds($params), function () use ($params): array {
-            try {
-                $dimensions = $this->adNetworkFailureDimensions($params);
-                $summaryRows = $this->adNetworkFailureSummaryRows($params, $dimensions);
-                if ($summaryRows->isEmpty()) {
-                    return [
-                        'available' => false,
-                        'source' => $this->eventTable(),
-                        'reason' => '当前筛选范围没有携带 date/country/asn/server_id/protocol 网络上下文的广告事件。',
-                        'dimensions' => $dimensions,
-                        'rows' => [],
-                        'totals' => $this->emptyAdNetworkFailureTotals(),
-                    ];
-                }
+        return Cache::remember(
+            $cacheKey,
+            $this->adNetworkFailureCacheSeconds($params),
+            fn (): array => $this->buildAdNetworkFailureMatrix($params)
+        );
+    }
 
-                $reasonRows = $this->adNetworkFailureReasonRows($params, $dimensions)
-                    ->groupBy(fn ($row): string => $this->adNetworkFailureDimensionKey($dimensions, $row));
-                $totals = $this->adNetworkFailureTotals($summaryRows);
-                $rows = $summaryRows
-                    ->map(fn ($row): array => $this->formatAdNetworkFailureRow(
-                        $row,
-                        $reasonRows->get($this->adNetworkFailureDimensionKey($dimensions, $row), collect()),
-                        $dimensions
-                    ))
-                    ->sortByDesc('failureScore')
-                    ->values()
-                    ->all();
-
-                return [
-                    'available' => true,
-                    'source' => $this->eventTable(),
-                    'dimensions' => $dimensions,
-                    'rows' => $rows,
-                    'totals' => $totals,
-                    'queryHint' => '按所选维度（日期/国家/ASN/节点/协议）横向聚合广告请求、加载和展示的成功率与失败率；去掉某个维度即向上聚合。',
-                ];
-            } catch (Throwable $exception) {
-                Log::warning('jkcl_ad_network_failure_matrix_failed', [
-                    'message' => $exception->getMessage(),
-                    'projectCode' => $params['projectCode'] ?? null,
-                    'dateFrom' => $params['dateFrom'] ?? null,
-                    'dateTo' => $params['dateTo'] ?? null,
-                ]);
-
+    private function buildAdNetworkFailureMatrix(array $params): array
+    {
+        try {
+            $dimensions = $this->adNetworkFailureDimensions($params);
+            $useSummaryTable = $this->shouldUseA003VpnNetworkSummary($params);
+            $source = $useSummaryTable ? 'jkcl_a003_vpn_network_daily' : $this->eventTable();
+            $summaryRows = $useSummaryTable
+                ? $this->adNetworkFailureSummaryRowsFromA003Table($params, $dimensions)
+                : $this->adNetworkFailureSummaryRows($params, $dimensions);
+            if ($summaryRows->isEmpty()) {
                 return [
                     'available' => false,
-                    'source' => $this->eventTable(),
-                    'reason' => '广告网络失败横向报表读取失败：' . $exception->getMessage(),
-                    'dimensions' => $this->adNetworkFailureDimensions($params),
+                    'source' => $source,
+                    'reason' => '当前筛选范围没有携带 date/country/asn/server_id/protocol 网络上下文的广告事件。',
+                    'dimensions' => $dimensions,
                     'rows' => [],
                     'totals' => $this->emptyAdNetworkFailureTotals(),
                 ];
             }
-        });
+
+            $reasonRows = $useSummaryTable
+                ? collect()
+                : $this->adNetworkFailureReasonRows($params, $dimensions)
+                    ->groupBy(fn ($row): string => $this->adNetworkFailureDimensionKey($dimensions, $row));
+            $totals = $this->adNetworkFailureTotals($summaryRows);
+            $rows = $summaryRows
+                ->map(fn ($row): array => $this->formatAdNetworkFailureRow(
+                    $row,
+                    $reasonRows->get($this->adNetworkFailureDimensionKey($dimensions, $row), collect()),
+                    $dimensions
+                ))
+                ->sortByDesc('failureScore')
+                ->values()
+                ->all();
+
+            return [
+                'available' => true,
+                'source' => $source,
+                'dimensions' => $dimensions,
+                'rows' => $rows,
+                'totals' => $totals,
+                'queryHint' => '按所选维度（日期/国家/ASN/节点/协议）横向聚合广告请求、加载和展示的成功率与失败率；去掉某个维度即向上聚合。',
+            ];
+        } catch (Throwable $exception) {
+            Log::warning('jkcl_ad_network_failure_matrix_failed', [
+                'message' => $exception->getMessage(),
+                'projectCode' => $params['projectCode'] ?? null,
+                'dateFrom' => $params['dateFrom'] ?? null,
+                'dateTo' => $params['dateTo'] ?? null,
+            ]);
+
+            return [
+                'available' => false,
+                'source' => $this->eventTable(),
+                'reason' => '广告网络失败横向报表读取失败：' . $exception->getMessage(),
+                'dimensions' => $this->adNetworkFailureDimensions($params),
+                'rows' => [],
+                'totals' => $this->emptyAdNetworkFailureTotals(),
+            ];
+        }
     }
 
     private function adNetworkFailureSummaryRows(array $params, array $dimensions)
@@ -5215,7 +5232,7 @@ class FunnelAnalyticsService
         return $query
             ->selectRaw("COUNT(*) AS event_count")
             ->selectRaw("COUNT(DISTINCT NULLIF(ad.my_user_id, '')) AS users")
-            ->selectRaw("COUNT(DISTINCT CASE WHEN ad.event_name IN ('first_open', 'app_first_open') THEN NULLIF(ad.my_user_id, '') END) AS new_users")
+            ->selectRaw("COUNT(DISTINCT CASE WHEN ad.event_name = 'app_first_open' THEN NULLIF(ad.my_user_id, '') END) AS new_users")
             ->selectRaw("COUNT(DISTINCT NULLIF(ad.my_user_id, '')) AS dau_users")
             ->selectRaw("COUNT(DISTINCT NULLIF(COALESCE(ad.vpn_session_id, ad.session_id), '')) AS vpn_session_count")
             ->selectRaw("COUNT(DISTINCT CASE WHEN ad.event_name = 'ad_opportunity' THEN NULLIF(ad.my_user_id, '') END) AS opportunity_users")
@@ -5232,6 +5249,71 @@ class FunnelAnalyticsService
             ->selectRaw("SUM(CASE WHEN ad.event_name = 'ad_impression' THEN 1 ELSE 0 END) AS impression_count")
             ->selectRaw("SUM(CASE WHEN ad.event_name = 'ad_paid_event' THEN COALESCE(ad.value_micros, 0) ELSE 0 END) AS revenue_micros")
             ->selectRaw("MAX(ad.event_time_utc) AS latest_event_at")
+            ->groupBy($dimensions)
+            ->orderByDesc('load_failed_count')
+            ->orderByDesc('show_failed_count')
+            ->limit(80)
+            ->get();
+    }
+
+    private function shouldUseA003VpnNetworkSummary(array $params): bool
+    {
+        // Avoid Schema::hasTable() here: on the production RDS metadata lookup can take seconds.
+        // The table is created by funnel-analysis:aggregate-a003-vpn-network before this fast path is enabled.
+        return strtoupper((string) ($params['projectCode'] ?? '')) === 'A003';
+    }
+
+    private function adNetworkFailureSummaryRowsFromA003Table(array $params, array $dimensions)
+    {
+        $dimensionSql = [
+            'event_date' => 'stat_date',
+            'country_code' => 'country_code',
+            'asn' => 'asn',
+            'server_id' => 'server_id',
+            'protocol' => 'protocol',
+        ];
+
+        $query = DB::table('jkcl_a003_vpn_network_daily')
+            ->where('project_code', 'A003')
+            ->whereBetween('stat_date', [$params['dateFrom'], $params['dateTo']]);
+
+        if (!empty($params['appIdentifier'])) {
+            $query->where('app_identifier', (string) $params['appIdentifier']);
+        }
+        if (!empty($params['platform'])) {
+            $query->where('platform', strtolower((string) $params['platform']));
+        }
+        if (!empty($params['countryCode'])) {
+            $query->where('country_code', (string) $params['countryCode']);
+        }
+        if (!empty($params['appVersion'])) {
+            $query->where('app_version', (string) $params['appVersion']);
+        }
+
+        foreach ($dimensions as $dimension) {
+            $query->selectRaw($dimensionSql[$dimension] . " AS {$dimension}");
+        }
+
+        return $query
+            ->selectRaw('SUM(event_count) AS event_count')
+            ->selectRaw('SUM(users) AS users')
+            ->selectRaw('SUM(new_users) AS new_users')
+            ->selectRaw('SUM(dau_users) AS dau_users')
+            ->selectRaw('SUM(vpn_session_count) AS vpn_session_count')
+            ->selectRaw('SUM(opportunity_users) AS opportunity_users')
+            ->selectRaw('SUM(opportunity_count) AS opportunity_count')
+            ->selectRaw('SUM(request_users) AS request_users')
+            ->selectRaw('SUM(request_count) AS request_count')
+            ->selectRaw('SUM(load_success_count) AS load_success_count')
+            ->selectRaw('SUM(load_failed_count) AS load_failed_count')
+            ->selectRaw('SUM(show_attempt_count) AS show_attempt_count')
+            ->selectRaw('SUM(show_success_count) AS show_success_count')
+            ->selectRaw('SUM(show_failed_count) AS show_failed_count')
+            ->selectRaw('SUM(show_blocked_count) AS show_blocked_count')
+            ->selectRaw('SUM(impression_users) AS impression_users')
+            ->selectRaw('SUM(impression_count) AS impression_count')
+            ->selectRaw('SUM(revenue_micros) AS revenue_micros')
+            ->selectRaw('MAX(latest_event_at) AS latest_event_at')
             ->groupBy($dimensions)
             ->orderByDesc('load_failed_count')
             ->orderByDesc('show_failed_count')

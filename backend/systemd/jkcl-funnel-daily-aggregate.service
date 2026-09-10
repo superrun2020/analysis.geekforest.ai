@@ -11,6 +11,7 @@ WorkingDirectory=/opt/jkcl-funnel-api/current
 Environment=PLUGIN_INITIALIZATION_ENABLED=false
 ExecStart=/bin/bash -lc '/usr/bin/php artisan funnel-analysis:aggregate --start-date="$(date -d yesterday +%%F)" --end-date="$(date -d yesterday +%%F)" --force --no-interaction'
 ExecStartPost=/bin/bash -lc '/usr/bin/php artisan funnel-analysis:warm-workbench-cache --date="$(date -d yesterday +%%F)" --domain=all --platform=android --limit=200 --force --no-interaction'
+ExecStartPost=/bin/bash -lc '/usr/bin/php artisan funnel-analysis:aggregate-a003-vpn-network --start-date="$(date -d yesterday +%%F)" --end-date="$(date -d yesterday +%%F)" --no-interaction'
 ExecStartPost=/bin/bash -lc '/usr/bin/php artisan funnel-analysis:resolve-domain-asn --project-code=A003 --days=7 --no-interaction'
 TimeoutStartSec=14400
 Restart=on-failure
