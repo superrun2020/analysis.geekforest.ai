@@ -1,0 +1,9 @@
+[Unit]
+Description=JKCL A040 VPN bad exit IP detection
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/jkcl-funnel-api/releases/20260825-1106
+ExecStart=/usr/bin/php artisan funnel-analysis:detect-vpn-bad-ips --project-code=A040 --lookback-minutes=1440
+User=root

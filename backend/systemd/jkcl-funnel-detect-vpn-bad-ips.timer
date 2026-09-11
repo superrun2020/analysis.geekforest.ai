@@ -1,0 +1,11 @@
+[Unit]
+Description=Run JKCL A040 VPN bad exit IP detection every 30 minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=30min
+AccuracySec=1min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
