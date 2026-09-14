@@ -40,7 +40,7 @@ test("compiled bundle contains current product features", async () => {
   const js = await file(`dist/assets/${jsFile}`);
   assert.match(js, /广告漏斗Overall/);
   assert.match(js, /诊断报表/);
-  assert.match(js, /V141/);
+  assert.match(js, /V142/);
   assert.match(js, /sidebar-collapsed/);
   assert.match(js, /广告链路总表/);
 });
@@ -106,4 +106,14 @@ test("sidebar is narrowed and submenu stays left", async () => {
   assert.match(css, /V141: narrower sidebar and flush-left submenu/);
   assert.match(css, /grid-template-columns: 212px minmax/);
   assert.match(css, /\.nav-submenu-list \{ padding: 4px 0 8px 10px; \}/);
+});
+
+
+test("branched funnel is simplified into main sequence and compact path details", async () => {
+  const [source, css] = await Promise.all([file("app/operational-funnel.tsx"), file("app/globals.css")]);
+  assert.match(source, /simplified-funnel/);
+  assert.match(source, /履约路径明细/);
+  assert.doesNotMatch(source, /branch-split-line/);
+  assert.match(css, /V142: simplify ad core funnel readability/);
+  assert.match(css, /\.simplified-funnel \.vertical-flow-line/);
 });

@@ -768,6 +768,12 @@ function funnelUnitLabel(unit: FunnelUnit = "users", domain = "ads") {
   return "去重用户 UV";
 }
 
+function funnelPercentOfBase(row: AnyRow, base: number) {
+  const value = rowCount(row);
+  if (!base || base <= 0) return "—";
+  return percent(value / base * 100);
+}
+
 function funnelUnitHint(unit: FunnelUnit = "users", domain = "ads") {
   if (domain === "vpn") return "VPN 主漏斗按 my_user_id 去重；连接后广告链路只统计连接成功用户里的后续覆盖，会话数和 connection_id 在原因证据中下钻。";
   if (unit === "sessions") return "按 session_id 去重统计；用于看一整个广告履约链路，不等于事件次数。";
@@ -796,27 +802,29 @@ function Funnel({ rows = [], selectedTransition, onSelectTransition, unit = "use
   const firstBranch = Math.min(...branchIndexes);
   const lastBranch = Math.max(...branchIndexes);
   const branchBase = Math.max(1, rowCount(rows[firstBranch - 1]));
-  return <div className="operational-funnel-list branched-funnel">
-    {rows.slice(0, firstBranch).map((row, index) => <div className="funnel-main-node" key={row.stepCode ?? row.code ?? index}>{renderStage(row, index)}<span className="vertical-flow-line" aria-hidden="true">↓</span></div>)}
-    <section className="funnel-branch-stage" aria-label="广告履约分支">
-      <header><span>广告机会进入两条履约路径</span><strong>缓存优先，未命中或需刷新时走实时请求</strong></header>
-      <div className="branch-split-line"><i /><span>分流</span><i /></div>
-      <div className="funnel-branch-grid">{branchIndexes.map((index) => {
+  return <div className="operational-funnel-list branched-funnel simplified-funnel">
+    <div className="funnel-main-sequence" aria-label="广告核心漏斗主链路">
+      {[...rows.slice(0, firstBranch), ...rows.slice(lastBranch + 1)].map((row, orderIndex) => {
+        const index = orderIndex < firstBranch ? orderIndex : lastBranch + 1 + (orderIndex - firstBranch);
+        return <div className="funnel-main-node" key={row.stepCode ?? row.code ?? index}>{renderStage(row, index, "main-chain-node")}<small className="funnel-base-ratio">相对起点 {funnelPercentOfBase(row, max)}</small></div>;
+      })}
+    </div>
+    <section className="funnel-branch-stage compact-branch-stage" aria-label="广告履约路径明细">
+      <header><span>履约路径明细</span><strong>默认收起复杂连接线；这里只看广告机会之后的路径占比，汇合后继续看下方主链路</strong></header>
+      <div className="funnel-branch-grid compact">{branchIndexes.map((index) => {
         const row = rows[index];
         const share = rowCount(row) / branchBase * 100;
         const tone = String(row.code ?? row.stepCode ?? "").includes("cache") ? "cache" : "request";
-        return <article className={`funnel-branch-card ${tone}`} key={row.stepCode ?? row.code ?? index}>
+        const transition = { fromIndex: Math.max(0, index - 1), toIndex: index };
+        const selected = selectedTransition?.fromIndex === transition.fromIndex && selectedTransition?.toIndex === transition.toIndex;
+        return <Button className={`funnel-branch-card ${tone} ${selected ? "selected" : ""}`} key={row.stepCode ?? row.code ?? index} onClick={() => onSelectTransition?.(transition)} title={`分析 ${rowName(rows[Math.max(0, index - 1)])} → ${rowName(row)} 的路径流失`}>
           <div className="branch-label"><span>{tone === "cache" ? "路径 A" : "路径 B"}</span><strong>{tone === "cache" ? "缓存履约" : "实时请求"}</strong></div>
-          {renderStage(row, index, "branch-node")}
-          <footer><span>占广告机会</span><strong>{percent(share)}</strong></footer>
-        </article>;
+          <div className="branch-metric"><strong>{rowName(row)}</strong><em>{number(rowCount(row))}<small>{unitLabel}</small></em></div>
+          <div className="branch-share"><i style={{ width: `${Math.max(4, Math.min(100, share))}%` }} /><span>占广告机会 {percent(share)}</span></div>
+          <small>{rowEvent(row)}</small>
+        </Button>;
       })}</div>
-      <div className="branch-merge-line"><i /><span>两条路径在此汇合</span><i /></div>
     </section>
-    {rows.slice(lastBranch + 1).map((row, offset) => {
-      const index = lastBranch + 1 + offset;
-      return <div className="funnel-main-node" key={row.stepCode ?? row.code ?? index}>{renderStage(row, index)}{index < rows.length - 1 && <span className="vertical-flow-line" aria-hidden="true">↓</span>}</div>;
-    })}
   </div>;
 }
 
