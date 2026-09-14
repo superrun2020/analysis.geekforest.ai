@@ -3252,7 +3252,7 @@ tr:hover td { background: #f5f8ff; }
 @media(max-width:1200px){.simplified-funnel .funnel-main-node{grid-template-columns:1fr}.simplified-funnel .funnel-base-ratio{justify-self:start}.funnel-branch-grid.compact{grid-template-columns:1fr}.compact-branch-stage>header{display:block}.compact-branch-stage>header strong{text-align:left}}
 
 
-/* V143: A012 ad DNS report */
+/* V144: multi-project ad DNS report */
 .ad-dns-report .overall-active-hint code,.ad-dns-result-card code{font-size:11px}
 .ad-dns-table td strong{font-size:12px;color:#1f2e46}
 .ad-dns-table .row-warn td:first-child{border-left:3px solid #f59e0b}

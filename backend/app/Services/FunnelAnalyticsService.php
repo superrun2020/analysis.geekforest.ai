@@ -5300,7 +5300,7 @@ class FunnelAnalyticsService
     }
 
     /**
-     * DNS/provider diagnostics for A012 Google Ads domain probes. It reads the
+     * DNS/provider diagnostics for Google Ads domain probes across any project that has launched the diagnostic event. It reads the
      * launched V1.8 diagnostic event directly and groups by selected DNS fields.
      *
      * @param array<string, mixed> $params
@@ -5419,7 +5419,7 @@ class FunnelAnalyticsService
                 'totals' => $totals,
                 'source' => $this->eventTable(),
                 'eventName' => 'vpn_network_diagnostic',
-                'notice' => 'A012 广告 DNS 诊断报表读取 vpn_network_diagnostic；DNS厂商/服务器/广告域名目标来自 event_params_json，成功率 = result_status=success / 探测次数。',
+                'notice' => '广告 DNS 诊断报表读取各项目上报的 vpn_network_diagnostic；DNS厂商/服务器/广告域名目标来自 event_params_json，成功率 = result_status=success / 探测次数。',
             ];
         } catch (Throwable $exception) {
             Log::warning('jkcl_ad_dns_report_failed', ['message' => $exception->getMessage()]);
