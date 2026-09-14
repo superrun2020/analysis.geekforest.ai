@@ -40,7 +40,7 @@ test("compiled bundle contains current product features", async () => {
   const js = await file(`dist/assets/${jsFile}`);
   assert.match(js, /广告漏斗Overall/);
   assert.match(js, /诊断报表/);
-  assert.match(js, /V140/);
+  assert.match(js, /V141/);
   assert.match(js, /sidebar-collapsed/);
   assert.match(js, /广告链路总表/);
 });
@@ -98,4 +98,12 @@ test("diagnostic submenu items are explicitly left aligned", async () => {
   assert.match(css, /V140: left align diagnostic submenu items/);
   assert.match(css, /align-items: flex-start !important/);
   assert.match(css, /text-align: left !important/);
+});
+
+
+test("sidebar is narrowed and submenu stays left", async () => {
+  const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+  assert.match(css, /V141: narrower sidebar and flush-left submenu/);
+  assert.match(css, /grid-template-columns: 212px minmax/);
+  assert.match(css, /\.nav-submenu-list \{ padding: 4px 0 8px 10px; \}/);
 });

@@ -3202,3 +3202,16 @@ tr:hover td { background: #f5f8ff; }
 .nav-submenu-item small { width: 100%; display: block; text-align: left; }
 .nav-submenu-item.ant-btn.active { box-shadow: inset 3px 0 #2d57b8; }
 
+/* V141: narrower sidebar and flush-left submenu */
+.app-shell { grid-template-columns: 212px minmax(0, 1fr); }
+.app-shell.sidebar-collapsed { grid-template-columns: 64px minmax(0, 1fr); }
+.sidebar { padding: 16px 10px; }
+.brand { padding-inline: 6px; }
+.main-nav-item { min-height: 40px; padding: 0 10px; font-size: 11px; }
+.nav-submenu-list { padding: 4px 0 8px 10px; }
+.nav-submenu-item.ant-btn { min-height: 34px; padding: 6px 10px !important; }
+.nav-submenu-item strong { font-size: 10px; }
+.nav-submenu-item small { font-size: 7px; }
+.sidebar-collapse-toggle.ant-btn { right: -12px; }
+.app-shell.sidebar-collapsed .sidebar { padding: 16px 8px; }
+
