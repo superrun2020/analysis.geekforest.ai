@@ -25,6 +25,7 @@ export default defineConfig(({ mode }) => {
     preview: {
       host: "127.0.0.1",
       port: 3020,
+      allowedHosts: ["analysis.geekforest.ai", "localhost", "127.0.0.1"],
     },
   };
 });
