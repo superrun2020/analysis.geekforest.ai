@@ -289,17 +289,17 @@ async function createProjectReportShare(snapshot: OperationalReportSnapshot, mod
   return payload.data;
 }
 
-const moduleMenus: Array<{ key: ModuleKey; index: string; label: string; group: "经营分析" | "质量治理" }> = [
-  { key: "funnel", index: "01", label: "广告漏斗分析中心", group: "经营分析" },
-  { key: "vpn", index: "02", label: "VPN功能漏斗分析", group: "经营分析" },
-  { key: "vpnReport", index: "03", label: "诊断报表", group: "经营分析" },
-  { key: "admob", index: "04", label: "AdMob 分析", group: "经营分析" },
-  { key: "firebase", index: "05", label: "Firebase 数据", group: "经营分析" },
-  { key: "reconcile", index: "06", label: "数据对账", group: "经营分析" },
-  { key: "report", index: "07", label: "域名解析报表", group: "经营分析" },
-  { key: "tracking", index: "08", label: "打点测试配置", group: "质量治理" },
-  { key: "tasks", index: "09", label: "任务与告警", group: "质量治理" },
-  { key: "shareAlerts", index: "10", label: "异常报警", group: "质量治理" },
+const moduleMenus: Array<{ key: ModuleKey; label: string; group: "经营分析" | "质量治理" }> = [
+  { key: "funnel", label: "广告漏斗分析中心", group: "经营分析" },
+  { key: "vpn", label: "VPN功能漏斗分析", group: "经营分析" },
+  { key: "vpnReport", label: "诊断报表", group: "经营分析" },
+  { key: "admob", label: "AdMob 分析", group: "经营分析" },
+  { key: "firebase", label: "Firebase 数据", group: "经营分析" },
+  { key: "reconcile", label: "数据对账", group: "经营分析" },
+  { key: "report", label: "域名解析报表", group: "经营分析" },
+  { key: "tracking", label: "打点测试配置", group: "质量治理" },
+  { key: "tasks", label: "任务与告警", group: "质量治理" },
+  { key: "shareAlerts", label: "异常报警", group: "质量治理" },
 ];
 
 type VpnReportSectionKey = "matrix" | "adOverall" | "versions";
