@@ -40,7 +40,7 @@ test("compiled bundle contains current product features", async () => {
   const js = await file(`dist/assets/${jsFile}`);
   assert.match(js, /广告漏斗Overall/);
   assert.match(js, /诊断报表/);
-  assert.match(js, /V142/);
+  assert.match(js, /V143/);
   assert.match(js, /sidebar-collapsed/);
   assert.match(js, /广告链路总表/);
 });
@@ -116,4 +116,23 @@ test("branched funnel is simplified into main sequence and compact path details"
   assert.doesNotMatch(source, /branch-split-line/);
   assert.match(css, /V142: simplify ad core funnel readability/);
   assert.match(css, /\.simplified-funnel \.vertical-flow-line/);
+});
+
+
+test("A012 ad DNS report is registered in frontend and backend", async () => {
+  const [api, page, source, request, service] = await Promise.all([
+    file("app/funnel-analysis-api.ts"),
+    file("app/page.tsx"),
+    file("app/operational-funnel.tsx"),
+    file("backend/app/Http/Requests/Admin/FunnelAnalyticsQueryRequest.php"),
+    file("backend/app/Services/FunnelAnalyticsService.php"),
+  ]);
+  assert.match(api, /ad_dns_report/);
+  assert.match(page, /广告DNS诊断/);
+  assert.match(source, /AdDnsReport/);
+  assert.match(source, /dns_provider/);
+  assert.match(request, /ad_dns_report/);
+  assert.match(request, /dns_server/);
+  assert.match(service, /vpn_network_diagnostic/);
+  assert.match(service, /adDnsReport/);
 });

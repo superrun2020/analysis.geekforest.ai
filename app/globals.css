@@ -3250,3 +3250,10 @@ tr:hover td { background: #f5f8ff; }
 .funnel-branch-grid.compact .branch-share span{color:#475569;font-size:11px;font-weight:850;text-align:right}
 .funnel-branch-grid.compact .funnel-branch-card>small{grid-column:2/4;margin-top:-4px;color:#7a8699;font-size:10px;line-height:1.4}
 @media(max-width:1200px){.simplified-funnel .funnel-main-node{grid-template-columns:1fr}.simplified-funnel .funnel-base-ratio{justify-self:start}.funnel-branch-grid.compact{grid-template-columns:1fr}.compact-branch-stage>header{display:block}.compact-branch-stage>header strong{text-align:left}}
+
+
+/* V143: A012 ad DNS report */
+.ad-dns-report .overall-active-hint code,.ad-dns-result-card code{font-size:11px}
+.ad-dns-table td strong{font-size:12px;color:#1f2e46}
+.ad-dns-table .row-warn td:first-child{border-left:3px solid #f59e0b}
+.ad-dns-result-card .matrix-footnote{line-height:1.65}

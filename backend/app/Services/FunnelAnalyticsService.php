@@ -688,7 +688,7 @@ class FunnelAnalyticsService
      */
     private function cacheableQueryPages(): array
     {
-        return ['overview', 'workbench', 'diagnosis', 'path', 'evidence', 'version_comparison', 'ad_overall', 'domain_report'];
+        return ['overview', 'workbench', 'diagnosis', 'path', 'evidence', 'version_comparison', 'ad_overall', 'ad_dns_report', 'domain_report'];
     }
 
     /**
@@ -709,6 +709,7 @@ class FunnelAnalyticsService
             'network_failure_matrix' => $this->networkFailureMatrix($params),
             'version_comparison' => $this->versionComparisonPage($params),
             'ad_overall' => $this->adOverallPage($params),
+            'ad_dns_report' => $this->adDnsReportPage($params),
             'domain_report' => $this->domainReportPage($params),
             default => throw new InvalidArgumentException('不支持的漏斗分析页面'),
         };
@@ -5295,6 +5296,182 @@ class FunnelAnalyticsService
             'impressionRate' => $this->rate($impression, $showAttempt),
             'viewerRatio' => $this->rate($impression, $dau),
             'paidRate' => $this->rate($paid, $impression),
+        ];
+    }
+
+    /**
+     * DNS/provider diagnostics for A012 Google Ads domain probes. It reads the
+     * launched V1.8 diagnostic event directly and groups by selected DNS fields.
+     *
+     * @param array<string, mixed> $params
+     * @return array<string, mixed>
+     */
+    private function adDnsReportPage(array $params): array
+    {
+        return [
+            'context' => $this->context($params),
+            'adDnsReport' => $this->adDnsReport($params),
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $params
+     * @return array<string, mixed>
+     */
+    private function adDnsReport(array $params): array
+    {
+        $allowedDimensions = ['stat_date', 'project_code', 'country_code', 'platform', 'app_version', 'dns_provider', 'dns_server', 'target_id', 'test_type'];
+        $requested = array_values(array_filter(
+            (array) ($params['dimensions'] ?? ['stat_date', 'dns_provider', 'target_id']),
+            static fn ($dimension): bool => in_array($dimension, $allowedDimensions, true)
+        ));
+        $dimensions = array_values(array_unique(count($requested) ? $requested : ['stat_date', 'dns_provider', 'target_id']));
+        $jsonDimensions = ['dns_provider', 'dns_server', 'target_id', 'test_type'];
+        $jsonExpr = static fn (string $key): string => "COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(event_params_json, '$." . $key . "')), ''), 'unknown')";
+
+        try {
+            $selectParts = [];
+            foreach ($dimensions as $dimension) {
+                if (in_array($dimension, $jsonDimensions, true)) {
+                    $selectParts[] = $jsonExpr($dimension) . " AS {$dimension}";
+                    continue;
+                }
+                if ($dimension === 'app_version') {
+                    $selectParts[] = "COALESCE(app_version, '') AS app_version";
+                    $selectParts[] = "COALESCE(app_build, '') AS app_build";
+                    continue;
+                }
+                $selectParts[] = $dimension === 'stat_date'
+                    ? 'event_date AS stat_date'
+                    : "COALESCE({$dimension}, '') AS {$dimension}";
+            }
+
+            $targetExpr = $jsonExpr('target_id');
+            $testTypeExpr = $jsonExpr('test_type');
+            $providerExpr = $jsonExpr('dns_provider');
+            $serverExpr = $jsonExpr('dns_server');
+            $successCase = "CASE WHEN result_status = 'success' THEN 1 ELSE 0 END";
+            $timeoutCase = "CASE WHEN result_status = 'timeout' OR error_code LIKE '%timeout%' THEN 1 ELSE 0 END";
+            $dnsFailureCase = "CASE WHEN result_status != 'success' AND (error_code LIKE '%UnknownHost%' OR error_code LIKE '%dns%' OR error_code LIKE '%nxdomain%') THEN 1 ELSE 0 END";
+            $avgSuccessMs = "AVG(CASE WHEN result_status = 'success' THEN duration_ms ELSE NULL END)";
+
+            $query = DB::connection('adb')->table($this->eventTable())
+                ->whereBetween('event_date', [$params['dateFrom'], $params['dateTo']])
+                ->where('event_name', 'vpn_network_diagnostic')
+                ->where(function (Builder $query) use ($targetExpr): void {
+                    $query->whereRaw("{$targetExpr} LIKE 'ad_%'")
+                        ->orWhereRaw("{$targetExpr} = 'unknown'");
+                });
+            if (!empty($params['projectCode'])) {
+                $query->where('project_code', (string) $params['projectCode']);
+            }
+            if (!in_array('platform', $dimensions, true) && !empty($params['platform'])) {
+                $query->where('platform', strtolower((string) $params['platform']));
+            }
+            if (!in_array('country_code', $dimensions, true) && !empty($params['country'])) {
+                $query->where('country_code', (string) $params['country']);
+            }
+            if (!in_array('app_version', $dimensions, true) && !empty($params['appVersion'])) {
+                $query->where('app_version', (string) $params['appVersion']);
+            }
+
+            $groupBy = array_map(static fn (string $dimension): string => $dimension === 'app_version' ? 'app_version' : $dimension, $dimensions);
+            if (in_array('app_version', $dimensions, true)) {
+                $groupBy[] = 'app_build';
+            }
+            $groupBy = array_values(array_unique($groupBy));
+
+            $rows = $query
+                ->selectRaw(implode(', ', $selectParts) . ", COUNT(*) AS probes, SUM({$successCase}) AS success_probes, SUM({$timeoutCase}) AS timeout_probes, SUM({$dnsFailureCase}) AS dns_failure_probes, COUNT(DISTINCT session_id) AS sessions, COUNT(DISTINCT my_user_id) AS users, {$avgSuccessMs} AS avg_success_ms, MIN({$providerExpr}) AS sample_dns_provider, MIN({$serverExpr}) AS sample_dns_server, MIN({$targetExpr}) AS sample_target_id, MIN({$testTypeExpr}) AS sample_test_type")
+                ->groupBy($groupBy)
+                ->orderByDesc('probes')
+                ->limit((int) ($params['pageSize'] ?? 100))
+                ->get()
+                ->map(fn (object $row): array => $this->formatAdDnsReportRow($row, $dimensions))
+                ->values();
+
+            $totals = $rows->reduce(function (array $carry, array $row): array {
+                foreach (['probes', 'successProbes', 'timeoutProbes', 'dnsFailureProbes', 'sessions', 'users'] as $key) {
+                    $carry[$key] = ($carry[$key] ?? 0) + (int) ($row[$key] ?? 0);
+                }
+                return $carry;
+            }, []);
+            $totals['successRate'] = ($totals['probes'] ?? 0) > 0 ? round(($totals['successProbes'] ?? 0) / $totals['probes'] * 100, 2) : null;
+            $totals['failureRate'] = ($totals['probes'] ?? 0) > 0 ? round((($totals['probes'] ?? 0) - ($totals['successProbes'] ?? 0)) / $totals['probes'] * 100, 2) : null;
+
+            $labels = [
+                'stat_date' => '日期',
+                'project_code' => '项目',
+                'country_code' => '国家',
+                'platform' => '平台',
+                'app_version' => '应用版本',
+                'dns_provider' => 'DNS厂商',
+                'dns_server' => 'DNS服务器',
+                'target_id' => '广告域名目标',
+                'test_type' => '测试类型',
+            ];
+
+            return [
+                'available' => $rows->count() > 0,
+                'dimensions' => $dimensions,
+                'dimensionLabel' => implode(' × ', array_map(static fn (string $dimension): string => $labels[$dimension] ?? $dimension, $dimensions)),
+                'rows' => $rows->all(),
+                'totals' => $totals,
+                'source' => $this->eventTable(),
+                'eventName' => 'vpn_network_diagnostic',
+                'notice' => 'A012 广告 DNS 诊断报表读取 vpn_network_diagnostic；DNS厂商/服务器/广告域名目标来自 event_params_json，成功率 = result_status=success / 探测次数。',
+            ];
+        } catch (Throwable $exception) {
+            Log::warning('jkcl_ad_dns_report_failed', ['message' => $exception->getMessage()]);
+            return [
+                'available' => false,
+                'dimensions' => $dimensions,
+                'rows' => [],
+                'totals' => [],
+                'source' => $this->eventTable(),
+                'eventName' => 'vpn_network_diagnostic',
+                'reason' => '广告 DNS 诊断读取失败：' . $exception->getMessage(),
+            ];
+        }
+    }
+
+    /**
+     * @param array<int, string> $dimensions
+     * @return array<string, mixed>
+     */
+    private function formatAdDnsReportRow(object $row, array $dimensions): array
+    {
+        $probes = (int) ($row->probes ?? 0);
+        $success = (int) ($row->success_probes ?? 0);
+        $timeouts = (int) ($row->timeout_probes ?? 0);
+        $dnsFailures = (int) ($row->dns_failure_probes ?? 0);
+        $dimensionValues = [];
+        foreach ($dimensions as $dimension) {
+            if ($dimension === 'app_version') {
+                $version = trim((string) ($row->app_version ?? '')) ?: 'unknown';
+                $build = trim((string) ($row->app_build ?? ''));
+                $dimensionValues[$dimension] = $build !== '' ? "{$version} ({$build})" : $version;
+                continue;
+            }
+            $dimensionValues[$dimension] = trim((string) ($row->{$dimension} ?? '')) ?: 'unknown';
+        }
+        return [
+            'dimensions' => $dimensionValues,
+            'dimensionKey' => implode('|', array_map(static fn ($value): string => (string) $value, $dimensionValues)),
+            'probes' => $probes,
+            'successProbes' => $success,
+            'failedProbes' => max(0, $probes - $success),
+            'timeoutProbes' => $timeouts,
+            'dnsFailureProbes' => $dnsFailures,
+            'sessions' => (int) ($row->sessions ?? 0),
+            'users' => (int) ($row->users ?? 0),
+            'successRate' => $probes > 0 ? round($success / $probes * 100, 2) : null,
+            'failureRate' => $probes > 0 ? round(($probes - $success) / $probes * 100, 2) : null,
+            'avgSuccessMs' => $row->avg_success_ms !== null ? round((float) $row->avg_success_ms, 1) : null,
+            'sampleDnsProvider' => (string) ($row->sample_dns_provider ?? ''),
+            'sampleDnsServer' => (string) ($row->sample_dns_server ?? ''),
+            'sampleTargetId' => (string) ($row->sample_target_id ?? ''),
+            'sampleTestType' => (string) ($row->sample_test_type ?? ''),
         ];
     }
 

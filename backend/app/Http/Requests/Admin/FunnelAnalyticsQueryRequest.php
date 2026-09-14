@@ -34,7 +34,7 @@ class FunnelAnalyticsQueryRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'page' => ['required', Rule::in(['overview', 'workbench', 'diagnosis', 'cohort', 'path', 'evidence', 'issues', 'snapshot', 'network_failure_matrix', 'version_comparison', 'ad_overall', 'domain_report'])],
+            'page' => ['required', Rule::in(['overview', 'workbench', 'diagnosis', 'cohort', 'path', 'evidence', 'issues', 'snapshot', 'network_failure_matrix', 'version_comparison', 'ad_overall', 'ad_dns_report', 'domain_report'])],
             'dateFrom' => 'required|date_format:Y-m-d',
             'dateTo' => 'required|date_format:Y-m-d|after_or_equal:dateFrom',
             'projectCode' => 'nullable|string|max:64',
@@ -50,7 +50,7 @@ class FunnelAnalyticsQueryRequest extends FormRequest
             'unit' => ['nullable', Rule::in(['users', 'sessions', 'events'])],
             'dimension' => ['nullable', Rule::in(['stat_date', 'project_code', 'app_version', 'country_code', 'platform', 'network_type', 'device_model', 'ad_format', 'placement'])],
             'dimensions' => 'nullable|array|min:1|max:6',
-            'dimensions.*' => ['string', Rule::in(['event_date', 'stat_date', 'project_code', 'app_version', 'user_country_code', 'country_code', 'platform', 'asn', 'server_id', 'protocol'])],
+            'dimensions.*' => ['string', Rule::in(['event_date', 'stat_date', 'project_code', 'app_version', 'user_country_code', 'country_code', 'platform', 'asn', 'server_id', 'protocol', 'dns_provider', 'dns_server', 'target_id', 'test_type'])],
             'startStep' => 'nullable|string|max:100',
             'endStep' => 'nullable|string|max:100',
             'screenName' => 'nullable|string|max:100',

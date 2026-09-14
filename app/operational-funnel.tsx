@@ -29,8 +29,8 @@ type Props = {
   initialDomain?: "ads" | "vpn" | "quality";
   lockDomain?: boolean;
   softFailure?: boolean;
-  reportSection?: "matrix" | "adOverall" | "versions";
-  onReportSectionChange?: (section: "matrix" | "adOverall" | "versions") => void;
+  reportSection?: "matrix" | "adOverall" | "adDns" | "versions";
+  onReportSectionChange?: (section: "matrix" | "adOverall" | "adDns" | "versions") => void;
   hideReportTabs?: boolean;
   onSnapshotChange?: (snapshot: OperationalReportSnapshot | null) => void;
 };
@@ -691,6 +691,7 @@ function queryItemLabel(item: FunnelQueryPackageItem) {
     network_failure_matrix: "网络失败横向报表",
     version_comparison: "版本对比",
     ad_overall: "广告漏斗Overall",
+    ad_dns_report: "广告DNS诊断",
     domain_report: "域名报表",
   };
   const domainNames: Record<string, string> = { ads: "广告", vpn: "VPN", quality: "质量" };
@@ -738,6 +739,7 @@ function countLabel(result: AnyRow, page: FunnelPageKey) {
   if (page === "workbench") return `指标 ${(result.metrics ?? []).length} 个 · 漏斗 ${(result.funnel ?? []).length} 步`;
   if (page === "diagnosis") return `原因 ${(result.reasons ?? []).length} 条`;
   if (page === "path") return `页面 ${(result.pages ?? []).length} 个`;
+  if (page === "ad_dns_report") return `DNS组合 ${(result.adDnsReport?.rows ?? []).length} 个`;
   if (page === "evidence") return `证据 ${number(result.total ?? (result.items ?? []).length)} 条`;
   if (page === "issues") return `问题 ${(result.items ?? []).length} 个`;
   if (page === "snapshot") return `步骤 ${(result.steps ?? []).length} 个`;
@@ -2096,6 +2098,93 @@ function matrixDimensionLabel(key: string): string {
 }
 
 
+
+const AD_DNS_DIMENSIONS: Array<{ key: string; label: string }> = [
+  { key: "stat_date", label: "日期" },
+  { key: "project_code", label: "项目" },
+  { key: "dns_provider", label: "DNS厂商" },
+  { key: "dns_server", label: "DNS服务器" },
+  { key: "target_id", label: "广告域名目标" },
+  { key: "test_type", label: "测试类型" },
+  { key: "country_code", label: "国家" },
+  { key: "platform", label: "平台" },
+  { key: "app_version", label: "应用版本" },
+];
+
+const AD_DNS_COLUMNS = [
+  { key: "probes", label: "探测次数" },
+  { key: "successProbes", label: "成功次数" },
+  { key: "successRate", label: "解析/探测成功率", ratio: true },
+  { key: "failedProbes", label: "失败次数" },
+  { key: "timeoutProbes", label: "超时次数" },
+  { key: "dnsFailureProbes", label: "DNS类失败" },
+  { key: "sessions", label: "Session" },
+  { key: "users", label: "用户数" },
+  { key: "avgSuccessMs", label: "成功平均耗时(ms)" },
+] as const;
+
+type AdDnsColumnKey = typeof AD_DNS_COLUMNS[number]["key"];
+
+function adDnsDimensionLabel(key: string): string {
+  return AD_DNS_DIMENSIONS.find((dimension) => dimension.key === key)?.label ?? key;
+}
+
+function AdDnsReport({ data, dimensions, dates, projectCode, platform, country, appVersion, projectOptions = [], countryOptions = ["全部国家"], appVersionOptions = ["全部版本"], querying, queryError, onQuery, onProjectSelect, onRangeChange, onCountryChange, onAppVersionChange, onPlatformChange }: { data: AnyRow; dimensions: string[]; dates: { dateFrom: string; dateTo: string }; projectCode: string; platform: string; country: string; appVersion: string; projectOptions?: Array<{ projectCode: string; appName?: string }>; countryOptions?: string[]; appVersionOptions?: string[]; querying: boolean; queryError: string; onQuery: (dimensions: string[]) => void; onProjectSelect?: (projectCode: string) => void; onRangeChange?: (range: string) => void; onCountryChange?: (country: string) => void; onAppVersionChange?: (appVersion: string) => void; onPlatformChange?: (platform: string) => void }) {
+  const report = data.adDnsReport ?? {};
+  const rows = Array.isArray(report.rows) ? report.rows : [];
+  const totals = report.totals ?? {};
+  const activeDimensions: string[] = Array.isArray(report.dimensions) && report.dimensions.length ? report.dimensions : dimensions;
+  const [draftDimensions, setDraftDimensions] = useState<string[]>(dimensions);
+  const [visibleColumns, setVisibleColumns] = useState<AdDnsColumnKey[]>(AD_DNS_COLUMNS.map((column) => column.key));
+  const [sortKey, setSortKey] = useState<string>("probes");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
+  const selectableProjects = projectOptions.length ? projectOptions : [{ projectCode }];
+  const safeCountryOptions = countryOptions.length ? countryOptions : ["全部国家"];
+  const safeAppVersionOptions = appVersionOptions.length ? appVersionOptions : ["全部版本"];
+  const toggleDimension = (key: string) => setDraftDimensions((current) => current.includes(key) ? current.length <= 1 ? current : current.filter((dimension) => dimension !== key) : [...current, key]);
+  const toggleColumn = (key: AdDnsColumnKey) => setVisibleColumns((current) => current.includes(key) ? current.filter((column) => column !== key) : [...current, key]);
+  const shows = (key: AdDnsColumnKey) => visibleColumns.includes(key);
+  const setSort = (key: string, defaultDirection: "asc" | "desc" = "desc") => {
+    if (sortKey === key) setSortDirection((direction) => direction === "asc" ? "desc" : "asc");
+    else { setSortKey(key); setSortDirection(defaultDirection); }
+  };
+  const sortedRows = useMemo(() => {
+    const direction = sortDirection === "asc" ? 1 : -1;
+    return [...rows].sort((a: AnyRow, b: AnyRow) => {
+      if (sortKey.startsWith("dimension:")) return direction * text(a.dimensions?.[sortKey.slice(10)]).localeCompare(text(b.dimensions?.[sortKey.slice(10)]), "zh-CN", { numeric: true });
+      return direction * (Number(a[sortKey] ?? 0) - Number(b[sortKey] ?? 0));
+    });
+  }, [rows, sortKey, sortDirection]);
+  const formatDnsCell = (row: AnyRow, key: AdDnsColumnKey) => {
+    const column = AD_DNS_COLUMNS.find((item) => item.key === key);
+    if ((column as { ratio?: boolean } | undefined)?.ratio) return percent(row[key]);
+    if (key === "avgSuccessMs") return row[key] === null || row[key] === undefined ? "—" : number(row[key]);
+    return number(row[key]);
+  };
+  return <div className="vpn-overall-report ad-dns-report">
+    <section className="surface matrix-overall-config">
+      <div className="overall-config-row dimension-row"><span className="overall-config-label">维度</span>{AD_DNS_DIMENSIONS.map((dimension) => <label key={dimension.key} className={`overall-chip ${draftDimensions.includes(dimension.key) ? "active" : ""}`} title={draftDimensions.includes(dimension.key) ? "取消勾选即向上聚合" : "勾选后按此维度细分"}><input type="checkbox" checked={draftDimensions.includes(dimension.key)} onChange={() => toggleDimension(dimension.key)} disabled={draftDimensions.includes(dimension.key) && draftDimensions.length <= 1} /><span>{dimension.label}</span></label>)}</div>
+      <div className="overall-config-row metric-row"><span className="overall-config-label">统计字段</span>{AD_DNS_COLUMNS.map((column) => <label key={column.key} className={`overall-chip ${shows(column.key) ? "active" : ""}`}><input type="checkbox" checked={shows(column.key)} onChange={() => toggleColumn(column.key)} /><span>{column.label}</span></label>)}</div>
+      <div className="overall-filter-row">
+        <label className="overall-filter-item date-range-control"><span>日期范围：</span><input type="date" value={dates.dateFrom} onChange={(event) => { const nextFrom = event.target.value; if (!nextFrom) return; const nextTo = dates.dateTo < nextFrom ? nextFrom : dates.dateTo; onRangeChange?.(`${nextFrom}~${nextTo}`); }} /><b>→</b><input type="date" value={dates.dateTo} min={dates.dateFrom} onChange={(event) => { if (!event.target.value) return; onRangeChange?.(`${dates.dateFrom}~${event.target.value}`); }} /></label>
+        <label className="overall-filter-item"><span>项目代号：</span><select value={projectCode} onChange={(event) => onProjectSelect?.(event.target.value)}>{selectableProjects.map((item) => <option key={item.projectCode} value={item.projectCode}>{item.projectCode}{item.appName ? ` · ${item.appName}` : ""}</option>)}</select></label>
+        <label className="overall-filter-item"><span>国家：</span><select value={country} onChange={(event) => onCountryChange?.(event.target.value)}>{safeCountryOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+        <label className="overall-filter-item"><span>平台：</span><select value={platform} onChange={(event) => onPlatformChange?.(event.target.value)}><option>Android</option><option>iOS</option><option>全部</option></select></label>
+        <label className="overall-filter-item"><span>App版本：</span><select value={appVersion} onChange={(event) => onAppVersionChange?.(event.target.value)}>{safeAppVersionOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+      </div>
+      <div className="overall-action-row"><div className="overall-view-actions"><Button htmlType="button">A012 DNS</Button><Button htmlType="button">Google Ads 域名</Button></div><div className="overall-query-actions"><Button htmlType="button">导出 CSV</Button><Button htmlType="button" onClick={() => setVisibleColumns(AD_DNS_COLUMNS.map((column) => column.key))}>重置</Button><Button htmlType="button" className="primary" onClick={() => onQuery(draftDimensions)} disabled={querying}>⌕ {querying ? "查询中…" : "查询"}</Button></div></div>
+      <div className="overall-active-hint">当前生效：{activeDimensions.map(adDnsDimensionLabel).join(" × ")} · 成功率 = result_status=success / 探测次数；DNS厂商、服务器、广告域名目标来自 A012 诊断参数。</div>
+    </section>
+    <section className="surface overall-result-card ad-dns-result-card">
+      <div className="overall-result-tools"><div><strong>广告DNS诊断</strong><span>{report.available === false ? "等待 A012 诊断数据" : `${rows.length} 个DNS组合`}</span></div><div><Button htmlType="button" onClick={() => onQuery(draftDimensions)} disabled={querying}>刷新</Button><Button htmlType="button">设置</Button></div></div>
+      {report.available === false && <div className="diagnosis-no-reasons compact warn"><strong>当前没有可聚合的广告 DNS 诊断数据</strong><p>{text(report.reason)}。请确认 A012 已上报 <code>vpn_network_diagnostic</code>，且参数包含 <code>dns_provider</code>、<code>dns_server</code>、<code>target_id</code>。</p></div>}
+      {queryError && <div className="diagnosis-no-reasons compact warn"><strong>查询失败</strong><p>{queryError}</p></div>}
+      <div className="table-wrap"><table className="version-compare-table ad-dns-table"><thead><tr>{activeDimensions.map((dimension) => <th key={dimension} className="sortable" onClick={() => setSort(`dimension:${dimension}`, "asc")}>{adDnsDimensionLabel(dimension)}{sortKey === `dimension:${dimension}` && <span className="sort-indicator">{sortDirection === "asc" ? "▲" : "▼"}</span>}</th>)}{AD_DNS_COLUMNS.filter((column) => shows(column.key)).map((column) => <th key={column.key} className="sortable" onClick={() => setSort(column.key)}>{column.label}{sortKey === column.key && <span className="sort-indicator">{sortDirection === "asc" ? "▲" : "▼"}</span>}</th>)}</tr></thead><tbody>{sortedRows.length === 0 && <tr><td colSpan={activeDimensions.length + visibleColumns.length}><div className="overall-empty-state">{querying ? "正在查询 A012 DNS 诊断数据…" : "暂无数据"}</div></td></tr>}{sortedRows.slice(0, 100).map((row: AnyRow, index: number) => <tr key={`${row.dimensionKey ?? index}`} className={Number(row.successRate ?? 0) < 80 && Number(row.probes ?? 0) >= 10 ? "row-warn" : ""}>{activeDimensions.map((dimension) => <td key={dimension}><strong>{text(row.dimensions?.[dimension] ?? "unknown")}</strong></td>)}{AD_DNS_COLUMNS.filter((column) => shows(column.key)).map((column) => <td key={column.key}>{formatDnsCell(row, column.key)}</td>)}</tr>)}</tbody>{rows.length > 1 && <tfoot><tr><td colSpan={activeDimensions.length}><strong>摘要</strong><small>全部 {rows.length} 组</small></td>{AD_DNS_COLUMNS.filter((column) => shows(column.key)).map((column) => <td key={column.key}><strong>{column.key === "successRate" ? percent(totals.successRate) : column.key === "avgSuccessMs" ? "—" : number(totals[column.key])}</strong></td>)}</tr></tfoot>}</table></div>
+      <div className="matrix-footnote">字段来源：{text(report.source)} / {text(report.eventName)}；{text(report.notice)}</div>
+    </section>
+  </div>;
+}
+
 const AD_OVERALL_DIMENSIONS: Array<{ key: string; label: string }> = [
   { key: "stat_date", label: "日期" },
   { key: "project_code", label: "项目" },
@@ -3159,14 +3248,19 @@ export function OperationalFunnel(props: Props) {
   const [adOverallLoading, setAdOverallLoading] = useState(false);
   const [adOverallError, setAdOverallError] = useState("");
   const [adOverallDimensions, setAdOverallDimensions] = useState<string[]>(["stat_date", "project_code", "app_version"]);
-  const [internalVpnReportSection, setInternalVpnReportSection] = useState<"matrix" | "adOverall" | "versions">("matrix");
+  const [adDnsData, setAdDnsData] = useState<AnyRow | null>(null);
+  const [adDnsLoading, setAdDnsLoading] = useState(false);
+  const [adDnsError, setAdDnsError] = useState("");
+  const [adDnsDimensions, setAdDnsDimensions] = useState<string[]>(["stat_date", "dns_provider", "target_id"]);
+  const [internalVpnReportSection, setInternalVpnReportSection] = useState<"matrix" | "adOverall" | "adDns" | "versions">("matrix");
   const vpnReportSection = props.reportSection ?? internalVpnReportSection;
-  const setVpnReportSection = (section: "matrix" | "adOverall" | "versions") => {
+  const setVpnReportSection = (section: "matrix" | "adOverall" | "adDns" | "versions") => {
     props.onReportSectionChange?.(section);
     if (!props.reportSection) setInternalVpnReportSection(section);
   };
   const [matrixQueryKey, setMatrixQueryKey] = useState(0);
   const [adOverallQueryKey, setAdOverallQueryKey] = useState(0);
+  const [adDnsQueryKey, setAdDnsQueryKey] = useState(0);
   const dates = useMemo(() => dateRange(props.range), [props.range]);
   const queryUnit: FunnelUnit = domain === "vpn" ? "sessions" : domain === "ads" ? unit : "users";
   const scope = props.page === "overview" ? "overview" : "project";
@@ -3390,6 +3484,26 @@ export function OperationalFunnel(props: Props) {
   }, [props.page, vpnReportSection, props.enabled, props.projectCode, props.appIdentifier, props.platform, props.country, props.appVersion, props.refreshKey, dates, adOverallDimensions, adOverallQueryKey]);
 
   useEffect(() => {
+    if (props.page !== "network_failure_matrix" || vpnReportSection !== "adDns" || !props.enabled || !props.projectCode) return;
+    let active = true;
+    const controller = new AbortController();
+    setAdDnsLoading(true);
+    setAdDnsError("");
+    const baseQuery = {
+      ...dates,
+      projectCode: props.projectCode,
+      appIdentifier: props.appIdentifier,
+      platform: props.platform === "全部" ? undefined : props.platform.toLowerCase() as "android" | "ios",
+      country: props.country === "全部国家" ? undefined : props.country,
+      appVersion: props.appVersion === "全部版本" ? undefined : props.appVersion.split(" ")[0],
+    };
+    queryFunnel<AnyRow>({ ...baseQuery, page: "ad_dns_report", domain: "ads", unit: "users", pageSize: 100, dimensions: adDnsDimensions }, controller.signal)
+      .then((result) => { if (active) { setAdDnsData(result); setAdDnsLoading(false); } })
+      .catch((reason) => { if (active) { setAdDnsError(reason instanceof Error ? reason.message : "查询失败"); setAdDnsLoading(false); } });
+    return () => { active = false; controller.abort(); };
+  }, [props.page, vpnReportSection, props.enabled, props.projectCode, props.appIdentifier, props.platform, props.country, props.appVersion, props.refreshKey, dates, adDnsDimensions, adDnsQueryKey]);
+
+  useEffect(() => {
     if (!props.enabled || Object.keys(dataPackage).length === 0) {
       props.onSnapshotChange?.(null);
       return;
@@ -3448,9 +3562,18 @@ export function OperationalFunnel(props: Props) {
         totals: {},
       },
     };
+    const loadingAdDnsData = adDnsData ?? {
+      adDnsReport: {
+        available: true,
+        source: "查询中",
+        dimensions: adDnsDimensions,
+        rows: [],
+        totals: {},
+      },
+    };
     return <div className="page-stack">
-      {!props.hideReportTabs && <nav className="operational-tabs workbench-tabs"><Button className={vpnReportSection === "matrix" ? "active" : ""} onClick={() => setVpnReportSection("matrix")}>VPN Overall</Button><Button className={vpnReportSection === "adOverall" ? "active" : ""} onClick={() => setVpnReportSection("adOverall")}>广告漏斗Overall</Button><Button className={vpnReportSection === "versions" ? "active" : ""} onClick={() => setVpnReportSection("versions")}>版本对比</Button></nav>}
-      {vpnReportSection === "versions" ? <VersionComparison data={{}} domain="vpn" projectCode={props.projectCode} appIdentifier={props.appIdentifier} platform={props.platform} country={props.country} appVersion={props.appVersion} initialRange={props.range} refreshKey={props.refreshKey + matrixQueryKey} projectOptions={props.projectOptions} onProjectSelect={props.onProjectSelect} onRangeChange={props.onRangeChange} /> : vpnReportSection === "adOverall" ? <AdOverallReport data={loadingAdOverallData} dimensions={adOverallDimensions} dates={dates} projectCode={props.projectCode} platform={props.platform} country={props.country} appVersion={props.appVersion} projectOptions={props.projectOptions} countryOptions={props.countryOptions} appVersionOptions={props.appVersionOptions} querying={adOverallLoading} queryError={adOverallError} onQuery={(nextDimensions) => { setAdOverallDimensions(nextDimensions); setAdOverallQueryKey((value) => value + 1); }} onProjectSelect={props.onProjectSelect} onRangeChange={props.onRangeChange} onCountryChange={props.onCountryChange} onAppVersionChange={props.onAppVersionChange} onPlatformChange={props.onPlatformChange} /> : <AdNetworkFailureMatrix data={loadingMatrixData} dimensions={matrixDimensions} dates={dates} projectCode={props.projectCode} platform={props.platform} country={props.country} appVersion={props.appVersion} projectOptions={props.projectOptions} countryOptions={props.countryOptions} appVersionOptions={props.appVersionOptions} querying={matrixLoading} queryError={matrixError} onQuery={(nextDimensions) => { setMatrixDimensions(nextDimensions); setMatrixQueryKey((value) => value + 1); }} onProjectSelect={props.onProjectSelect} onRangeChange={props.onRangeChange} onCountryChange={props.onCountryChange} onAppVersionChange={props.onAppVersionChange} onPlatformChange={props.onPlatformChange} />}
+      {!props.hideReportTabs && <nav className="operational-tabs workbench-tabs"><Button className={vpnReportSection === "matrix" ? "active" : ""} onClick={() => setVpnReportSection("matrix")}>VPN Overall</Button><Button className={vpnReportSection === "adOverall" ? "active" : ""} onClick={() => setVpnReportSection("adOverall")}>广告漏斗Overall</Button><Button className={vpnReportSection === "adDns" ? "active" : ""} onClick={() => setVpnReportSection("adDns")}>广告DNS诊断</Button><Button className={vpnReportSection === "versions" ? "active" : ""} onClick={() => setVpnReportSection("versions")}>版本对比</Button></nav>}
+      {vpnReportSection === "versions" ? <VersionComparison data={{}} domain="vpn" projectCode={props.projectCode} appIdentifier={props.appIdentifier} platform={props.platform} country={props.country} appVersion={props.appVersion} initialRange={props.range} refreshKey={props.refreshKey + matrixQueryKey} projectOptions={props.projectOptions} onProjectSelect={props.onProjectSelect} onRangeChange={props.onRangeChange} /> : vpnReportSection === "adDns" ? <AdDnsReport data={loadingAdDnsData} dimensions={adDnsDimensions} dates={dates} projectCode={props.projectCode} platform={props.platform} country={props.country} appVersion={props.appVersion} projectOptions={props.projectOptions} countryOptions={props.countryOptions} appVersionOptions={props.appVersionOptions} querying={adDnsLoading} queryError={adDnsError} onQuery={(nextDimensions) => { setAdDnsDimensions(nextDimensions); setAdDnsQueryKey((value) => value + 1); }} onProjectSelect={props.onProjectSelect} onRangeChange={props.onRangeChange} onCountryChange={props.onCountryChange} onAppVersionChange={props.onAppVersionChange} onPlatformChange={props.onPlatformChange} /> : vpnReportSection === "adOverall" ? <AdOverallReport data={loadingAdOverallData} dimensions={adOverallDimensions} dates={dates} projectCode={props.projectCode} platform={props.platform} country={props.country} appVersion={props.appVersion} projectOptions={props.projectOptions} countryOptions={props.countryOptions} appVersionOptions={props.appVersionOptions} querying={adOverallLoading} queryError={adOverallError} onQuery={(nextDimensions) => { setAdOverallDimensions(nextDimensions); setAdOverallQueryKey((value) => value + 1); }} onProjectSelect={props.onProjectSelect} onRangeChange={props.onRangeChange} onCountryChange={props.onCountryChange} onAppVersionChange={props.onAppVersionChange} onPlatformChange={props.onPlatformChange} /> : <AdNetworkFailureMatrix data={loadingMatrixData} dimensions={matrixDimensions} dates={dates} projectCode={props.projectCode} platform={props.platform} country={props.country} appVersion={props.appVersion} projectOptions={props.projectOptions} countryOptions={props.countryOptions} appVersionOptions={props.appVersionOptions} querying={matrixLoading} queryError={matrixError} onQuery={(nextDimensions) => { setMatrixDimensions(nextDimensions); setMatrixQueryKey((value) => value + 1); }} onProjectSelect={props.onProjectSelect} onRangeChange={props.onRangeChange} onCountryChange={props.onCountryChange} onAppVersionChange={props.onAppVersionChange} onPlatformChange={props.onPlatformChange} />}
     </div>;
   }
 
