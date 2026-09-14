@@ -40,7 +40,7 @@ test("compiled bundle contains current product features", async () => {
   const js = await file(`dist/assets/${jsFile}`);
   assert.match(js, /广告漏斗Overall/);
   assert.match(js, /诊断报表/);
-  assert.match(js, /V137/);
+  assert.match(js, /V138/);
   assert.match(js, /sidebar-collapsed/);
   assert.match(js, /广告链路总表/);
 });
@@ -75,4 +75,12 @@ test("tracked pages no longer render native button elements", async () => {
   for (const [index, content] of contents.entries()) {
     assert.doesNotMatch(content, /<\/?button\b/, `${files[index]} still contains native button`);
   }
+});
+
+
+test("oa workspace visual style token is shipped", async () => {
+  const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+  assert.match(css, /OA workspace inspired light dashboard polish/);
+  assert.match(css, /--canvas: #f6f7fb/);
+  assert.match(css, /grid-template-columns: 252px minmax/);
 });
