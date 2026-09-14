@@ -25,7 +25,7 @@ import { DomainReportPage } from "./domain-report";
 import { trackingApiBaseUrl } from "./api-base-url";
 import { createCodexQueryLinks } from "./codex-query-links-api";
 
-const APP_VERSION = "V138";
+const APP_VERSION = "V139";
 const VERSION_MANIFEST_PATH = "/version.json";
 
 type PageKey =
@@ -1681,9 +1681,9 @@ export default function Home() {
         <Button htmlType="button" className="sidebar-collapse-toggle" onClick={() => setSidebarCollapsed((value) => !value)} title={sidebarCollapsed ? "展开左侧菜单" : "折叠左侧菜单"} aria-label={sidebarCollapsed ? "展开左侧菜单" : "折叠左侧菜单"}>{sidebarCollapsed ? "›" : "‹"}</Button>
         <div className="brand"><span className="brand-mark">GF</span><span><strong>GeekForest 产品大脑</strong><small className="version-line"><span>质量分析中心 · {APP_VERSION}</span><Button htmlType="button" onClick={checkLatestVersion} disabled={checkingLatestVersion} title="检测并打开线上最新版本">{checkingLatestVersion ? "检测中" : "刷新"}</Button></small></span></div>
         <div className="nav-group-label">经营分析</div>
-        {moduleMenus.filter((item) => item.group === "经营分析").map((item) => item.key === "vpnReport" ? <div key={item.key} className={`nav-submenu ${module === "vpnReport" ? "active" : ""} ${diagnosticMenuOpen ? "open" : ""}`}><Button className={`main-nav-item nav-parent ${module === item.key ? "active" : ""}`} onClick={() => { openModule(item.key); setDiagnosticMenuOpen((value) => module === "vpnReport" ? !value : true); }} title={item.label}><span>{item.index}</span><b>{item.label}</b><em>{diagnosticMenuOpen ? "▾" : "▸"}</em></Button>{diagnosticMenuOpen && !sidebarCollapsed && <div className="nav-submenu-list">{diagnosticReportMenus.map((child) => <Button key={child.key} className={`nav-submenu-item ${vpnReportSection === child.key ? "active" : ""}`} onClick={() => openDiagnosticReport(child.key)}><strong>{child.label}</strong><small>{child.hint}</small></Button>)}</div>}</div> : <Button key={item.key} className={`main-nav-item ${module === item.key ? "active" : ""}`} onClick={() => openModule(item.key)} title={item.label}><span>{item.index}</span><b>{item.label}</b></Button>)}
+        {moduleMenus.filter((item) => item.group === "经营分析").map((item) => item.key === "vpnReport" ? <div key={item.key} className={`nav-submenu ${module === "vpnReport" ? "active" : ""} ${diagnosticMenuOpen ? "open" : ""}`}><Button className={`main-nav-item nav-parent ${module === item.key ? "active" : ""}`} onClick={() => { openModule(item.key); setDiagnosticMenuOpen((value) => module === "vpnReport" ? !value : true); }} title={item.label}><b>{item.label}</b><em>{diagnosticMenuOpen ? "▾" : "▸"}</em></Button>{diagnosticMenuOpen && !sidebarCollapsed && <div className="nav-submenu-list">{diagnosticReportMenus.map((child) => <Button key={child.key} className={`nav-submenu-item ${vpnReportSection === child.key ? "active" : ""}`} onClick={() => openDiagnosticReport(child.key)}><strong>{child.label}</strong><small>{child.hint}</small></Button>)}</div>}</div> : <Button key={item.key} className={`main-nav-item ${module === item.key ? "active" : ""}`} onClick={() => openModule(item.key)} title={item.label}><b>{item.label}</b></Button>)}
         <div className="nav-group-label">质量治理</div>
-        {moduleMenus.filter((item) => item.group === "质量治理").map((item) => <Button key={item.key} className={`main-nav-item ${module === item.key ? "active" : ""}`} onClick={() => openModule(item.key)} title={item.label}><span>{item.index}</span><b>{item.label}</b></Button>)}
+        {moduleMenus.filter((item) => item.group === "质量治理").map((item) => <Button key={item.key} className={`main-nav-item ${module === item.key ? "active" : ""}`} onClick={() => openModule(item.key)} title={item.label}><b>{item.label}</b></Button>)}
         <div className="sidebar-foot"><span className="status-dot" />线上数据接入<small>经营分析走线上接口；治理菜单按真实接口状态展示</small></div>
       </aside>
 

@@ -40,7 +40,7 @@ test("compiled bundle contains current product features", async () => {
   const js = await file(`dist/assets/${jsFile}`);
   assert.match(js, /广告漏斗Overall/);
   assert.match(js, /诊断报表/);
-  assert.match(js, /V138/);
+  assert.match(js, /V139/);
   assert.match(js, /sidebar-collapsed/);
   assert.match(js, /广告链路总表/);
 });
@@ -83,4 +83,11 @@ test("oa workspace visual style token is shipped", async () => {
   assert.match(css, /OA workspace inspired light dashboard polish/);
   assert.match(css, /--canvas: #f6f7fb/);
   assert.match(css, /grid-template-columns: 252px minmax/);
+});
+
+
+test("sidebar serial numbers are not rendered", async () => {
+  const source = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /<span>\{item\.index\}<\/span>/);
+  assert.match(source, /<b>\{item\.label\}<\/b>/);
 });

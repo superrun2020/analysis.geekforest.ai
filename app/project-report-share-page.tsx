@@ -337,9 +337,9 @@ function SnapshotReportShell({ report, meta, onlineViewers, packageErrors, metri
     <aside className="sidebar">
       <div className="brand"><span className="brand-mark">GF</span><span><strong>GeekForest 产品大脑</strong><small className="version-line"><span>质量分析中心 · V103</span><Button htmlType="button" disabled title="分享快照不刷新数据">快照</Button></small></span></div>
       <div className="nav-group-label">经营分析</div>
-      {snapshotMenus.filter((item) => item.group === "经营分析").map((item) => <Button key={item.key} className={`main-nav-item ${activeMenu === item.key ? "active" : ""}`} disabled><span>{item.index}</span>{item.label}</Button>)}
+      {snapshotMenus.filter((item) => item.group === "经营分析").map((item) => <Button key={item.key} className={`main-nav-item ${activeMenu === item.key ? "active" : ""}`} disabled><b>{item.label}</b></Button>)}
       <div className="nav-group-label">质量治理</div>
-      {snapshotMenus.filter((item) => item.group === "质量治理").map((item) => <Button key={item.key} className="main-nav-item" disabled><span>{item.index}</span>{item.label}</Button>)}
+      {snapshotMenus.filter((item) => item.group === "质量治理").map((item) => <Button key={item.key} className="main-nav-item" disabled><b>{item.label}</b></Button>)}
       <div className="sidebar-foot"><span className="status-dot" />分享快照模式<small>数据固定为生成链接时的线上查询结果</small></div>
     </aside>
 
