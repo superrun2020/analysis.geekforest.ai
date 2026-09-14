@@ -29,6 +29,9 @@ type Props = {
   initialDomain?: "ads" | "vpn" | "quality";
   lockDomain?: boolean;
   softFailure?: boolean;
+  reportSection?: "matrix" | "adOverall" | "versions";
+  onReportSectionChange?: (section: "matrix" | "adOverall" | "versions") => void;
+  hideReportTabs?: boolean;
   onSnapshotChange?: (snapshot: OperationalReportSnapshot | null) => void;
 };
 
@@ -3144,7 +3147,12 @@ export function OperationalFunnel(props: Props) {
   const [adOverallLoading, setAdOverallLoading] = useState(false);
   const [adOverallError, setAdOverallError] = useState("");
   const [adOverallDimensions, setAdOverallDimensions] = useState<string[]>(["stat_date", "project_code", "app_version"]);
-  const [vpnReportSection, setVpnReportSection] = useState<"matrix" | "adOverall" | "versions">("matrix");
+  const [internalVpnReportSection, setInternalVpnReportSection] = useState<"matrix" | "adOverall" | "versions">("matrix");
+  const vpnReportSection = props.reportSection ?? internalVpnReportSection;
+  const setVpnReportSection = (section: "matrix" | "adOverall" | "versions") => {
+    props.onReportSectionChange?.(section);
+    if (!props.reportSection) setInternalVpnReportSection(section);
+  };
   const [matrixQueryKey, setMatrixQueryKey] = useState(0);
   const [adOverallQueryKey, setAdOverallQueryKey] = useState(0);
   const dates = useMemo(() => dateRange(props.range), [props.range]);
@@ -3429,7 +3437,7 @@ export function OperationalFunnel(props: Props) {
       },
     };
     return <div className="page-stack">
-      <nav className="operational-tabs workbench-tabs"><Button className={vpnReportSection === "matrix" ? "active" : ""} onClick={() => setVpnReportSection("matrix")}>VPN Overall</Button><Button className={vpnReportSection === "adOverall" ? "active" : ""} onClick={() => setVpnReportSection("adOverall")}>广告漏斗Overall</Button><Button className={vpnReportSection === "versions" ? "active" : ""} onClick={() => setVpnReportSection("versions")}>版本对比</Button></nav>
+      {!props.hideReportTabs && <nav className="operational-tabs workbench-tabs"><Button className={vpnReportSection === "matrix" ? "active" : ""} onClick={() => setVpnReportSection("matrix")}>VPN Overall</Button><Button className={vpnReportSection === "adOverall" ? "active" : ""} onClick={() => setVpnReportSection("adOverall")}>广告漏斗Overall</Button><Button className={vpnReportSection === "versions" ? "active" : ""} onClick={() => setVpnReportSection("versions")}>版本对比</Button></nav>}
       {vpnReportSection === "versions" ? <VersionComparison data={{}} domain="vpn" projectCode={props.projectCode} appIdentifier={props.appIdentifier} platform={props.platform} country={props.country} appVersion={props.appVersion} initialRange={props.range} refreshKey={props.refreshKey + matrixQueryKey} projectOptions={props.projectOptions} onProjectSelect={props.onProjectSelect} onRangeChange={props.onRangeChange} /> : vpnReportSection === "adOverall" ? <AdOverallReport data={loadingAdOverallData} dimensions={adOverallDimensions} dates={dates} projectCode={props.projectCode} platform={props.platform} country={props.country} appVersion={props.appVersion} projectOptions={props.projectOptions} countryOptions={props.countryOptions} appVersionOptions={props.appVersionOptions} querying={adOverallLoading} queryError={adOverallError} onQuery={(nextDimensions) => { setAdOverallDimensions(nextDimensions); setAdOverallQueryKey((value) => value + 1); }} onProjectSelect={props.onProjectSelect} onRangeChange={props.onRangeChange} onCountryChange={props.onCountryChange} onAppVersionChange={props.onAppVersionChange} onPlatformChange={props.onPlatformChange} /> : <AdNetworkFailureMatrix data={loadingMatrixData} dimensions={matrixDimensions} dates={dates} projectCode={props.projectCode} platform={props.platform} country={props.country} appVersion={props.appVersion} projectOptions={props.projectOptions} countryOptions={props.countryOptions} appVersionOptions={props.appVersionOptions} querying={matrixLoading} queryError={matrixError} onQuery={(nextDimensions) => { setMatrixDimensions(nextDimensions); setMatrixQueryKey((value) => value + 1); }} onProjectSelect={props.onProjectSelect} onRangeChange={props.onRangeChange} onCountryChange={props.onCountryChange} onAppVersionChange={props.onAppVersionChange} onPlatformChange={props.onPlatformChange} />}
     </div>;
   }

@@ -25,7 +25,7 @@ import { DomainReportPage } from "./domain-report";
 import { trackingApiBaseUrl } from "./api-base-url";
 import { createCodexQueryLinks } from "./codex-query-links-api";
 
-const APP_VERSION = "V134";
+const APP_VERSION = "V135";
 const VERSION_MANIFEST_PATH = "/version.json";
 
 type PageKey =
@@ -300,6 +300,13 @@ const moduleMenus: Array<{ key: ModuleKey; index: string; label: string; group: 
   { key: "tracking", index: "08", label: "打点测试配置", group: "质量治理" },
   { key: "tasks", index: "09", label: "任务与告警", group: "质量治理" },
   { key: "shareAlerts", index: "10", label: "异常报警", group: "质量治理" },
+];
+
+type VpnReportSectionKey = "matrix" | "adOverall" | "versions";
+const diagnosticReportMenus: Array<{ key: VpnReportSectionKey; label: string; hint: string }> = [
+  { key: "matrix", label: "VPN Overall", hint: "网络失败横向" },
+  { key: "adOverall", label: "广告漏斗Overall", hint: "广告链路总表" },
+  { key: "versions", label: "版本对比", hint: "版本与日期" },
 ];
 
 const moduleCopy: Record<ModuleKey, { title: string; description: string; action: string }> = {
@@ -1070,6 +1077,9 @@ export default function Home() {
   const [diagnosticQualityStatus, setDiagnosticQualityStatus] = useState("全部状态");
   const [workbenchSection, setWorkbenchSection] = useState("diagnosis-overview");
   const [reportSnapshot, setReportSnapshot] = useState<OperationalReportSnapshot | null>(null);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [diagnosticMenuOpen, setDiagnosticMenuOpen] = useState(true);
+  const [vpnReportSection, setVpnReportSection] = useState<VpnReportSectionKey>("matrix");
   const [sharingReport, setSharingReport] = useState(false);
   const [sharedReportResult, setSharedReportResult] = useState<{ shareUrl: string; copyText?: string } | null>(null);
   const [creatingCodexLinks, setCreatingCodexLinks] = useState(false);
@@ -1540,7 +1550,18 @@ export default function Home() {
     } else {
       setModule(next);
       if (next === "vpn") setPage("workbench");
+      if (next === "vpnReport") setDiagnosticMenuOpen(true);
     }
+    if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+
+  function openDiagnosticReport(section: VpnReportSectionKey) {
+    setModule("vpnReport");
+    setPage("network_failure_matrix");
+    setDiagnosticMenuOpen(true);
+    setVpnReportSection(section);
+    setReportSnapshot(null);
     if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
@@ -1655,19 +1676,20 @@ export default function Home() {
 
   return (
     <MetricInspectContext.Provider value={openMetricDefinition}>
-    <div className={`app-shell ${embedded ? "embedded" : ""}`}>
+    <div className={`app-shell ${embedded ? "embedded" : ""} ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
       <aside className="sidebar">
+        <Button htmlType="button" className="sidebar-collapse-toggle" onClick={() => setSidebarCollapsed((value) => !value)} title={sidebarCollapsed ? "展开左侧菜单" : "折叠左侧菜单"} aria-label={sidebarCollapsed ? "展开左侧菜单" : "折叠左侧菜单"}>{sidebarCollapsed ? "›" : "‹"}</Button>
         <div className="brand"><span className="brand-mark">GF</span><span><strong>GeekForest 产品大脑</strong><small className="version-line"><span>质量分析中心 · {APP_VERSION}</span><Button htmlType="button" onClick={checkLatestVersion} disabled={checkingLatestVersion} title="检测并打开线上最新版本">{checkingLatestVersion ? "检测中" : "刷新"}</Button></small></span></div>
         <div className="nav-group-label">经营分析</div>
-        {moduleMenus.filter((item) => item.group === "经营分析").map((item) => <Button key={item.key} className={`main-nav-item ${module === item.key ? "active" : ""}`} onClick={() => openModule(item.key)}><span>{item.index}</span>{item.label}</Button>)}
+        {moduleMenus.filter((item) => item.group === "经营分析").map((item) => item.key === "vpnReport" ? <div key={item.key} className={`nav-submenu ${module === "vpnReport" ? "active" : ""} ${diagnosticMenuOpen ? "open" : ""}`}><Button className={`main-nav-item nav-parent ${module === item.key ? "active" : ""}`} onClick={() => { openModule(item.key); setDiagnosticMenuOpen((value) => module === "vpnReport" ? !value : true); }} title={item.label}><span>{item.index}</span><b>{item.label}</b><em>{diagnosticMenuOpen ? "▾" : "▸"}</em></Button>{diagnosticMenuOpen && !sidebarCollapsed && <div className="nav-submenu-list">{diagnosticReportMenus.map((child) => <Button key={child.key} className={`nav-submenu-item ${vpnReportSection === child.key ? "active" : ""}`} onClick={() => openDiagnosticReport(child.key)}><strong>{child.label}</strong><small>{child.hint}</small></Button>)}</div>}</div> : <Button key={item.key} className={`main-nav-item ${module === item.key ? "active" : ""}`} onClick={() => openModule(item.key)} title={item.label}><span>{item.index}</span><b>{item.label}</b></Button>)}
         <div className="nav-group-label">质量治理</div>
-        {moduleMenus.filter((item) => item.group === "质量治理").map((item) => <Button key={item.key} className={`main-nav-item ${module === item.key ? "active" : ""}`} onClick={() => openModule(item.key)}><span>{item.index}</span>{item.label}</Button>)}
+        {moduleMenus.filter((item) => item.group === "质量治理").map((item) => <Button key={item.key} className={`main-nav-item ${module === item.key ? "active" : ""}`} onClick={() => openModule(item.key)} title={item.label}><span>{item.index}</span><b>{item.label}</b></Button>)}
         <div className="sidebar-foot"><span className="status-dot" />线上数据接入<small>经营分析走线上接口；治理菜单按真实接口状态展示</small></div>
       </aside>
 
       <div className="workspace">
         <header className="topbar">
-          <div className="breadcrumbs">{moduleMenus.find((item) => item.key === module)?.group} / {currentModule.title}{configWorkspaceOpen ? <> / <strong>{editingConfig ? "编辑打点配置" : "新建打点配置"}</strong></> : module === "funnel" && <> / <strong>{currentPage.label}</strong></>}</div>
+          <div className="breadcrumbs">{moduleMenus.find((item) => item.key === module)?.group} / {currentModule.title}{configWorkspaceOpen ? <> / <strong>{editingConfig ? "编辑打点配置" : "新建打点配置"}</strong></> : module === "funnel" ? <> / <strong>{currentPage.label}</strong></> : module === "vpnReport" ? <> / <strong>{diagnosticReportMenus.find((item) => item.key === vpnReportSection)?.label}</strong></> : null}</div>
           <div className="topbar-actions"><div className="global-search">搜索项目、事件、问题单</div><Button className="share-report-button" disabled={!["funnel", "vpn"].includes(module) || !project || creatingCodexLinks} onClick={() => void copyCodexQueryLinks()} title="生成广告打点/VPN打点 JSON 查询链接，发给 Codex 后可直接查线上数据">{creatingCodexLinks ? "生成中…" : "复制Codex查询"}</Button><Button className="share-report-button" disabled={!["funnel", "vpn"].includes(module) || !reportSnapshot || sharingReport} onClick={() => void shareCurrentProjectReport()} title={reportSnapshot ? "将当前页面已查询出的全部数据固定成分享快照" : "请先等待当前页面查询完成"}>{sharingReport ? "生成中…" : "分享项目报告"}</Button><Button className="icon-button" aria-label="通知">3</Button><Button className="account-chip" onClick={() => void companyAuth.signOut()} title="退出登录"><span>{companyAuth.user.employee?.name?.slice(0, 1) || companyAuth.user.email.slice(0, 1).toUpperCase()}</span><small>{companyAuth.user.employee?.name || companyAuth.user.email}</small></Button></div>
         </header>
 
@@ -1675,7 +1697,7 @@ export default function Home() {
           {configWorkspaceOpen ? <TrackingConfigWorkspace editingConfig={editingConfig} onlineProjects={onlineProjects} onCancel={() => { setConfigWorkspaceOpen(false); setEditingConfig(null); }} onSave={saveTrackingConfig} /> : <>
           <section className="page-heading">
             <div><h1>{currentModule.title}</h1><p>{currentModule.description}</p></div>
-            <div className="heading-actions"><Button className="secondary-button" onClick={() => openMetricDefinition("dau")}>指标口径字典</Button>{module !== "tracking" && <Button className="primary-button" onClick={() => module === "config" ? openConfigEditor(null) : setDialog(moduleDialog[module])}>{["project", "funnel", "config", "firebaseSetup", "tasks"].includes(module) ? "＋ " : ""}{currentModule.action}</Button>}</div>
+            <div className="heading-actions">{module === "vpnReport" && <label className="diagnostic-report-select"><span>报表</span><select value={vpnReportSection} onChange={(event) => openDiagnosticReport(event.target.value as VpnReportSectionKey)}>{diagnosticReportMenus.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select></label>}<Button className="secondary-button" onClick={() => openMetricDefinition("dau")}>指标口径字典</Button>{module !== "tracking" && <Button className="primary-button" onClick={() => module === "config" ? openConfigEditor(null) : setDialog(moduleDialog[module])}>{["project", "funnel", "config", "firebaseSetup", "tasks"].includes(module) ? "＋ " : ""}{currentModule.action}</Button>}</div>
           </section>
 
           {module === "funnel" && <section className="workflow-strip" aria-label="漏斗诊断流程">
@@ -1899,6 +1921,9 @@ export default function Home() {
             initialDomain="vpn"
             lockDomain
             softFailure
+            reportSection={vpnReportSection}
+            onReportSectionChange={setVpnReportSection}
+            hideReportTabs
             onSnapshotChange={setReportSnapshot}
           />}
 

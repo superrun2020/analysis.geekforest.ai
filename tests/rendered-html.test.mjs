@@ -40,7 +40,9 @@ test("compiled bundle contains current product features", async () => {
   const js = await file(`dist/assets/${jsFile}`);
   assert.match(js, /广告漏斗Overall/);
   assert.match(js, /诊断报表/);
-  assert.match(js, /V134/);
+  assert.match(js, /V135/);
+  assert.match(js, /sidebar-collapsed/);
+  assert.match(js, /广告链路总表/);
 });
 
 
