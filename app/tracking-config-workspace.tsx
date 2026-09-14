@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { Button } from "antd";
 import { defaultSelectedEventIds, trackingEventCatalog, type TrackingConfigRecord, type TrackingPriority } from "./tracking-config-data";
 import { trackingDatabaseSource } from "./tracking-config-repository";
 
@@ -143,7 +144,7 @@ export function TrackingConfigWorkspace({ editingConfig, onlineProjects = [], on
     <div className="config-workspace-page">
       <section className="config-workspace-head">
         <div>
-          <button className="back-link" onClick={onCancel}>← 返回配置列表</button>
+          <Button className="back-link" onClick={onCancel}>← 返回配置列表</Button>
           <div className="eyebrow">V1.8 · 广告与 VPN 资格检查更新版</div>
           <h1>{editingConfig?.status === "DRAFT" ? "编辑打点配置草稿" : copyingPublished ? "复制为新配置版本" : "新建打点配置"}</h1>
           <p>事件、字段和统计按最新 V1.8 执行表读取；广告以 session_id 串联，VPN 以 vpn_session_id 串联。</p>
@@ -164,7 +165,7 @@ export function TrackingConfigWorkspace({ editingConfig, onlineProjects = [], on
           <label><span>版本 *</span><input value={version} onChange={(event) => setVersion(event.target.value)} /></label>
           <label><span>适用品类 *</span><select value={category} onChange={(event) => setCategory(event.target.value)}><option>套利 VPN</option><option>清理</option><option>Launcher</option></select></label>
           <label><span>平台 *</span><select value={platform} onChange={(event) => setPlatform(event.target.value)}><option>Android+iOS</option><option>Android</option><option>iOS</option></select></label>
-          <label className="projects-field"><span>关联项目 *（线上项目列表）</span><div>{categoryProjectOptions.length ? categoryProjectOptions.map((item) => <button type="button" key={item.code} className={selectedProjects.includes(item.code) ? "selected" : ""} onClick={() => toggleProject(item.code)}><i>{selectedProjects.includes(item.code) ? "✓" : ""}</i>{item.label}</button>) : <button type="button" disabled><i>!</i>线上项目暂不可用，请先确认 Firebase 配置/项目接口</button>}</div></label>
+          <label className="projects-field"><span>关联项目 *（线上项目列表）</span><div>{categoryProjectOptions.length ? categoryProjectOptions.map((item) => <Button htmlType="button" key={item.code} className={selectedProjects.includes(item.code) ? "selected" : ""} onClick={() => toggleProject(item.code)}><i>{selectedProjects.includes(item.code) ? "✓" : ""}</i>{item.label}</Button>) : <Button htmlType="button" disabled><i>!</i>线上项目暂不可用，请先确认 Firebase 配置/项目接口</Button>}</div></label>
           <label className="description-field"><span>配置说明</span><textarea value={description} onChange={(event) => setDescription(event.target.value)} /></label>
         </div>
       </section>
@@ -179,7 +180,7 @@ export function TrackingConfigWorkspace({ editingConfig, onlineProjects = [], on
           const events = trackingEventCatalog.filter((event) => event.stage === module);
           const selectedCount = events.filter((event) => selectedIds.includes(event.id)).length;
           const state = selectedCount === events.length ? "selected" : selectedCount > 0 ? "partial" : "";
-          return <button type="button" key={module} className={state} onClick={() => toggleModule(module)}><i>{state === "selected" ? "✓" : state === "partial" ? "−" : ""}</i><span><strong>{module}</strong><small>{selectedCount}/{events.length} · {state === "selected" ? "已全选" : state === "partial" ? "部分选择" : "未选择"}</small></span></button>;
+          return <Button htmlType="button" key={module} className={state} onClick={() => toggleModule(module)}><i>{state === "selected" ? "✓" : state === "partial" ? "−" : ""}</i><span><strong>{module}</strong><small>{selectedCount}/{events.length} · {state === "selected" ? "已全选" : state === "partial" ? "部分选择" : "未选择"}</small></span></Button>;
         })}</div>
 
         <div className="event-master-filters">
@@ -188,13 +189,13 @@ export function TrackingConfigWorkspace({ editingConfig, onlineProjects = [], on
           <label><span>标准事件名</span><input value={standardNameFilter} onChange={(event) => setStandardNameFilter(event.target.value)} placeholder="例如 ad_impression" /></label>
           <label><span>事件显示名</span><input value={displayNameFilter} onChange={(event) => setDisplayNameFilter(event.target.value)} placeholder="例如 广告产生展示" /></label>
           <label><span>优先级</span><select value={priorityFilter} onChange={(event) => setPriorityFilter(event.target.value)}><option value="all">全部</option><option>P0</option><option>P1</option><option>P2</option></select></label>
-          <button className="reset-filter" onClick={resetFilters}>重置筛选</button>
+          <Button className="reset-filter" onClick={resetFilters}>重置筛选</Button>
         </div>
 
         <div className="event-master-toolbar">
           <label><input type="checkbox" checked={allVisibleSelected} onChange={toggleVisible} /> 全选当前筛选结果（{filteredEvents.length}个事件）</label>
-          <div className="event-master-segments"><button className={selectionView === "all" ? "active" : ""} onClick={() => setSelectionView("all")}>全部</button><button className={selectionView === "selected" ? "active" : ""} onClick={() => setSelectionView("selected")}>只看已选</button><button className={selectionView === "unselected" ? "active" : ""} onClick={() => setSelectionView("unselected")}>只看未选</button></div>
-          <div className="event-master-segments view-toggle"><button className={masterView === "fields" ? "active" : ""} onClick={() => setMasterView("fields")}>字段明细 {fieldRows.length}</button><button className={masterView === "events" ? "active" : ""} onClick={() => setMasterView("events")}>事件汇总 {filteredEvents.length}</button></div>
+          <div className="event-master-segments"><Button className={selectionView === "all" ? "active" : ""} onClick={() => setSelectionView("all")}>全部</Button><Button className={selectionView === "selected" ? "active" : ""} onClick={() => setSelectionView("selected")}>只看已选</Button><Button className={selectionView === "unselected" ? "active" : ""} onClick={() => setSelectionView("unselected")}>只看未选</Button></div>
+          <div className="event-master-segments view-toggle"><Button className={masterView === "fields" ? "active" : ""} onClick={() => setMasterView("fields")}>字段明细 {fieldRows.length}</Button><Button className={masterView === "events" ? "active" : ""} onClick={() => setMasterView("events")}>事件汇总 {filteredEvents.length}</Button></div>
         </div>
 
         <div className="event-master-count"><strong>当前展示 {masterView === "fields" ? fieldRows.length : filteredEvents.length} 条</strong><span>不分页、不截断；筛选只改变显示，不改变已选结果。</span></div>
@@ -213,7 +214,7 @@ export function TrackingConfigWorkspace({ editingConfig, onlineProjects = [], on
         <label><input type="checkbox" checked={publishConfirmed} onChange={(event) => setPublishConfirmed(event.target.checked)} /> 我确认发布后生成不可变快照；后续修改必须复制为新版本</label>
       </section>
 
-      <footer className="config-workspace-actions"><button className="secondary-button" onClick={onCancel}>取消</button><button className="secondary-button" onClick={() => save("draft")}>保存草稿</button><button className="primary-button" onClick={() => save("publish")}>校验并发布配置快照</button></footer>
+      <footer className="config-workspace-actions"><Button className="secondary-button" onClick={onCancel}>取消</Button><Button className="secondary-button" onClick={() => save("draft")}>保存草稿</Button><Button className="primary-button" onClick={() => save("publish")}>校验并发布配置快照</Button></footer>
     </div>
   );
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { Button } from "antd";
 import { acceptanceApi, type AcceptanceDetail, type AcceptanceFieldCoverage, type AcceptanceRun } from "./tracking-acceptance-api";
 import { queryTrackingOnlineCoverage, type OnlineCoverageEvent, type OnlineCoverageResult } from "./tracking-online-coverage-api";
 import { trackingEventCatalog, type TrackingCatalogEvent, type TrackingConfigRecord } from "./tracking-config-data";
@@ -261,10 +262,10 @@ function FieldCoverageLookup({
     <div className="field-lookup-form">
       <label><span>事件</span><select value={selectedEvent?.name ?? fieldEventName} onChange={(event) => { const nextEvent = eventOptions.find((item) => item.name === event.target.value); setFieldEventName(event.target.value); setFieldName(nextEvent ? uniqueFieldOptions(nextEvent)[0]?.name ?? "" : ""); setFieldResult(null); setQueryError(""); }}>{eventOptions.map((event) => <option key={event.id} value={event.name}>{event.name} · {event.displayName}</option>)}</select></label>
       <label><span>字段</span><input list={datalistId} value={fieldName} placeholder="输入字段名，如 screen_view_id / session_id" onChange={(event) => { setFieldName(event.target.value); setFieldResult(null); setQueryError(""); }} /><datalist id={datalistId}>{fieldOptions.map((field) => <option key={field.name} value={field.name}>{field.displayName}</option>)}</datalist></label>
-      <button className="primary-button" onClick={checkField} disabled={!selectedEvent || !fieldName.trim() || querying}>{querying ? "查询中..." : "检查字段"}</button>
+      <Button className="primary-button" onClick={checkField} disabled={!selectedEvent || !fieldName.trim() || querying}>{querying ? "查询中..." : "检查字段"}</Button>
     </div>
     <div className="field-lookup-quick">
-      {["screen_view_id", "screen_name", "session_id", "current_screen", "element_name", "action_name", "logged_at_ms"].map((field) => <button key={field} onClick={() => { setFieldName(field); setFieldResult(null); setQueryError(""); }}>{field}</button>)}
+      {["screen_view_id", "screen_name", "session_id", "current_screen", "element_name", "action_name", "logged_at_ms"].map((field) => <Button key={field} onClick={() => { setFieldName(field); setFieldResult(null); setQueryError(""); }}>{field}</Button>)}
     </div>
     <div className="field-lookup-result">
       <div>
@@ -353,7 +354,7 @@ function PageTrackingAcceptancePanel({
       <div><span>A054重点判断</span><strong>{project === "A054" ? "专项开启" : "通用规则"}</strong><small>screen_view 为页面数据分母</small></div>
     </div>
     {project === "A054" && <div className="page-acceptance-callout"><strong>A054 无页面数据时先按这个顺序排：</strong><span>① Firebase 是否收到 screen_view；② screen_view 是否带 session_id 和 screen_view_id；③ DWS 页面路径是否过滤了缺 ID 事件；④ App 后台是否只打了 app_background 但没有 screen_exit。</span></div>}
-    {expectedCount === 0 && <div className="page-acceptance-callout danger"><strong>当前配置没有纳入页面事件</strong><span>请在“打点测试配置”里把 页面行为 / 核心行为 模块加入配置，否则验收中心无法把页面数据缺失算进失败。</span><button onClick={openConfig}>去配置页面事件</button></div>}
+    {expectedCount === 0 && <div className="page-acceptance-callout danger"><strong>当前配置没有纳入页面事件</strong><span>请在“打点测试配置”里把 页面行为 / 核心行为 模块加入配置，否则验收中心无法把页面数据缺失算进失败。</span><Button onClick={openConfig}>去配置页面事件</Button></div>}
     <div className="table-wrap page-check-table"><table><thead><tr><th>检查项</th><th>标准事件</th><th>必须字段 / 上下文</th><th>打点位置</th><th>验收规则</th><th>当前结果</th><th>影响</th></tr></thead><tbody>{pageTrackingChecks.map((check) => {
       const detailEvent = eventByName.get(check.eventName);
       const configured = configuredNames.has(check.eventName);
@@ -362,9 +363,9 @@ function PageTrackingAcceptancePanel({
     })}</tbody></table></div>
     <FieldCoverageLookup detail={detail} configuredEvents={configuredEvents} />
     <div className="page-acceptance-actions">
-      <button className="secondary-button" onClick={onRefresh} disabled={loading || !selectedConfig}>{loading ? "刷新中..." : "刷新页面事件结果"}</button>
-      <button className="secondary-button" onClick={() => onMarkPageScene(pageEventNamesForScene)} disabled={!detail || pageEventNamesForScene.length === 0}>标记页面场景已执行</button>
-      <button className="primary-button" onClick={onCreateRun} disabled={!selectedConfig || loading}>创建页面验收 Run</button>
+      <Button className="secondary-button" onClick={onRefresh} disabled={loading || !selectedConfig}>{loading ? "刷新中..." : "刷新页面事件结果"}</Button>
+      <Button className="secondary-button" onClick={() => onMarkPageScene(pageEventNamesForScene)} disabled={!detail || pageEventNamesForScene.length === 0}>标记页面场景已执行</Button>
+      <Button className="primary-button" onClick={onCreateRun} disabled={!selectedConfig || loading}>创建页面验收 Run</Button>
     </div>
   </section>;
 }
@@ -470,10 +471,10 @@ export function TrackingAcceptanceCenter({ project, projects, configs, platform,
       <label><span>产品</span><select value={project} onChange={(e) => onProjectChange(e.target.value)}>{projects.map((item) => <option key={item.code} value={item.code}>{item.code}{item.name ? ` · ${item.name}` : ""}</option>)}</select></label>
       <label><span>应测配置</span><select value={selectedConfig?.id ?? "V18_FULL"} onChange={(e) => setConfigId(e.target.value)}><option value="V18_FULL">V1.8 全量事件自检 · {trackingEventCatalog.length}事件</option>{compatible.map((item) => <option key={item.id} value={item.id}>{item.name} {item.version} · {item.selectedCount}事件</option>)}</select></label>
       <label><span>查询日期</span><input type="date" value={queryDate} onChange={(e) => setQueryDate(e.target.value)} /></label>
-      <button className="primary-button" disabled={loading || !expectedEvents.length} onClick={queryCoverage}>{loading ? "查询中..." : "查询打点结果"}</button>
+      <Button className="primary-button" disabled={loading || !expectedEvents.length} onClick={queryCoverage}>{loading ? "查询中..." : "查询打点结果"}</Button>
     </section>
-    {error && <section className="surface acceptance-api-error"><strong>线上打点查询不可用</strong><span>{error}</span><button className="secondary-button" onClick={queryCoverage} disabled={loading}>重新查询</button></section>}
-    {!selectedConfig && <section className="surface page-acceptance-callout danger"><strong>当前项目没有发布配置</strong><span>已临时使用 V1.8 全量事件自检。正式发版验收前，请先创建该项目的打点配置，选择本版本真正需要验证的事件。</span><button onClick={openConfig}>新建配置</button></section>}
+    {error && <section className="surface acceptance-api-error"><strong>线上打点查询不可用</strong><span>{error}</span><Button className="secondary-button" onClick={queryCoverage} disabled={loading}>重新查询</Button></section>}
+    {!selectedConfig && <section className="surface page-acceptance-callout danger"><strong>当前项目没有发布配置</strong><span>已临时使用 V1.8 全量事件自检。正式发版验收前，请先创建该项目的打点配置，选择本版本真正需要验证的事件。</span><Button onClick={openConfig}>新建配置</Button></section>}
     <section className="metric-grid six">
       <div className="metric-card"><span>应测事件</span><strong>{summary.total}</strong><small>{selectedConfig ? `${selectedConfig.name} · ${selectedConfig.version}` : "V1.8 全量事件自检"}</small></div>
       <div className="metric-card"><span>已收到</span><strong>{coverage ? summary.received : "—"}</strong><small>按项目+包名+日期查线上数据</small></div>
@@ -485,12 +486,12 @@ export function TrackingAcceptanceCenter({ project, projects, configs, platform,
     <section className="surface tracking-clean-console">
       <div className="surface-title">
         <div><h2>应测事件接收结果</h2><p>这里不再创建 Run，只判断当前配置里应该打的事件，线上有没有收到、字段是否完整、失败后该去哪里修。</p></div>
-        <div className="event-result-tabs">{[["all","全部"],["success","成功"],["failed","需处理"],["missing","未收到"],["pending","待查询"]].map(([key,label])=><button key={key} className={statusFilter===key?"active":""} onClick={()=>setStatusFilter(key)}>{label}</button>)}</div>
+        <div className="event-result-tabs">{[["all","全部"],["success","成功"],["failed","需处理"],["missing","未收到"],["pending","待查询"]].map(([key,label])=><Button key={key} className={statusFilter===key?"active":""} onClick={()=>setStatusFilter(key)}>{label}</Button>)}</div>
       </div>
       <div className="tracking-test-toolbar">
         <label><span>事件模块</span><select value={moduleFilter} onChange={(e)=>setModuleFilter(e.target.value)}><option value="all">全部模块</option>{moduleOptions.map((item)=><option key={item} value={item}>{item}</option>)}</select></label>
         <label><span>搜索事件</span><input value={keyword} onChange={(e)=>setKeyword(e.target.value)} placeholder="搜标准事件名 / 显示名 / 打点位置" /></label>
-        <button className="secondary-button" onClick={()=>{ setModuleFilter("all"); setStatusFilter("all"); setKeyword(""); }}>重置筛选</button>
+        <Button className="secondary-button" onClick={()=>{ setModuleFilter("all"); setStatusFilter("all"); setKeyword(""); }}>重置筛选</Button>
       </div>
       {loading && <div className="query-progress-panel"><div className="query-progress-title"><div><strong>正在检查线上打点</strong><small>优先查 dws_app_event_quality_daily，缺失事件再查 DWD 明细回填。</small></div><span>{project} · {queryDate}</span></div><div className="query-progress-list"><div className="loading"><i>1</i><span>汇总表查询</span><small>事件数量、隔离、类型异常、P0完整率</small><strong>进行中</strong></div><div className="loading"><i>2</i><span>明细表补查</span><small>汇总没有命中的事件用 DWD 再确认</small><strong>等待返回</strong></div><div className="loading"><i>3</i><span>生成修复建议</span><small>按未收到/字段缺失/类型/隔离分类</small><strong>准备中</strong></div></div></div>}
       <div className="table-wrap event-result-table"><table><thead><tr><th>模块</th><th>标准事件名</th><th>事件显示名</th><th>优先级</th><th>在哪里打点 / 怎么触发</th><th>是否收到</th><th>次数 / UV</th><th>P0完整率</th><th>异常</th><th>最后收到</th><th>建议</th></tr></thead><tbody>{visibleRows.length ? visibleRows.map(({ event, online, status }) => <tr key={event.id} className={status.key === "success" ? "" : "row-warn"}><td>{event.stage}</td><td><strong>{event.name}</strong><small>{event.chainKey}</small></td><td>{event.displayName}</td><td><span className={`badge badge-${event.priority === "P0" ? "bad" : event.priority === "P1" ? "warn" : "neutral"}`}>{event.priority}</span></td><td><strong>{event.trackingLocation || event.page}</strong><small>{event.triggerTiming || event.operation}</small></td><td><span className={`badge badge-${status.tone}`}>{status.label}</span><small>{online?.source ?? "待查询"}</small></td><td><strong>{online?.eventCount ?? 0}</strong><small>UV {online?.users ?? "—"} · 有效 {online?.acceptedCount ?? "—"}</small></td><td>{online?.p0CompletenessRate === null || online?.p0CompletenessRate === undefined ? "—" : `${online.p0CompletenessRate.toFixed(1)}%`}</td><td><small>隔离 {online?.quarantineCount ?? 0}</small><small>类型 {online?.typeMismatchCount ?? 0}</small></td><td>{online?.latestAt ?? "—"}</td><td>{status.suggestion}</td></tr>) : <tr><td colSpan={11}><div className="empty-table-state"><strong>没有匹配的事件</strong><span>请放宽模块、状态或搜索条件。</span></div></td></tr>}</tbody></table></div>

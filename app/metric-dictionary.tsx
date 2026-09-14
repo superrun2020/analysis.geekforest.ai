@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { Button } from "antd";
 
 export type MetricDefinition = {
   key: string;
@@ -181,9 +182,9 @@ export function MetricDictionaryDrawer({ open, selectedMetric, onSelect, onClose
   if (!open) return null;
   return <div className="metric-drawer-backdrop" onMouseDown={onClose}>
     <aside className="metric-drawer" role="dialog" aria-modal="true" aria-label="指标口径字典" onMouseDown={(event) => event.stopPropagation()}>
-      <header><div><span>指标治理 · V1.7</span><h2>指标口径字典</h2><p>所有指标统一使用中文名称，并明确来源、公式、字段、去重与打点位置。</p></div><button onClick={onClose} aria-label="关闭指标口径字典">×</button></header>
+      <header><div><span>指标治理 · V1.7</span><h2>指标口径字典</h2><p>所有指标统一使用中文名称，并明确来源、公式、字段、去重与打点位置。</p></div><Button onClick={onClose} aria-label="关闭指标口径字典">×</Button></header>
       <div className="metric-drawer-layout">
-        <nav><label>搜索指标、事件或字段<input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="例如：页面 UV、jk_ad_impression" /></label><div className="metric-dictionary-count">共 {visible.length} 个标准指标</div><div className="metric-dictionary-list">{visible.map((item) => <button key={item.key} className={selected.key === item.key ? "active" : ""} onClick={() => onSelect(item.key)}><span>{item.category}</span><strong>{item.nameZh}</strong><small>{item.nameEn}</small></button>)}</div></nav>
+        <nav><label>搜索指标、事件或字段<input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="例如：页面 UV、jk_ad_impression" /></label><div className="metric-dictionary-count">共 {visible.length} 个标准指标</div><div className="metric-dictionary-list">{visible.map((item) => <Button key={item.key} className={selected.key === item.key ? "active" : ""} onClick={() => onSelect(item.key)}><span>{item.category}</span><strong>{item.nameZh}</strong><small>{item.nameEn}</small></Button>)}</div></nav>
         <main>
           <div className="metric-definition-title"><div><span>{selected.category}</span><h3>{selected.nameZh}</h3><p>{selected.nameEn}</p></div><em>{selected.freshness}</em></div>
           <p className="metric-definition-description">{selected.description}</p>

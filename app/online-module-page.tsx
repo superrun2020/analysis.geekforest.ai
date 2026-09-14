@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { Button } from "antd";
 import { queryFunnel } from "./funnel-analysis-api";
 import type { OnlineProject } from "./project-options-api";
 import type { DialogKey } from "./action-dialog";
@@ -138,7 +139,7 @@ function dateRange(range: string) {
 }
 
 function State({ kind, message, retry }: { kind: "loading" | "empty" | "error"; message: string; retry?: () => void }) {
-  return <section className={`surface operational-state ${kind}`}><span>{kind === "loading" ? "同步" : kind === "empty" ? "空" : "!"}</span><div><h2>{kind === "loading" ? "正在读取线上数据" : kind === "empty" ? "当前筛选范围暂无数据" : "数据读取失败"}</h2><p>{message}</p>{retry && <button onClick={retry}>重新加载</button>}</div></section>;
+  return <section className={`surface operational-state ${kind}`}><span>{kind === "loading" ? "同步" : kind === "empty" ? "空" : "!"}</span><div><h2>{kind === "loading" ? "正在读取线上数据" : kind === "empty" ? "当前筛选范围暂无数据" : "数据读取失败"}</h2><p>{message}</p>{retry && <Button onClick={retry}>重新加载</Button>}</div></section>;
 }
 
 function Card({ label, value, note, tone }: { label: string; value: string; note?: string; tone?: string }) {
@@ -280,7 +281,7 @@ function VpnNodeDropoffBoard({ data, onOpenModule }: { data: AnyRow; onOpenModul
       const hasBadContract = rowCondition(row.from).includes("口径异常") || rowCondition(row.to).includes("口径异常");
       return <tr key={`${rowName(row.from)}-${rowName(row.to)}`} className={hasBadContract ? "row-warn" : row.lossRate !== null && row.lossRate > 30 ? "row-bad" : row.lossRate !== null && row.lossRate > 10 ? "row-warn" : ""}><td><strong>{rowName(row.from)} → {rowName(row.to)}</strong><small>{rowEventDetail(row.from)} → {rowEventDetail(row.to)}</small></td><td>{number(row.fromValue)}</td><td>{number(row.toValue)}</td><td>{number(row.loss)}</td><td>{row.lossRate === null ? "—" : percent(row.lossRate)}</td><td>{row.passRate === null ? "—" : percent(row.passRate)}</td><td>{row.advice}</td></tr>;
     })}</tbody></table></div> : <div className="inline-empty">当前接口没有返回 VPN 漏斗步骤，无法判断节点流失。</div>}
-    <div className="vpn-dropoff-guide"><div><strong>如果是功能节点流失</strong><span>看上表：权限、配置、节点选择、连接结果、出口可用性哪个掉得最多。</span></div><div><strong>如果是技术阶段失败</strong><span>看下方连接阶段：DNS、Socket、TLS、协议握手、ready 哪个阶段成功率低 / P95 高。</span></div><button onClick={() => onOpenModule("funnel")}>去单项目工作台看完整流失诊断</button></div>
+    <div className="vpn-dropoff-guide"><div><strong>如果是功能节点流失</strong><span>看上表：权限、配置、节点选择、连接结果、出口可用性哪个掉得最多。</span></div><div><strong>如果是技术阶段失败</strong><span>看下方连接阶段：DNS、Socket、TLS、协议握手、ready 哪个阶段成功率低 / P95 高。</span></div><Button onClick={() => onOpenModule("funnel")}>去单项目工作台看完整流失诊断</Button></div>
   </section>;
 }
 
@@ -631,7 +632,7 @@ function SourceContract({ module, data }: { module: ModuleKey; data: AnyRow }) {
 }
 
 function DiagnosticPlaybook({ module, onOpenModule, onOpenDialog }: { module: ModuleKey; onOpenModule: Props["onOpenModule"]; onOpenDialog: Props["onOpenDialog"] }) {
-  return <section className="surface module-playbook"><div className="surface-title"><div><h2>异常时怎么继续查</h2><p>这里是给运营/研发排查用的固定路径；指标数值仍以上方线上接口返回为准。</p></div></div><div className="table-wrap"><table><thead><tr><th>看到的问题</th><th>下一步看什么</th><th>关键字段 / 事件</th><th>建议动作</th></tr></thead><tbody>{playbooks[module].map((row) => <tr key={row.symptom}><td><strong>{row.symptom}</strong></td><td>{row.inspect}</td><td><code>{row.fields}</code></td><td>{row.action}</td></tr>)}</tbody></table></div><div className="module-playbook-actions"><button onClick={() => onOpenModule("funnel")}>进入漏斗工作台</button><button onClick={() => onOpenModule("tracking")}>去打点验收</button><button onClick={() => onOpenModule("tasks")}>查任务日志</button><button onClick={() => onOpenDialog(module === "admob" ? "admob-report" : module === "reconcile" ? "reconcile-run" : "diagnosis")}>创建处理任务</button></div></section>;
+  return <section className="surface module-playbook"><div className="surface-title"><div><h2>异常时怎么继续查</h2><p>这里是给运营/研发排查用的固定路径；指标数值仍以上方线上接口返回为准。</p></div></div><div className="table-wrap"><table><thead><tr><th>看到的问题</th><th>下一步看什么</th><th>关键字段 / 事件</th><th>建议动作</th></tr></thead><tbody>{playbooks[module].map((row) => <tr key={row.symptom}><td><strong>{row.symptom}</strong></td><td>{row.inspect}</td><td><code>{row.fields}</code></td><td>{row.action}</td></tr>)}</tbody></table></div><div className="module-playbook-actions"><Button onClick={() => onOpenModule("funnel")}>进入漏斗工作台</Button><Button onClick={() => onOpenModule("tracking")}>去打点验收</Button><Button onClick={() => onOpenModule("tasks")}>查任务日志</Button><Button onClick={() => onOpenDialog(module === "admob" ? "admob-report" : module === "reconcile" ? "reconcile-run" : "diagnosis")}>创建处理任务</Button></div></section>;
 }
 
 function MetricFormulaBoard({ module }: { module: ModuleKey }) {
@@ -716,6 +717,6 @@ export function OnlineModulePage(props: Props) {
     {props.module === "vpn" && <VpnPageDropoffBoard data={data} />}
     <DiagnosticLensBoard module={props.module} />
     <DiagnosticPlaybook module={props.module} onOpenModule={props.onOpenModule} onOpenDialog={props.onOpenDialog} />
-    <section className="two-column"><div className="surface"><div className="surface-title"><div><h2>指标明细</h2><p>运营可直接复制指标名给技术排查</p></div></div><MetricsTable rows={data.metrics} /></div><aside className="surface"><div className="surface-title"><div><h2>下一步动作</h2><p>每个按钮都跳到可用页面</p></div></div><div className="technical-actions"><button onClick={() => props.onOpenModule("funnel")}><strong>进入漏斗工作台</strong><span>查看核心漏斗 / 流失诊断 / 页面路径</span></button><button onClick={() => props.onOpenModule("tracking")}><strong>打点验收</strong><span>验证 P0 事件、参数和关联链</span></button><button onClick={() => props.onOpenModule("tasks")}><strong>任务与告警</strong><span>查看同步任务和接口错误</span></button><button onClick={() => props.onOpenDialog(props.module === "admob" ? "admob-report" : "diagnosis")}><strong>创建任务</strong><span>冻结当前筛选和证据范围</span></button></div></aside></section>
+    <section className="two-column"><div className="surface"><div className="surface-title"><div><h2>指标明细</h2><p>运营可直接复制指标名给技术排查</p></div></div><MetricsTable rows={data.metrics} /></div><aside className="surface"><div className="surface-title"><div><h2>下一步动作</h2><p>每个按钮都跳到可用页面</p></div></div><div className="technical-actions"><Button onClick={() => props.onOpenModule("funnel")}><strong>进入漏斗工作台</strong><span>查看核心漏斗 / 流失诊断 / 页面路径</span></Button><Button onClick={() => props.onOpenModule("tracking")}><strong>打点验收</strong><span>验证 P0 事件、参数和关联链</span></Button><Button onClick={() => props.onOpenModule("tasks")}><strong>任务与告警</strong><span>查看同步任务和接口错误</span></Button><Button onClick={() => props.onOpenDialog(props.module === "admob" ? "admob-report" : "diagnosis")}><strong>创建任务</strong><span>冻结当前筛选和证据范围</span></Button></div></aside></section>
   </div>;
 }

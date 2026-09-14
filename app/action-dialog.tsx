@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
+import { Button } from "antd";
 import { defaultSelectedEventIds, trackingConfigs, trackingEventCatalog, type TrackingConfigRecord } from "./tracking-config-data";
 
 export type DialogKey =
@@ -399,17 +400,17 @@ export function ActionDialog({ dialog, project, configs = trackingConfigs, editi
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
       <section className={`modal-panel modal-panel-v5 ${dialog === "config-version" ? "modal-panel-config-wizard" : ""}`} role="dialog" aria-modal="true" aria-labelledby="action-dialog-title">
-        <header><div><div className="dialog-version">V13 · 多项目数据接入与验收</div><h2 id="action-dialog-title">{phase === "success" ? `${result?.title ?? meta.title}成功` : dialog === "config-version" ? isEditingDraft ? "编辑打点配置草稿" : isCopyingPublished ? "复制为新配置版本" : meta.title : meta.title}</h2><p>{phase === "success" ? "系统已返回业务ID，后续状态可在对应任务或配置页面追踪。" : meta.description}</p></div><button type="button" aria-label="关闭弹窗" onClick={onClose}>×</button></header>
+        <header><div><div className="dialog-version">V13 · 多项目数据接入与验收</div><h2 id="action-dialog-title">{phase === "success" ? `${result?.title ?? meta.title}成功` : dialog === "config-version" ? isEditingDraft ? "编辑打点配置草稿" : isCopyingPublished ? "复制为新配置版本" : meta.title : meta.title}</h2><p>{phase === "success" ? "系统已返回业务ID，后续状态可在对应任务或配置页面追踪。" : meta.description}</p></div><Button htmlType="button" aria-label="关闭弹窗" onClick={onClose}>×</Button></header>
 
         {phase === "success" && result ? (
           <div className="dialog-result">
             <div className="result-mark">✓</div>
             <h3>{result.message}</h3>
             <p>请求已通过前端校验并进入系统处理流程。</p>
-            <div className="result-id"><span>{result.idLabel}</span><strong>{result.id}</strong><button type="button" onClick={() => navigator.clipboard?.writeText(result.id)}>复制</button></div>
+            <div className="result-id"><span>{result.idLabel}</span><strong>{result.id}</strong><Button htmlType="button" onClick={() => navigator.clipboard?.writeText(result.id)}>复制</Button></div>
             <div className="result-status-grid"><div><span>当前状态</span><strong>{result.idLabel === "export_job_id" ? "QUEUED" : "CREATED"}</strong></div><div><span>接口</span><strong>{result.endpoint}</strong></div><div><span>提交人</span><strong>Oliver</strong></div><div><span>审计记录</span><strong>已生成</strong></div></div>
             <div className="result-summary"><strong>已提交字段</strong><div>{Object.entries(result.payload).slice(0, 8).map(([key, value]) => <span key={key}><em>{key}</em><b>{Array.isArray(value) ? value.join(", ") : value || "—"}</b></span>)}</div></div>
-            <footer><button type="button" className="secondary-button" onClick={onClose}>关闭</button><button type="button" className="primary-button" onClick={onClose}>进入详情页</button></footer>
+            <footer><Button htmlType="button" className="secondary-button" onClick={onClose}>关闭</Button><Button htmlType="button" className="primary-button" onClick={onClose}>进入详情页</Button></footer>
           </div>
         ) : (
           <form ref={formRef} onSubmit={submit} noValidate={false}>
@@ -418,7 +419,7 @@ export function ActionDialog({ dialog, project, configs = trackingConfigs, editi
 
               {dialog === "config-version" && <div className="config-wizard-steps" aria-label="打点配置创建步骤">{[
                 [1, "基本信息"], [2, "选择打点"], [3, "规则确认"], [4, "校验发布"],
-              ].map(([step, label]) => <button type="button" key={step} className={configStep === step ? "active" : configStep > Number(step) ? "done" : ""} onClick={() => setConfigStep(Number(step))}><span>{configStep > Number(step) ? "✓" : step}</span><strong>{label}</strong></button>)}</div>}
+              ].map(([step, label]) => <Button htmlType="button" key={step} className={configStep === step ? "active" : configStep > Number(step) ? "done" : ""} onClick={() => setConfigStep(Number(step))}><span>{configStep > Number(step) ? "✓" : step}</span><strong>{label}</strong></Button>)}</div>}
 
               {dialog === "diagnosis" && <div className="modal-form-grid">
                 <Field label="项目" required help="提交后不可更换项目"><select name="project_code" defaultValue={project} required><option>{project}</option><option>CLEAN-MAX-03</option><option>AIVORA-LAUNCHER</option></select></Field>
@@ -508,8 +509,8 @@ export function ActionDialog({ dialog, project, configs = trackingConfigs, editi
                 </div>
                 <div className={`config-event-picker config-step-panel ${configStep === 2 ? "" : "config-step-hidden"}`}>
                   <div className="picker-summary"><div><span>全量事件库</span><strong>{trackingEventCatalog.length}</strong></div><div className="selected"><span>本配置已选</span><strong>{selectedConfigEventIds.length}</strong></div><div><span>P0</span><strong>{selectedPriorityCounts.P0}</strong></div><div><span>P1</span><strong>{selectedPriorityCounts.P1}</strong></div><div><span>P2</span><strong>{selectedPriorityCounts.P2}</strong></div></div>
-                  <div className="capability-selector" aria-label="按分类选择事件">{capabilityGroups.map((group) => <button type="button" key={group.capability} className={`capability-card ${group.allSelected ? "selected" : group.partial ? "partial" : ""}`} onClick={() => toggleCapability(group.capability)} aria-pressed={group.allSelected}><span className="capability-check" aria-hidden="true">{group.allSelected ? "✓" : group.partial ? "−" : ""}</span><strong>{group.capability}</strong><small>{group.selectedCount}/{group.totalCount}</small><em>{group.allSelected ? "已全选" : group.partial ? "部分选择" : "未选择"}</em></button>)}</div>
-                  <div className="picker-tools"><input value={configKeyword} onChange={(event) => setConfigKeyword(event.target.value)} placeholder="搜索事件名、阶段或Provider" /><select value={configCapability} onChange={(event) => setConfigCapability(event.target.value)}><option value="all">全部能力包</option>{Array.from(new Set(trackingEventCatalog.map((event) => event.capability))).map((capability) => <option key={capability}>{capability}</option>)}</select><div className="dimension-tabs"><button type="button" className={configSelectionView === "all" ? "active" : ""} onClick={() => setConfigSelectionView("all")}>全部</button><button type="button" className={configSelectionView === "selected" ? "active" : ""} onClick={() => setConfigSelectionView("selected")}>只看已选</button><button type="button" className={configSelectionView === "warning" ? "active" : ""} onClick={() => setConfigSelectionView("warning")}>只看冲突</button></div></div>
+                  <div className="capability-selector" aria-label="按分类选择事件">{capabilityGroups.map((group) => <Button htmlType="button" key={group.capability} className={`capability-card ${group.allSelected ? "selected" : group.partial ? "partial" : ""}`} onClick={() => toggleCapability(group.capability)} aria-pressed={group.allSelected}><span className="capability-check" aria-hidden="true">{group.allSelected ? "✓" : group.partial ? "−" : ""}</span><strong>{group.capability}</strong><small>{group.selectedCount}/{group.totalCount}</small><em>{group.allSelected ? "已全选" : group.partial ? "部分选择" : "未选择"}</em></Button>)}</div>
+                  <div className="picker-tools"><input value={configKeyword} onChange={(event) => setConfigKeyword(event.target.value)} placeholder="搜索事件名、阶段或Provider" /><select value={configCapability} onChange={(event) => setConfigCapability(event.target.value)}><option value="all">全部能力包</option>{Array.from(new Set(trackingEventCatalog.map((event) => event.capability))).map((capability) => <option key={capability}>{capability}</option>)}</select><div className="dimension-tabs"><Button htmlType="button" className={configSelectionView === "all" ? "active" : ""} onClick={() => setConfigSelectionView("all")}>全部</Button><Button htmlType="button" className={configSelectionView === "selected" ? "active" : ""} onClick={() => setConfigSelectionView("selected")}>只看已选</Button><Button htmlType="button" className={configSelectionView === "warning" ? "active" : ""} onClick={() => setConfigSelectionView("warning")}>只看冲突</Button></div></div>
                   <div className="picker-bulk"><label><input type="checkbox" checked={allVisibleSelected} onChange={toggleVisibleConfigEvents} /> 全选当前筛选结果（{visibleConfigEvents.length}）</label><span>当前显示第 1–{Math.min(20, visibleConfigEvents.length)} 条，共 {visibleConfigEvents.length} 条</span></div>
                   <div className="table-wrap picker-table"><table><thead><tr><th>选择</th><th>事件名</th><th>阶段 / 能力包</th><th>级别</th><th>参数</th><th>场景</th><th>Provider</th><th>状态</th></tr></thead><tbody>{visibleConfigEventPage.map((event) => <tr key={event.id} className={selectedConfigEventIds.includes(event.id) ? "row-selected" : ""}><td><input type="checkbox" checked={selectedConfigEventIds.includes(event.id)} onChange={() => toggleConfigEvent(event.id)} aria-label={`选择${event.name}`} /></td><td><strong>{event.name}</strong><small>{event.id}</small></td><td><strong>{event.stage}</strong><small>{event.capability}</small></td><td><span className={`badge badge-${event.priority === "P0" ? "bad" : event.priority === "P1" ? "warn" : "neutral"}`}>{event.priority}</span></td><td>{event.parameterCount}</td><td>{event.scene}</td><td>{event.provider}</td><td><span className={`badge badge-${event.state === "READY" ? "good" : "warn"}`}>{event.state === "READY" ? "可用" : "待补配置"}</span></td></tr>)}</tbody></table></div>
                 </div>
@@ -594,10 +595,10 @@ export function ActionDialog({ dialog, project, configs = trackingConfigs, editi
               </div>}
             </div>
             <footer>
-              <button type="button" className="secondary-button" onClick={onClose}>取消</button>
-              {dialog === "config-version" && <button type="button" className="secondary-button" onClick={saveConfigDraft}>{phase === "submitting" ? "正在保存…" : isEditingDraft ? "保存草稿修改" : "保存草稿"}</button>}
-              {dialog === "config-version" && configStep > 1 && <button type="button" className="secondary-button" onClick={() => setConfigStep((step) => Math.max(1, step - 1))}>上一步</button>}
-              {dialog === "config-version" && configStep < 4 ? <button type="button" className="primary-button" onClick={nextConfigStep}>{configStep === 1 ? "下一步：选择打点" : configStep === 2 ? `下一步：确认 ${selectedConfigEventIds.length} 个事件` : "下一步：校验发布"}</button> : <button type="submit" className="primary-button" disabled={phase === "submitting"}>{phase === "submitting" ? "正在提交…" : meta.submit}</button>}
+              <Button htmlType="button" className="secondary-button" onClick={onClose}>取消</Button>
+              {dialog === "config-version" && <Button htmlType="button" className="secondary-button" onClick={saveConfigDraft}>{phase === "submitting" ? "正在保存…" : isEditingDraft ? "保存草稿修改" : "保存草稿"}</Button>}
+              {dialog === "config-version" && configStep > 1 && <Button htmlType="button" className="secondary-button" onClick={() => setConfigStep((step) => Math.max(1, step - 1))}>上一步</Button>}
+              {dialog === "config-version" && configStep < 4 ? <Button htmlType="button" className="primary-button" onClick={nextConfigStep}>{configStep === 1 ? "下一步：选择打点" : configStep === 2 ? `下一步：确认 ${selectedConfigEventIds.length} 个事件` : "下一步：校验发布"}</Button> : <Button htmlType="submit" className="primary-button" disabled={phase === "submitting"}>{phase === "submitting" ? "正在提交…" : meta.submit}</Button>}
             </footer>
           </form>
         )}

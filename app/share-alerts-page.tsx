@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Button } from "antd";
 import { trackingApiBaseUrl } from "./api-base-url";
 import { getCompanyAuthToken } from "./company-auth";
 
@@ -104,13 +105,13 @@ export function ShareAlertsPage({ projectCode, notify }: { projectCode: string; 
       <div className="share-alert-summary">
         <div><span>待处理</span><strong>{data?.summary?.open ?? 0}</strong></div>
         <div><span>高危</span><strong>{data?.summary?.high ?? 0}</strong></div>
-        <button className="primary-button" onClick={() => void load()}>{loading ? "刷新中…" : "刷新告警"}</button>
+        <Button className="primary-button" onClick={() => void load()}>{loading ? "刷新中…" : "刷新告警"}</Button>
       </div>
     </section>
     <section className="surface">
       <div className="surface-title">
         <div><h2>分享安全事件</h2><p>出现异常时优先终止链接，然后让分享人重新生成。</p></div>
-        <div className="dimension-tabs"><button className={status === "OPEN" ? "active" : ""} onClick={() => setStatus("OPEN")}>待处理</button><button className={status === "ALL" ? "active" : ""} onClick={() => setStatus("ALL")}>全部</button></div>
+        <div className="dimension-tabs"><Button className={status === "OPEN" ? "active" : ""} onClick={() => setStatus("OPEN")}>待处理</Button><Button className={status === "ALL" ? "active" : ""} onClick={() => setStatus("ALL")}>全部</Button></div>
       </div>
       {error && <div className="firebase-log-state warn"><strong>异常报警接口不可用</strong><p>{error}</p></div>}
       <div className="table-wrap">
@@ -123,7 +124,7 @@ export function ShareAlertsPage({ projectCode, notify }: { projectCode: string; 
             <td><div className="share-alert-evidence"><span>邮箱：{item.evidence?.viewerEmail || "—"}</span><span>IP：{item.evidence?.ip || "—"}</span><span>原因：{(item.evidence?.riskReasons ?? []).map(riskReasonLabel).join("、") || "—"}</span></div></td>
             <td>{item.emailSent ? "已发送" : item.emailError ? `失败：${item.emailError}` : "待发送/未配置"}</td>
             <td>{item.status === "OPEN" ? "待处理" : "已处理"} · 链接{item.shareStatus === "REVOKED" ? "已终止" : "可访问"}</td>
-            <td><button className="danger-link-button" disabled={item.shareStatus === "REVOKED"} onClick={() => void revoke(item.shareId)}>终止链接</button></td>
+            <td><Button className="danger-link-button" disabled={item.shareStatus === "REVOKED"} onClick={() => void revoke(item.shareId)}>终止链接</Button></td>
           </tr>) : <tr><td colSpan={7}><div className="empty-table-state"><strong>暂无异常报警</strong><span>当前筛选下没有发现项目报告分享泄漏风险。</span></div></td></tr>}</tbody>
         </table>
       </div>

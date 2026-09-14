@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { Button } from "antd";
 import { ActionDialog, type DialogKey, type DialogResult } from "./action-dialog";
 import { FirebaseConfiguration } from "./firebase-configuration";
 import { trackingConfigs, trackingEventCatalog, trackingConfigDataSource, type TrackingConfigRecord } from "./tracking-config-data";
@@ -24,7 +25,7 @@ import { DomainReportPage } from "./domain-report";
 import { trackingApiBaseUrl } from "./api-base-url";
 import { createCodexQueryLinks } from "./codex-query-links-api";
 
-const APP_VERSION = "V133";
+const APP_VERSION = "V134";
 const VERSION_MANIFEST_PATH = "/version.json";
 
 type PageKey =
@@ -791,7 +792,7 @@ function Segmented({ items, active, onChange, label }: { items: Array<{ key: str
   return (
     <div className="segmented" role="tablist" aria-label={label}>
       {items.map((item) => (
-        <button type="button" role="tab" aria-selected={active === item.key} key={item.key} className={active === item.key ? "selected" : ""} onClick={() => onChange(item.key)}>{item.label}</button>
+        <Button htmlType="button" role="tab" aria-selected={active === item.key} key={item.key} className={active === item.key ? "selected" : ""} onClick={() => onChange(item.key)}>{item.label}</Button>
       ))}
     </div>
   );
@@ -940,7 +941,7 @@ function ModulePage({ module, project, projectMeta, onlineProjects, range, platf
   if (["global", "project", "vpn", "admob", "firebase", "reconcile"].includes(module)) return <OnlineModulePage module={module as "global" | "project" | "vpn" | "admob" | "firebase" | "reconcile"} project={project} projectMeta={projectMeta} range={range} platform={platform} country={country} appVersion={appVersion} refreshKey={refreshKey} onOpenModule={openModule} onOpenDialog={openDialog} />;
   if (module === "tracking" || module === "config") return (
     <div className="page-stack">
-      <section className="config-head surface"><div><h2>打点测试配置</h2><p>只保留测试验收需要的操作：选择产品、选择应测配置、查询线上收到/未收到事件、定位修复建议。</p></div><div><button className="primary-button" onClick={() => openConfigEditor(null)}>＋ 新建打点配置</button></div></section>
+      <section className="config-head surface"><div><h2>打点测试配置</h2><p>只保留测试验收需要的操作：选择产品、选择应测配置、查询线上收到/未收到事件、定位修复建议。</p></div><div><Button className="primary-button" onClick={() => openConfigEditor(null)}>＋ 新建打点配置</Button></div></section>
       <TrackingAcceptanceCenter project={project} projects={onlineProjects.map((item) => ({ code: item.projectCode, name: item.appName, category: "线上项目", appIdentifier: item.appIdentifier }))} configs={configs} platform={platform} appVersion={appVersion} onProjectChange={changeTrackingProduct} openConfig={() => openConfigEditor(null)} notify={notify} />
     </div>
   );
@@ -948,11 +949,11 @@ function ModulePage({ module, project, projectMeta, onlineProjects, range, platf
   return (
     <div className="page-stack">
       <section className="metric-grid six"><Metric label="运行日志" value={String(syncRuns.length)} note={taskLogLoading ? "正在读取" : "Firebase同步任务"} /><Metric label="运行中" value={String(runningSyncRuns)} note="QUEUED/RUNNING/VERIFYING" tone={runningSyncRuns ? "good" : undefined} /><Metric label="失败运行" value={String(failedSyncRuns)} note="需排查或重试" tone={failedSyncRuns ? "bad" : undefined} /><Metric label="错误日志" value={String(failedCheckLogs)} note="Firebase预检失败" tone={failedCheckLogs ? "bad" : "good"} /><Metric label="检查记录" value={String(checkLogs.length)} note="服务账号/Firebase/BigQuery" /><Metric label="最近运行" value={formatLogTime(latestRunTime).slice(11) || "—"} note={latestRunTime ? formatLogTime(latestRunTime).slice(0, 10) : "等待同步"} /></section>
-      <section className="surface firebase-task-console"><div className="surface-title"><div><h2>Firebase 数据任务日志</h2><p>统一展示 Firebase 资源检查、同步运行和错误日志，数据来自 ADB 控制表。</p></div><div className="dimension-tabs"><button className={taskFilter==="all"?"active":""} onClick={()=>setTaskFilter("all")}>全部</button><button className={taskFilter==="failed"?"active":""} onClick={()=>setTaskFilter("failed")}>失败</button><button className={taskFilter==="running"?"active":""} onClick={()=>setTaskFilter("running")}>运行中</button></div></div><div className="firebase-task-toolbar"><input value={taskKeyword} onChange={(event)=>setTaskKeyword(event.target.value)} onKeyDown={(event)=>{ if (event.key === "Enter") void loadFirebaseTaskLogs(); }} placeholder="搜索项目、包名、Firebase Project/App、错误信息" /><button className="secondary-button" onClick={() => { setTaskKeyword(""); setTaskFilter("all"); }}>重置</button><button className="primary-button" onClick={() => void loadFirebaseTaskLogs()}>{taskLogLoading ? "刷新中..." : "刷新日志"}</button></div>{taskLogError && <div className="firebase-log-state warn"><strong>日志接口待接入</strong><p>{taskLogError}。请在部署环境变量配置 NEXT_PUBLIC_TRACKING_API_BASE_URL 和 NEXT_PUBLIC_TRACKING_API_SECURE_PATH，并确认后端已合并日志接口。</p></div>}</section>
+      <section className="surface firebase-task-console"><div className="surface-title"><div><h2>Firebase 数据任务日志</h2><p>统一展示 Firebase 资源检查、同步运行和错误日志，数据来自 ADB 控制表。</p></div><div className="dimension-tabs"><Button className={taskFilter==="all"?"active":""} onClick={()=>setTaskFilter("all")}>全部</Button><Button className={taskFilter==="failed"?"active":""} onClick={()=>setTaskFilter("failed")}>失败</Button><Button className={taskFilter==="running"?"active":""} onClick={()=>setTaskFilter("running")}>运行中</Button></div></div><div className="firebase-task-toolbar"><input value={taskKeyword} onChange={(event)=>setTaskKeyword(event.target.value)} onKeyDown={(event)=>{ if (event.key === "Enter") void loadFirebaseTaskLogs(); }} placeholder="搜索项目、包名、Firebase Project/App、错误信息" /><Button className="secondary-button" onClick={() => { setTaskKeyword(""); setTaskFilter("all"); }}>重置</Button><Button className="primary-button" onClick={() => void loadFirebaseTaskLogs()}>{taskLogLoading ? "刷新中..." : "刷新日志"}</Button></div>{taskLogError && <div className="firebase-log-state warn"><strong>日志接口待接入</strong><p>{taskLogError}。请在部署环境变量配置 NEXT_PUBLIC_TRACKING_API_BASE_URL 和 NEXT_PUBLIC_TRACKING_API_SECURE_PATH，并确认后端已合并日志接口。</p></div>}</section>
       <section className="surface task-interface-map"><div className="surface-title"><div><h2>任务页接入边界</h2><p>没有真实接口时不展示模拟任务；只展示接口状态、应接表和排查入口。</p></div><Badge tone={taskLogError ? "warn" : "good"}>{taskLogError ? "待配置" : "已连接"}</Badge></div><div>{[["同步运行","/firebase-integration/sync-runs","firebase_sync_runs","看BigQuery读取、OSS归档、ADB写入水位"],["资源检查","/firebase-integration/check-logs","firebase_api_check_logs","看服务账号、Firebase App、Dataset、events表权限"],["打点测试","/jkcl-funnel/tracking-event-coverage","dws_app_event_quality_daily + dwd_app_tracking_event_v18","看配置快照里应测事件是否收到、字段是否完整"],["告警规则","/alert-rules","metric_alert_rules","看阈值、冷却、通知和恢复状态"]].map((row)=><article key={row[0]}><span>{row[0]}</span><code>{row[1]}</code><strong>{row[2]}</strong><small>{row[3]}</small></article>)}</div></section>
       <section className="surface"><div className="surface-title"><div><h2>运行日志</h2><p>对应 ADB 表 <code>firebase_sync_runs</code>，用于查看 Firebase 绑定同步任务的水位、处理量和失败原因。</p></div><Badge tone={failedSyncRuns ? "bad" : "blue"}>{visibleSyncRuns.length} 条</Badge></div><div className="table-wrap"><table><thead><tr><th>任务 / 运行ID</th><th>项目</th><th>Firebase资源</th><th>时间范围</th><th>开始 / 结束</th><th>处理量</th><th>耗时</th><th>状态</th><th>错误</th></tr></thead><tbody>{visibleSyncRuns.length ? visibleSyncRuns.map((row) => <tr key={row.runId} className={isFailedStatus(row.status) ? "row-warn" : ""}><td><strong>{row.runType || "SYNC"}</strong><small>Run #{row.runId}{row.externalJobId ? ` · ${row.externalJobId}` : ""}</small></td><td><strong>{logProjectLabel(row)}</strong><small>{row.projectName || row.packageName || row.connectionName || "—"}</small></td><td><strong>{row.firebaseProjectId || "—"}</strong><small>{row.firebaseAppId || row.firebaseAppIdentifier || "—"}</small></td><td><strong>{formatLogTime(row.rangeStart)}</strong><small>{formatLogTime(row.rangeEnd)}</small></td><td><strong>{formatLogTime(row.startedAt)}</strong><small>{formatLogTime(row.finishedAt)}</small></td><td><strong>{formatLogRows(row.adbRows)} ADB</strong><small>{formatLogRows(row.sourceRows)} source</small></td><td>{formatLogDuration(row.durationMs)}</td><td><Badge tone={statusTone(row.status)}>{statusLabel(row.status)}</Badge></td><td>{row.errorMessage || "—"}</td></tr>) : <tr><td colSpan={9}><div className="empty-table-state"><strong>{taskLogLoading ? "正在读取运行日志" : "暂无运行日志"}</strong><span>{taskLogError ? "后端接入后会显示真实 Firebase 同步运行记录。" : "当前筛选条件下没有记录。"}</span></div></td></tr>}</tbody></table></div></section>
       <section className="surface"><div className="surface-title"><div><h2>错误日志 / 接口检查</h2><p>对应 ADB 表 <code>firebase_api_check_logs</code>，覆盖服务账号、Firebase Project/App、BigQuery Dataset 和 events 表检查。</p></div><Badge tone={failedCheckLogs ? "bad" : "good"}>{failedCheckLogs} 个失败</Badge></div><div className="table-wrap"><table><thead><tr><th>检查项 / 日志ID</th><th>项目</th><th>Firebase资源</th><th>检查时间</th><th>耗时</th><th>结果</th><th>错误码</th><th>详情</th></tr></thead><tbody>{visibleCheckLogs.length ? visibleCheckLogs.map((row) => <tr key={row.logId} className={isFailedStatus(row.status) ? "row-warn" : ""}><td><strong>{row.checkType || "CHECK"}</strong><small>Log #{row.logId}</small></td><td><strong>{logProjectLabel(row)}</strong><small>{row.projectName || row.packageName || row.connectionName || "—"}</small></td><td><strong>{row.firebaseProjectId || "—"}</strong><small>{row.firebaseAppId || row.firebaseAppIdentifier || "—"}</small></td><td>{formatLogTime(row.checkedAt || row.createdAt)}</td><td>{formatLogDuration(row.durationMs)}</td><td><Badge tone={statusTone(row.status)}>{statusLabel(row.status)}</Badge></td><td>{row.errorCode || "—"}</td><td>{row.message || "—"}</td></tr>) : <tr><td colSpan={8}><div className="empty-table-state"><strong>{taskLogLoading ? "正在读取错误日志" : "暂无错误日志"}</strong><span>{taskLogError ? "后端接入后会显示 Firebase 绑定预检错误和检查详情。" : "当前筛选条件下没有失败或检查记录。"}</span></div></td></tr>}</tbody></table></div></section>
-      <section className="two-column wide-left"><div className="surface"><div className="surface-title"><div><h2>处理建议</h2><p>根据 Firebase 数据任务日志快速定位负责人和下一步动作。</p></div><button className="text-button" onClick={() => openModule("firebase")}>去 Firebase 数据源</button></div><div className="alert-list">{[["P0","SERVICE_ACCOUNT / OAuth 失败","检查 secret:// 引用、服务账号邮箱和 JSON 文件权限","数据平台"],["P0","BIGQUERY_DATASET 或 EVENTS_TABLES 失败","确认 Firebase BigQuery Export 已开启且 Dataset 区域一致","数据平台"],["P1","FIREBASE_APP 包名不一致","回到 Firebase 数据源设置核对 App ID 与 project_projects.package_name","产品/客户端"],["P1","同步运行失败或处理量为 0","查看 run error_message，修复后由任务系统重试","数据平台"]].map(row => <button key={row[1]} onClick={() => notify(`${row[1]}：${row[2]}`)}><Badge tone={row[0]==="P0"?"bad":"warn"}>{row[0]}</Badge><div><strong>{row[1]}</strong><p>{row[2]}</p><small>负责人：{row[3]}</small></div><span>→</span></button>)}</div></div><aside className="surface"><div className="surface-title"><div><h2>告警通知</h2><p>当前值班策略</p></div></div><div className="notification-rules"><div><span>P0</span><strong>资源校验失败</strong><p>服务账号、Firebase App、BigQuery 不可读立即通知</p></div><div><span>P1</span><strong>同步任务失败</strong><p>连续失败或超过 SLA 通知数据平台</p></div><div><span>P2</span><strong>NO_DATA</strong><p>每日汇总未发现 events 表或数据水位为空</p></div></div><button className="primary-button full" onClick={() => openDialog("alert-rule")}>＋ 新建告警规则</button></aside></section>
+      <section className="two-column wide-left"><div className="surface"><div className="surface-title"><div><h2>处理建议</h2><p>根据 Firebase 数据任务日志快速定位负责人和下一步动作。</p></div><Button className="text-button" onClick={() => openModule("firebase")}>去 Firebase 数据源</Button></div><div className="alert-list">{[["P0","SERVICE_ACCOUNT / OAuth 失败","检查 secret:// 引用、服务账号邮箱和 JSON 文件权限","数据平台"],["P0","BIGQUERY_DATASET 或 EVENTS_TABLES 失败","确认 Firebase BigQuery Export 已开启且 Dataset 区域一致","数据平台"],["P1","FIREBASE_APP 包名不一致","回到 Firebase 数据源设置核对 App ID 与 project_projects.package_name","产品/客户端"],["P1","同步运行失败或处理量为 0","查看 run error_message，修复后由任务系统重试","数据平台"]].map(row => <Button key={row[1]} onClick={() => notify(`${row[1]}：${row[2]}`)}><Badge tone={row[0]==="P0"?"bad":"warn"}>{row[0]}</Badge><div><strong>{row[1]}</strong><p>{row[2]}</p><small>负责人：{row[3]}</small></div><span>→</span></Button>)}</div></div><aside className="surface"><div className="surface-title"><div><h2>告警通知</h2><p>当前值班策略</p></div></div><div className="notification-rules"><div><span>P0</span><strong>资源校验失败</strong><p>服务账号、Firebase App、BigQuery 不可读立即通知</p></div><div><span>P1</span><strong>同步任务失败</strong><p>连续失败或超过 SLA 通知数据平台</p></div><div><span>P2</span><strong>NO_DATA</strong><p>每日汇总未发现 events 表或数据水位为空</p></div></div><Button className="primary-button full" onClick={() => openDialog("alert-rule")}>＋ 新建告警规则</Button></aside></section>
     </div>
   );
 }
@@ -984,7 +985,7 @@ function LegacyActionDialog({ dialog, project, onClose, onSubmit }: { dialog: Ex
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
       <section className="modal-panel" role="dialog" aria-modal="true" aria-labelledby="action-dialog-title">
-        <header><div><h2 id="action-dialog-title">{current.title}</h2><p>{current.description}</p></div><button type="button" aria-label="关闭弹窗" onClick={onClose}>×</button></header>
+        <header><div><h2 id="action-dialog-title">{current.title}</h2><p>{current.description}</p></div><Button htmlType="button" aria-label="关闭弹窗" onClick={onClose}>×</Button></header>
         <form onSubmit={submit}>
           <div className="modal-body">
             {dialog === "diagnosis" && <div className="modal-form-grid"><label>项目<select defaultValue={project}><option>{project}</option><option>CLEAN-MAX-03</option><option>AIVORA-LAUNCHER</option></select></label><label>优先级<select><option>P0</option><option>P1</option><option>P2</option></select></label><label className="span-2">任务名称<input defaultValue="Opportunity 覆盖率异常诊断" /></label><label>异常指标<select><option>Opportunity覆盖率</option><option>广告浏览者比例</option><option>收入</option></select></label><label>负责人<select><option>Oliver / 客户端增长组</option><option>数据平台</option><option>广告变现组</option></select></label><label className="span-2">诊断范围<input defaultValue="伊朗 · Android 1.8.0 · Eligible → Opportunity" /></label><label className="span-2">问题说明<textarea defaultValue="广告浏览者比例下降，但AdMob匹配率与展示率正常，优先排查请求前用户覆盖。" /></label></div>}
@@ -998,7 +999,7 @@ function LegacyActionDialog({ dialog, project, onClose, onSubmit }: { dialog: Ex
             {dialog === "publish-approval" && <div className="modal-form-grid"><label>发布版本<select><option>V1.8 草稿</option><option>V1.7 当前版本</option></select></label><label>计划发布时间<input type="datetime-local" defaultValue="2026-08-18T10:00" /></label><label>产品审批人<select><option>Oliver / 数据产品</option><option>产品平台负责人</option></select></label><label>技术审批人<select><option>客户端架构组</option><option>数据平台负责人</option></select></label><label className="span-2">发布说明<textarea defaultValue="完成事件、参数、Provider 与验收门禁检查后发布。" /></label><div className="modal-warning span-2"><strong>发布前仍有 1 项提醒</strong><p>订阅 Provider 有 1 个 P1 未配置。可提交审批，但审批人需明确接受该风险。</p></div></div>}
             {dialog === "alert-rule" && <div className="modal-form-grid"><label className="span-2">规则名称<input defaultValue="广告浏览者比例低于目标" required /></label><label>监控项目<select><option>{project}</option><option>全部VPN项目</option><option>全部项目</option></select></label><label>监控指标<select><option>广告浏览者比例</option><option>Opportunity覆盖率</option><option>DAU对账差异</option><option>任务延迟</option></select></label><label>判断条件<select><option>低于</option><option>高于</option><option>环比下降超过</option></select></label><label>阈值<input defaultValue="25%" /></label><label>持续时间<select><option>15分钟</option><option>30分钟</option><option>1小时</option></select></label><label>告警等级<select><option>P0</option><option>P1</option><option>P2</option></select></label><label className="span-2">通知范围<div className="checkbox-grid"><span><input type="checkbox" defaultChecked /> 飞书项目群</span><span><input type="checkbox" defaultChecked /> 项目负责人</span><span><input type="checkbox" /> 数据值班人</span><span><input type="checkbox" /> 邮件</span></div></label></div>}
           </div>
-          <footer><button type="button" className="secondary-button" onClick={onClose}>取消</button><button type="submit" className="primary-button">{current.submit}</button></footer>
+          <footer><Button htmlType="button" className="secondary-button" onClick={onClose}>取消</Button><Button htmlType="submit" className="primary-button">{current.submit}</Button></footer>
         </form>
       </section>
     </div>
@@ -1656,25 +1657,25 @@ export default function Home() {
     <MetricInspectContext.Provider value={openMetricDefinition}>
     <div className={`app-shell ${embedded ? "embedded" : ""}`}>
       <aside className="sidebar">
-        <div className="brand"><span className="brand-mark">GF</span><span><strong>GeekForest 产品大脑</strong><small className="version-line"><span>质量分析中心 · {APP_VERSION}</span><button type="button" onClick={checkLatestVersion} disabled={checkingLatestVersion} title="检测并打开线上最新版本">{checkingLatestVersion ? "检测中" : "刷新"}</button></small></span></div>
+        <div className="brand"><span className="brand-mark">GF</span><span><strong>GeekForest 产品大脑</strong><small className="version-line"><span>质量分析中心 · {APP_VERSION}</span><Button htmlType="button" onClick={checkLatestVersion} disabled={checkingLatestVersion} title="检测并打开线上最新版本">{checkingLatestVersion ? "检测中" : "刷新"}</Button></small></span></div>
         <div className="nav-group-label">经营分析</div>
-        {moduleMenus.filter((item) => item.group === "经营分析").map((item) => <button key={item.key} className={`main-nav-item ${module === item.key ? "active" : ""}`} onClick={() => openModule(item.key)}><span>{item.index}</span>{item.label}</button>)}
+        {moduleMenus.filter((item) => item.group === "经营分析").map((item) => <Button key={item.key} className={`main-nav-item ${module === item.key ? "active" : ""}`} onClick={() => openModule(item.key)}><span>{item.index}</span>{item.label}</Button>)}
         <div className="nav-group-label">质量治理</div>
-        {moduleMenus.filter((item) => item.group === "质量治理").map((item) => <button key={item.key} className={`main-nav-item ${module === item.key ? "active" : ""}`} onClick={() => openModule(item.key)}><span>{item.index}</span>{item.label}</button>)}
+        {moduleMenus.filter((item) => item.group === "质量治理").map((item) => <Button key={item.key} className={`main-nav-item ${module === item.key ? "active" : ""}`} onClick={() => openModule(item.key)}><span>{item.index}</span>{item.label}</Button>)}
         <div className="sidebar-foot"><span className="status-dot" />线上数据接入<small>经营分析走线上接口；治理菜单按真实接口状态展示</small></div>
       </aside>
 
       <div className="workspace">
         <header className="topbar">
           <div className="breadcrumbs">{moduleMenus.find((item) => item.key === module)?.group} / {currentModule.title}{configWorkspaceOpen ? <> / <strong>{editingConfig ? "编辑打点配置" : "新建打点配置"}</strong></> : module === "funnel" && <> / <strong>{currentPage.label}</strong></>}</div>
-          <div className="topbar-actions"><div className="global-search">搜索项目、事件、问题单</div><button className="share-report-button" disabled={!["funnel", "vpn"].includes(module) || !project || creatingCodexLinks} onClick={() => void copyCodexQueryLinks()} title="生成广告打点/VPN打点 JSON 查询链接，发给 Codex 后可直接查线上数据">{creatingCodexLinks ? "生成中…" : "复制Codex查询"}</button><button className="share-report-button" disabled={!["funnel", "vpn"].includes(module) || !reportSnapshot || sharingReport} onClick={() => void shareCurrentProjectReport()} title={reportSnapshot ? "将当前页面已查询出的全部数据固定成分享快照" : "请先等待当前页面查询完成"}>{sharingReport ? "生成中…" : "分享项目报告"}</button><button className="icon-button" aria-label="通知">3</button><button className="account-chip" onClick={() => void companyAuth.signOut()} title="退出登录"><span>{companyAuth.user.employee?.name?.slice(0, 1) || companyAuth.user.email.slice(0, 1).toUpperCase()}</span><small>{companyAuth.user.employee?.name || companyAuth.user.email}</small></button></div>
+          <div className="topbar-actions"><div className="global-search">搜索项目、事件、问题单</div><Button className="share-report-button" disabled={!["funnel", "vpn"].includes(module) || !project || creatingCodexLinks} onClick={() => void copyCodexQueryLinks()} title="生成广告打点/VPN打点 JSON 查询链接，发给 Codex 后可直接查线上数据">{creatingCodexLinks ? "生成中…" : "复制Codex查询"}</Button><Button className="share-report-button" disabled={!["funnel", "vpn"].includes(module) || !reportSnapshot || sharingReport} onClick={() => void shareCurrentProjectReport()} title={reportSnapshot ? "将当前页面已查询出的全部数据固定成分享快照" : "请先等待当前页面查询完成"}>{sharingReport ? "生成中…" : "分享项目报告"}</Button><Button className="icon-button" aria-label="通知">3</Button><Button className="account-chip" onClick={() => void companyAuth.signOut()} title="退出登录"><span>{companyAuth.user.employee?.name?.slice(0, 1) || companyAuth.user.email.slice(0, 1).toUpperCase()}</span><small>{companyAuth.user.employee?.name || companyAuth.user.email}</small></Button></div>
         </header>
 
         <main className="main-content">
           {configWorkspaceOpen ? <TrackingConfigWorkspace editingConfig={editingConfig} onlineProjects={onlineProjects} onCancel={() => { setConfigWorkspaceOpen(false); setEditingConfig(null); }} onSave={saveTrackingConfig} /> : <>
           <section className="page-heading">
             <div><h1>{currentModule.title}</h1><p>{currentModule.description}</p></div>
-            <div className="heading-actions"><button className="secondary-button" onClick={() => openMetricDefinition("dau")}>指标口径字典</button>{module !== "tracking" && <button className="primary-button" onClick={() => module === "config" ? openConfigEditor(null) : setDialog(moduleDialog[module])}>{["project", "funnel", "config", "firebaseSetup", "tasks"].includes(module) ? "＋ " : ""}{currentModule.action}</button>}</div>
+            <div className="heading-actions"><Button className="secondary-button" onClick={() => openMetricDefinition("dau")}>指标口径字典</Button>{module !== "tracking" && <Button className="primary-button" onClick={() => module === "config" ? openConfigEditor(null) : setDialog(moduleDialog[module])}>{["project", "funnel", "config", "firebaseSetup", "tasks"].includes(module) ? "＋ " : ""}{currentModule.action}</Button>}</div>
           </section>
 
           {module === "funnel" && <section className="workflow-strip" aria-label="漏斗诊断流程">
@@ -1687,11 +1688,11 @@ export default function Home() {
           </section>}
 
           {module === "funnel" && <nav className="page-nav" aria-label="漏斗分析页面">
-            {pages.map((item) => <button key={item.key} className={page === item.key ? "active" : ""} onClick={() => go(item.key)}><span>{item.label}</span><small>{item.hint}</small></button>)}
+            {pages.map((item) => <Button key={item.key} className={page === item.key ? "active" : ""} onClick={() => go(item.key)}><span>{item.label}</span><small>{item.hint}</small></Button>)}
           </nav>}
 
           {module === "vpn" && <nav className="page-nav" aria-label="VPN 分析页面">
-            {vpnPages.map((item) => <button key={item.key} className={page === item.key ? "active" : ""} onClick={() => setPage(item.key)}><span>{item.label}</span><small>{item.hint}</small></button>)}
+            {vpnPages.map((item) => <Button key={item.key} className={page === item.key ? "active" : ""} onClick={() => setPage(item.key)}><span>{item.label}</span><small>{item.hint}</small></Button>)}
           </nav>}
 
           {module === "funnel" && <section className="page-purpose-strip">
@@ -1785,9 +1786,9 @@ export default function Home() {
               </div>
               <div className="date-session-days">
                 {recentSevenDateRows.map((row) => (
-                  <button
+                  <Button
                     key={row.date}
-                    type="button"
+                    htmlType="button"
                     className={`${row.isSelected ? "active" : ""} ${row.isBest ? "best" : ""}`.trim()}
                     onClick={() => {
                       setDraftRange(row.date);
@@ -1801,29 +1802,29 @@ export default function Home() {
                     <span>{row.date.slice(5)}</span>
                     <strong>{shortCount(row.sessionCount)}</strong>
                     <small>{row.isBest ? "推荐" : row.weekday}</small>
-                  </button>
+                  </Button>
                 ))}
               </div>
             </div>
             <label>平台<select value={draftPlatform} onChange={(event)=>setDraftPlatform(event.target.value)}>{platformOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
             <label>国家<select value={draftCountry} onChange={(event)=>setDraftCountry(event.target.value)}>{countryOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
             <label>App版本<select value={draftAppVersion} onChange={(event)=>setDraftAppVersion(event.target.value)}>{appVersionOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
-            <div className="filter-actions"><button onClick={resetFilters}>重置</button><button className={filtersDirty ? "primary-button" : ""} disabled={projectLoading || onlineProjects.length === 0} onClick={applyFilters}>{filtersDirty ? "应用并查询" : "刷新数据"}</button></div>
+            <div className="filter-actions"><Button onClick={resetFilters}>重置</Button><Button className={filtersDirty ? "primary-button" : ""} disabled={projectLoading || onlineProjects.length === 0} onClick={applyFilters}>{filtersDirty ? "应用并查询" : "刷新数据"}</Button></div>
             <div className="data-state"><span className={`status-dot ${filtersDirty ? "warn" : ""}`} /><strong>{sourceStatus[module].title}</strong><small>{filtersDirty ? "筛选已修改，点击应用后查询" : `${sourceStatus[module].detail} · 刷新#${filtersApplied}`}</small></div>
           </section>}
 
           {module !== "firebaseSetup" && module !== "report" && module !== "vpnReport" && <section className="context-toolbar">
             <div className="context-summary"><Badge tone="blue">{module === "funnel" ? currentPage.hint : currentModule.title}</Badge><span>{isFunnelOverview ? "全部项目" : project}</span><i /> <span>{isFunnelOverview ? "每日08:00汇总 · 09:30补数" : range}</span><i /> <span>{platform} · {appVersion}</span><i /> <span>{country}</span><i /> <span>口径 V1.8</span></div>
-            {module !== "tracking" && <div className="context-actions"><button onClick={() => notify("当前分析视图已保存")}>保存视图</button><button onClick={() => setDialog(module === "admob" ? "admob-report" : "project-report")}>导出报表</button></div>}
+            {module !== "tracking" && <div className="context-actions"><Button onClick={() => notify("当前分析视图已保存")}>保存视图</Button><Button onClick={() => setDialog(module === "admob" ? "admob-report" : "project-report")}>导出报表</Button></div>}
           </section>}
           {["tracking", "config", "tasks"].includes(module) && <section className="governance-flow-strip">
             {[
               ["config", "打点测试配置", "先选品类、项目和事件，发布不可变快照"],
               ["tracking", "打点测试", "选择产品和配置快照，查询线上事件是否收到"],
               ["tasks", "任务与告警", "看同步任务、验收失败、告警和处理闭环"],
-            ].map(([key, title, desc], index) => <button key={key} className={module === key ? "active" : ""} onClick={() => openModule(key as ModuleKey)}><span>{index + 1}</span><strong>{title}</strong><small>{desc}</small></button>)}
+            ].map(([key, title, desc], index) => <Button key={key} className={module === key ? "active" : ""} onClick={() => openModule(key as ModuleKey)}><span>{index + 1}</span><strong>{title}</strong><small>{desc}</small></Button>)}
           </section>}
-          {module !== "vpnReport" && <section className="freshness-note"><div><strong>数据使用提示：</strong>{sourceStatus[module].note}</div><button onClick={() => openMetricDefinition(module === "admob" ? "match_rate" : module === "tracking" ? "event_pass_rate" : "dau")}>查看数据口径</button></section>}
+          {module !== "vpnReport" && <section className="freshness-note"><div><strong>数据使用提示：</strong>{sourceStatus[module].note}</div><Button onClick={() => openMetricDefinition(module === "admob" ? "match_rate" : module === "tracking" ? "event_pass_rate" : "dau")}>查看数据口径</Button></section>}
 
           {module === "shareAlerts" && <ShareAlertsPage projectCode={project} notify={notify} />}
 
@@ -1939,11 +1940,11 @@ export default function Home() {
       }} />}
       {sharedReportResult && <div className="modal-backdrop share-result-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && setSharedReportResult(null)}>
         <section className="share-result-dialog" role="dialog" aria-modal="true" aria-labelledby="share-result-title">
-          <header><div><span className="share-result-icon">✓</span><div><h2 id="share-result-title">项目报告已生成</h2><p>链接已保存在当前项目的报告记录中，可随时再次复制。</p></div></div><button type="button" aria-label="关闭" onClick={() => setSharedReportResult(null)}>×</button></header>
+          <header><div><span className="share-result-icon">✓</span><div><h2 id="share-result-title">项目报告已生成</h2><p>链接已保存在当前项目的报告记录中，可随时再次复制。</p></div></div><Button htmlType="button" aria-label="关闭" onClick={() => setSharedReportResult(null)}>×</Button></header>
           <label htmlFor="shared-project-report-url">分享链接</label>
-          <div className="share-result-copy-row"><input id="shared-project-report-url" value={sharedReportResult.shareUrl} readOnly onFocus={(event) => event.currentTarget.select()} /><button type="button" className="primary-button" onClick={() => void copyShareLink(sharedReportResult.shareUrl)}>复制链接</button></div>
+          <div className="share-result-copy-row"><input id="shared-project-report-url" value={sharedReportResult.shareUrl} readOnly onFocus={(event) => event.currentTarget.select()} /><Button htmlType="button" className="primary-button" onClick={() => void copyShareLink(sharedReportResult.shareUrl)}>复制链接</Button></div>
           <small>打开链接后需使用公司邮箱验证；报告内容为本次查询的数据快照。</small>
-          <footer><button type="button" className="secondary-button" onClick={() => window.open(sharedReportResult.shareUrl, "_blank", "noopener,noreferrer")}>打开预览</button><button type="button" className="primary-button" onClick={() => setSharedReportResult(null)}>完成</button></footer>
+          <footer><Button htmlType="button" className="secondary-button" onClick={() => window.open(sharedReportResult.shareUrl, "_blank", "noopener,noreferrer")}>打开预览</Button><Button htmlType="button" className="primary-button" onClick={() => setSharedReportResult(null)}>完成</Button></footer>
         </section>
       </div>}
       {notice && <div className="toast" role="status"><span>✓</span>{notice}</div>}

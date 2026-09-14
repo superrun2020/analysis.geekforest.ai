@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { Button } from "antd";
 import { queryFunnel } from "./funnel-analysis-api";
 
 type DomainReportRow = {
@@ -128,7 +129,7 @@ export function DomainReportPage({ range, refreshKey }: { range: string; refresh
         <div className="config-group">
           <div className="config-title">展示范围</div>
           <div className="config-options">
-            {[["all", "全部"], ["domain", "仅域名"], ["ip", "仅 IP"]].map(([key, label]) => <button key={key} className={view === key ? "active" : ""} onClick={() => setView(key as "all" | "domain" | "ip")}>{label}</button>)}
+            {[["all", "全部"], ["domain", "仅域名"], ["ip", "仅 IP"]].map(([key, label]) => <Button key={key} className={view === key ? "active" : ""} onClick={() => setView(key as "all" | "domain" | "ip")}>{label}</Button>)}
           </div>
         </div>
       </aside>

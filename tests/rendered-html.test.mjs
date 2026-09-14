@@ -40,5 +40,30 @@ test("compiled bundle contains current product features", async () => {
   const js = await file(`dist/assets/${jsFile}`);
   assert.match(js, /广告漏斗Overall/);
   assert.match(js, /诊断报表/);
-  assert.match(js, /V133/);
+  assert.match(js, /V134/);
+});
+
+
+test("tracked pages no longer render native button elements", async () => {
+  const files = [
+    "app/action-dialog.tsx",
+    "app/company-auth.tsx",
+    "app/domain-report.tsx",
+    "app/firebase-configuration.tsx",
+    "app/metric-dictionary.tsx",
+    "app/online-module-page.tsx",
+    "app/operational-funnel.tsx",
+    "app/page.tsx",
+    "app/project-report-share-page.tsx",
+    "app/share-alerts-page.tsx",
+    "app/shared-report/page.tsx",
+    "app/shared-report/[shareId]/page.tsx",
+    "app/tracking-acceptance-center.tsx",
+    "app/tracking-config-workspace.tsx",
+    "app/tracking-module-test-config.tsx",
+  ];
+  const contents = await Promise.all(files.map((path) => file(path)));
+  for (const [index, content] of contents.entries()) {
+    assert.doesNotMatch(content, /<\/?button\b/, `${files[index]} still contains native button`);
+  }
 });

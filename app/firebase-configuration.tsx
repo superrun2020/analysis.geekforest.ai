@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { Button } from "antd";
 import type { DialogKey } from "./action-dialog";
 import { firebaseTaskLogsApi, type FirebaseCheckLog, type FirebaseSyncRunLog } from "./firebase-task-logs-api";
 
@@ -154,11 +155,11 @@ export function FirebaseConfiguration({ openDialog, notify }: { openDialog: (dia
     <section className="surface firebase-config-v5 firebase-integration-v13">
       <div className="surface-title firebase-config-head">
         <div><div className="eyebrow">Firebase 真实数据源控制面</div><h2>Firebase 数据源设置</h2><p>只展示后端接口返回或日志可推导的数据；未接入接口不展示演示数字。</p></div>
-        <div className="config-actions"><button className="secondary-button" onClick={() => { setRefreshIndex((value) => value + 1); notify("正在重新读取 Firebase 真实任务日志"); }}>刷新真实日志</button><button className="primary-button" onClick={() => openDialog("firebase-connection")}>＋ 新建连接</button></div>
+        <div className="config-actions"><Button className="secondary-button" onClick={() => { setRefreshIndex((value) => value + 1); notify("正在重新读取 Firebase 真实任务日志"); }}>刷新真实日志</Button><Button className="primary-button" onClick={() => openDialog("firebase-connection")}>＋ 新建连接</Button></div>
       </div>
 
       <div className="config-tabbar firebase-main-tabs" role="tablist">
-        {tabs.map(([key, label]) => <button key={key} className={tab === key ? "active" : ""} onClick={() => setTab(key)}>{label}</button>)}
+        {tabs.map(([key, label]) => <Button key={key} className={tab === key ? "active" : ""} onClick={() => setTab(key)}>{label}</Button>)}
       </div>
 
       <div className="firebase-demo-banner real-data-banner" role="status"><span>真实数据</span><p><strong>本页已移除演示项目、演示事件和演示健康状态。</strong>同步任务与检查记录来自线上接口；连接资源树和最新事件明细在专用接口接入前，只展示日志中能真实推导出的信息。</p></div>
@@ -168,33 +169,33 @@ export function FirebaseConfiguration({ openDialog, notify }: { openDialog: (dia
 
       {!loading && tab === "overview" && <div className="config-tab-content">
         <div className="firebase-overview-metrics">
-          <button onClick={() => setTab("resources")}><span>日志可识别项目</span><strong>{projects.length || "—"}</strong><small>{projects.length ? "由同步/检查日志推导" : "暂无真实日志"}</small></button>
-          <button onClick={() => setTab("resources")}><span>日志可识别资源</span><strong>{resources.length || "—"}</strong><small>Firebase Project/App/包名</small></button>
-          <button onClick={() => setTab("runs")}><span>同步任务</span><strong>{syncRuns.length || "—"}</strong><small>{runningRuns ? `${runningRuns} 个运行中` : "最近任务记录"}</small></button>
-          <button onClick={() => setTab("runs")}><span>失败任务</span><strong>{failedRuns}</strong><small>来自真实 status 字段</small></button>
-          <button onClick={() => setTab("health")}><span>检查记录</span><strong>{checkLogs.length || "—"}</strong><small>{failedChecks ? `${failedChecks} 个失败` : "服务账号/Firebase/BQ"}</small></button>
-          <button onClick={() => setTab("latest")}><span>最近任务时间</span><strong>{formatTime(latestRun?.startedAt || latestRun?.finishedAt || latestRun?.createdAt).slice(11) || "—"}</strong><small>{formatTime(latestRun?.startedAt || latestRun?.finishedAt || latestRun?.createdAt).slice(0, 10) || "暂无"}</small></button>
+          <Button onClick={() => setTab("resources")}><span>日志可识别项目</span><strong>{projects.length || "—"}</strong><small>{projects.length ? "由同步/检查日志推导" : "暂无真实日志"}</small></Button>
+          <Button onClick={() => setTab("resources")}><span>日志可识别资源</span><strong>{resources.length || "—"}</strong><small>Firebase Project/App/包名</small></Button>
+          <Button onClick={() => setTab("runs")}><span>同步任务</span><strong>{syncRuns.length || "—"}</strong><small>{runningRuns ? `${runningRuns} 个运行中` : "最近任务记录"}</small></Button>
+          <Button onClick={() => setTab("runs")}><span>失败任务</span><strong>{failedRuns}</strong><small>来自真实 status 字段</small></Button>
+          <Button onClick={() => setTab("health")}><span>检查记录</span><strong>{checkLogs.length || "—"}</strong><small>{failedChecks ? `${failedChecks} 个失败` : "服务账号/Firebase/BQ"}</small></Button>
+          <Button onClick={() => setTab("latest")}><span>最近任务时间</span><strong>{formatTime(latestRun?.startedAt || latestRun?.finishedAt || latestRun?.createdAt).slice(11) || "—"}</strong><small>{formatTime(latestRun?.startedAt || latestRun?.finishedAt || latestRun?.createdAt).slice(0, 10) || "暂无"}</small></Button>
         </div>
         <div className="firebase-pipeline-v13">
           {[["1","连接日志","sync-runs / check-logs","good"],["2","资源推导","从真实日志提取 Project/App","blue"],["3","同步水位","range_start / range_end","blue"],["4","ADB写入","adb_rows / source_rows","blue"],["5","错误隔离","status / error_message","blue"],["6","运营面板","无接口则空态","good"]].map(([no,title,detail,tone], index) => <div key={title}><span className={tone}>{no}</span><strong>{title}</strong><small>{detail}</small>{index < 5 && <i>→</i>}</div>)}
         </div>
         <div className="firebase-overview-grid">
-          <div className="surface nested-surface"><div className="surface-title"><div><h3>最近同步任务</h3><p>真实 sync-runs 返回；无返回时显示空态。</p></div><button className="text-button" onClick={() => setTab("runs")}>全部任务</button></div>
-            {syncRuns.length ? <div className="firebase-recent-runs">{syncRuns.slice(0, 5).map((run) => <button key={run.runId} onClick={() => setTab("runs")}><span className={`run-state-dot ${statusTone(run.status)}`} /><div><strong>{projectLabel(run)} · {run.runType || "SYNC"}</strong><small>{formatTime(run.rangeStart)} → {formatTime(run.rangeEnd)}</small></div><div><b>{formatRows(run.adbRows)}</b><small>ADB行数</small></div><StatusBadge tone={statusTone(run.status)}>{statusLabel(run.status)}</StatusBadge></button>)}</div> : <EmptyRealState title="暂无真实同步任务" detail="后端返回 sync-runs 后这里会展示项目、范围、源行数、ADB行数和状态。" />}
+          <div className="surface nested-surface"><div className="surface-title"><div><h3>最近同步任务</h3><p>真实 sync-runs 返回；无返回时显示空态。</p></div><Button className="text-button" onClick={() => setTab("runs")}>全部任务</Button></div>
+            {syncRuns.length ? <div className="firebase-recent-runs">{syncRuns.slice(0, 5).map((run) => <Button key={run.runId} onClick={() => setTab("runs")}><span className={`run-state-dot ${statusTone(run.status)}`} /><div><strong>{projectLabel(run)} · {run.runType || "SYNC"}</strong><small>{formatTime(run.rangeStart)} → {formatTime(run.rangeEnd)}</small></div><div><b>{formatRows(run.adbRows)}</b><small>ADB行数</small></div><StatusBadge tone={statusTone(run.status)}>{statusLabel(run.status)}</StatusBadge></Button>)}</div> : <EmptyRealState title="暂无真实同步任务" detail="后端返回 sync-runs 后这里会展示项目、范围、源行数、ADB行数和状态。" />}
           </div>
-          <div className="surface nested-surface"><div className="surface-title"><div><h3>最近接口检查</h3><p>真实 check-logs 返回；用于判断权限和资源可读性。</p></div><button className="text-button" onClick={() => setTab("health")}>全部检查</button></div>
-            {checkLogs.length ? <div className="firebase-recent-runs">{checkLogs.slice(0, 5).map((log) => <button key={log.logId} onClick={() => setTab("health")}><span className={`run-state-dot ${statusTone(log.status)}`} /><div><strong>{projectLabel(log)} · {log.checkType || "CHECK"}</strong><small>{log.firebaseProjectId || log.connectionName || "未返回资源"}</small></div><div><b>{formatDuration(log.durationMs)}</b><small>耗时</small></div><StatusBadge tone={statusTone(log.status)}>{statusLabel(log.status)}</StatusBadge></button>)}</div> : <EmptyRealState title="暂无真实检查日志" detail="后端返回 check-logs 后这里会展示认证、Firebase、BigQuery 和 Dataset 检查结果。" />}
+          <div className="surface nested-surface"><div className="surface-title"><div><h3>最近接口检查</h3><p>真实 check-logs 返回；用于判断权限和资源可读性。</p></div><Button className="text-button" onClick={() => setTab("health")}>全部检查</Button></div>
+            {checkLogs.length ? <div className="firebase-recent-runs">{checkLogs.slice(0, 5).map((log) => <Button key={log.logId} onClick={() => setTab("health")}><span className={`run-state-dot ${statusTone(log.status)}`} /><div><strong>{projectLabel(log)} · {log.checkType || "CHECK"}</strong><small>{log.firebaseProjectId || log.connectionName || "未返回资源"}</small></div><div><b>{formatDuration(log.durationMs)}</b><small>耗时</small></div><StatusBadge tone={statusTone(log.status)}>{statusLabel(log.status)}</StatusBadge></Button>)}</div> : <EmptyRealState title="暂无真实检查日志" detail="后端返回 check-logs 后这里会展示认证、Firebase、BigQuery 和 Dataset 检查结果。" />}
           </div>
         </div>
       </div>}
 
       {!loading && tab === "resources" && <div className="config-tab-content">
-        <div className="firebase-section-toolbar"><label>内部项目<select value={projectFilter} onChange={(event) => setProjectFilter(event.target.value)}><option value="all">全部项目</option>{projects.map((item) => <option key={item}>{item}</option>)}</select></label><div><button onClick={() => notify("资源发现专用接口待接入；当前只展示日志可推导资源")}>重新发现资源</button></div></div>
-        {resources.length ? <div className="table-wrap"><table><thead><tr><th>内部项目</th><th>连接</th><th>Firebase Project</th><th>Firebase App</th><th>App / 包名</th><th>最近出现</th><th>来源</th></tr></thead><tbody>{resources.filter((item) => projectFilter === "all" || item.projectCode === projectFilter).map((item) => <tr key={`${item.connectionName}${item.firebaseProjectId}${item.firebaseAppId}${item.app}`}><td><strong>{item.projectCode}</strong></td><td>{item.connectionName}</td><td><code>{item.firebaseProjectId}</code></td><td><code>{item.firebaseAppId}</code></td><td>{item.app}</td><td>{formatTime(item.lastSeen)}</td><td><StatusBadge tone="blue">日志推导</StatusBadge></td></tr>)}</tbody></table></div> : <EmptyRealState title="连接与资源树接口待接入" detail="当前 sync-runs/check-logs 没有可推导的 Firebase Project/App 信息；不会展示旧的演示资源树。" action={<button className="primary-button" onClick={() => openDialog("firebase-connection")}>去配置连接</button>} />}
+        <div className="firebase-section-toolbar"><label>内部项目<select value={projectFilter} onChange={(event) => setProjectFilter(event.target.value)}><option value="all">全部项目</option>{projects.map((item) => <option key={item}>{item}</option>)}</select></label><div><Button onClick={() => notify("资源发现专用接口待接入；当前只展示日志可推导资源")}>重新发现资源</Button></div></div>
+        {resources.length ? <div className="table-wrap"><table><thead><tr><th>内部项目</th><th>连接</th><th>Firebase Project</th><th>Firebase App</th><th>App / 包名</th><th>最近出现</th><th>来源</th></tr></thead><tbody>{resources.filter((item) => projectFilter === "all" || item.projectCode === projectFilter).map((item) => <tr key={`${item.connectionName}${item.firebaseProjectId}${item.firebaseAppId}${item.app}`}><td><strong>{item.projectCode}</strong></td><td>{item.connectionName}</td><td><code>{item.firebaseProjectId}</code></td><td><code>{item.firebaseAppId}</code></td><td>{item.app}</td><td>{formatTime(item.lastSeen)}</td><td><StatusBadge tone="blue">日志推导</StatusBadge></td></tr>)}</tbody></table></div> : <EmptyRealState title="连接与资源树接口待接入" detail="当前 sync-runs/check-logs 没有可推导的 Firebase Project/App 信息；不会展示旧的演示资源树。" action={<Button className="primary-button" onClick={() => openDialog("firebase-connection")}>去配置连接</Button>} />}
       </div>}
 
       {!loading && tab === "runs" && <div className="config-tab-content">
-        <div className="firebase-section-toolbar"><label>内部项目<select value={projectFilter} onChange={(event) => setProjectFilter(event.target.value)}><option value="all">全部项目</option>{projects.map((item) => <option key={item}>{item}</option>)}</select></label><div><button onClick={() => setProjectFilter("all")}>全部</button><button onClick={() => openDialog("firebase-sync")}>立即同步</button></div></div>
+        <div className="firebase-section-toolbar"><label>内部项目<select value={projectFilter} onChange={(event) => setProjectFilter(event.target.value)}><option value="all">全部项目</option>{projects.map((item) => <option key={item}>{item}</option>)}</select></label><div><Button onClick={() => setProjectFilter("all")}>全部</Button><Button onClick={() => openDialog("firebase-sync")}>立即同步</Button></div></div>
         <div className="table-wrap"><table><thead><tr><th>Run / 项目</th><th>类型</th><th>源范围</th><th>开始/结束</th><th>BigQuery源行</th><th>ADB写入</th><th>耗时</th><th>Firebase资源</th><th>状态</th><th>错误</th></tr></thead><tbody>{visibleRuns.length ? visibleRuns.map((run) => <tr key={run.runId} className={isFailedStatus(run.status) ? "row-warn" : ""}><td><strong>Run #{run.runId}</strong><small>{projectLabel(run)}</small></td><td><code>{run.runType || "SYNC"}</code></td><td><strong>{formatTime(run.rangeStart)}</strong><small>{formatTime(run.rangeEnd)}</small></td><td><strong>{formatTime(run.startedAt)}</strong><small>{formatTime(run.finishedAt)}</small></td><td>{formatRows(run.sourceRows)}</td><td>{formatRows(run.adbRows)}</td><td>{formatDuration(run.durationMs)}</td><td><strong>{run.firebaseProjectId || "—"}</strong><small>{run.firebaseAppId || run.firebaseAppIdentifier || run.packageName || "—"}</small></td><td><StatusBadge tone={statusTone(run.status)}>{statusLabel(run.status)}</StatusBadge></td><td>{run.errorMessage || "—"}</td></tr>) : <tr><td colSpan={10}><EmptyRealState title="暂无真实同步任务" detail={error ? "接口未返回任务日志。" : "当前筛选下没有 sync-runs 记录。"} /></td></tr>}</tbody></table></div>
       </div>}
 

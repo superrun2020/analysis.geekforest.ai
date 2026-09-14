@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Button } from "antd";
 
 const oaBaseUrl = (import.meta.env.VITE_OA_API_BASE_URL ?? import.meta.env.NEXT_PUBLIC_OA_API_BASE_URL ?? "").replace(/\/$/, "");
 export const companyAuthTokenKey = "jkcl_funnel_oa_token";
@@ -231,20 +232,20 @@ export function CompanyLogin({ onSignedIn }: { onSignedIn: (result: AuthResult) 
   return <main className="company-login-shell"><section className="company-login-card">
     <div className="company-login-brand"><span>GF</span><div><strong>GeekForest 产品大脑</strong><small>企业内部数据平台</small></div></div>
     <div className="company-login-copy"><h1>{step === "login" ? "使用企业账号登录" : "首次登录请修改密码"}</h1><p>{step === "login" ? "使用企业邮箱验证码或密码登录；系统会通过 OA/HRBP 核验极客主体在职员工身份。" : `当前账号：${email}`}</p></div>
-    {step === "login" && <div className="company-login-tabs" role="tablist" aria-label="登录方式"><button type="button" role="tab" aria-selected={loginMode === "code"} className={loginMode === "code" ? "active" : ""} onClick={() => { setLoginMode("code"); setMessage(""); }}>验证码登录</button><button type="button" role="tab" aria-selected={loginMode === "password"} className={loginMode === "password" ? "active" : ""} onClick={() => { setLoginMode("password"); setMessage(""); }}>密码登录</button></div>}
+    {step === "login" && <div className="company-login-tabs" role="tablist" aria-label="登录方式"><Button htmlType="button" role="tab" aria-selected={loginMode === "code"} className={loginMode === "code" ? "active" : ""} onClick={() => { setLoginMode("code"); setMessage(""); }}>验证码登录</Button><Button htmlType="button" role="tab" aria-selected={loginMode === "password"} className={loginMode === "password" ? "active" : ""} onClick={() => { setLoginMode("password"); setMessage(""); }}>密码登录</Button></div>}
     {step === "login" && loginMode === "code" ? <form onSubmit={submitCodeLogin}>
       <label>企业邮箱<input autoFocus type="email" autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="name@geekforest.ai" required /></label>
-      <label>邮箱验证码<div className="company-code-row"><input type="text" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="输入 6 位验证码" required /><button type="button" disabled={sendingCode || codeCooldown > 0} onClick={() => void requestLoginCode()}>{sendingCode ? "发送中…" : codeCooldown > 0 ? `${codeCooldown}s 后重发` : "获取验证码"}</button></div></label>
-      <button disabled={loading}>{loading ? "正在验证…" : "登录漏斗分析中心"}</button>
+      <label>邮箱验证码<div className="company-code-row"><input type="text" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="输入 6 位验证码" required /><Button htmlType="button" disabled={sendingCode || codeCooldown > 0} onClick={() => void requestLoginCode()}>{sendingCode ? "发送中…" : codeCooldown > 0 ? `${codeCooldown}s 后重发` : "获取验证码"}</Button></div></label>
+      <Button disabled={loading}>{loading ? "正在验证…" : "登录漏斗分析中心"}</Button>
     </form> : step === "login" ? <form onSubmit={submitLogin}>
       <label>企业邮箱<input autoFocus type="email" autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="name@geekforest.ai" required /></label>
       <label>密码<input type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="首次登录请输入企业邮箱" required /></label>
-      <button disabled={loading}>{loading ? "正在登录…" : "登录漏斗分析中心"}</button>
+      <Button disabled={loading}>{loading ? "正在登录…" : "登录漏斗分析中心"}</Button>
     </form> : <form onSubmit={submitChangePassword}>
       <label>新密码<input autoFocus type="password" autoComplete="new-password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} placeholder="至少 8 位，不能等于邮箱" required /></label>
       <label>确认新密码<input type="password" autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} placeholder="再次输入新密码" required /></label>
-      <button disabled={loading}>{loading ? "正在保存…" : "保存新密码并进入系统"}</button>
-      <button type="button" className="login-back" onClick={() => { setStep("login"); setPendingResult(null); setNewPassword(""); setConfirmPassword(""); setMessage(""); }}>返回登录</button>
+      <Button disabled={loading}>{loading ? "正在保存…" : "保存新密码并进入系统"}</Button>
+      <Button htmlType="button" className="login-back" onClick={() => { setStep("login"); setPendingResult(null); setNewPassword(""); setConfirmPassword(""); setMessage(""); }}>返回登录</Button>
     </form>}
     {message && <div className="company-login-error" role="alert">{message}</div>}
     <div className="company-login-policy"><strong>身份验证规则</strong><span>@geekforest.ai 企业邮箱</span><span>极客主体员工</span><span>当前在职</span><span>离职自动失效</span><span>本设备 30 天免登录</span></div>

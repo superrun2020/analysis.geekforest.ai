@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Button } from "antd";
 import { trackingApiBaseUrl } from "../api-base-url";
 
 type ShareMeta = {
@@ -150,7 +151,7 @@ export default function SharedReportPage() {
           访问密码
           <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="请输入复制链接时附带的密码" autoComplete="off" />
         </label>
-        <button className="primary-button" disabled={opening || (meta?.status ?? "").toUpperCase() === "EXPIRED"}>{opening ? "正在打开…" : "打开报告"}</button>
+        <Button className="primary-button" disabled={opening || (meta?.status ?? "").toUpperCase() === "EXPIRED"}>{opening ? "正在打开…" : "打开报告"}</Button>
         <small>密码错误不会扣次数；报告成功打开一次才扣 1 次。</small>
       </form>}
 

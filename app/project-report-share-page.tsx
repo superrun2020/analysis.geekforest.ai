@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { Button } from "antd";
 import { trackingApiBaseUrl } from "./api-base-url";
 
 type AnyRow = Record<string, any>;
@@ -334,11 +335,11 @@ function SnapshotReportShell({ report, meta, onlineViewers, packageErrors, metri
   const activeMenu = module === "vpn" || domain === "vpn" ? "vpn" : "funnel";
   return <div className="app-shell share-snapshot-shell">
     <aside className="sidebar">
-      <div className="brand"><span className="brand-mark">GF</span><span><strong>GeekForest 产品大脑</strong><small className="version-line"><span>质量分析中心 · V103</span><button type="button" disabled title="分享快照不刷新数据">快照</button></small></span></div>
+      <div className="brand"><span className="brand-mark">GF</span><span><strong>GeekForest 产品大脑</strong><small className="version-line"><span>质量分析中心 · V103</span><Button htmlType="button" disabled title="分享快照不刷新数据">快照</Button></small></span></div>
       <div className="nav-group-label">经营分析</div>
-      {snapshotMenus.filter((item) => item.group === "经营分析").map((item) => <button key={item.key} className={`main-nav-item ${activeMenu === item.key ? "active" : ""}`} disabled><span>{item.index}</span>{item.label}</button>)}
+      {snapshotMenus.filter((item) => item.group === "经营分析").map((item) => <Button key={item.key} className={`main-nav-item ${activeMenu === item.key ? "active" : ""}`} disabled><span>{item.index}</span>{item.label}</Button>)}
       <div className="nav-group-label">质量治理</div>
-      {snapshotMenus.filter((item) => item.group === "质量治理").map((item) => <button key={item.key} className="main-nav-item" disabled><span>{item.index}</span>{item.label}</button>)}
+      {snapshotMenus.filter((item) => item.group === "质量治理").map((item) => <Button key={item.key} className="main-nav-item" disabled><span>{item.index}</span>{item.label}</Button>)}
       <div className="sidebar-foot"><span className="status-dot" />分享快照模式<small>数据固定为生成链接时的线上查询结果</small></div>
     </aside>
 
@@ -347,18 +348,18 @@ function SnapshotReportShell({ report, meta, onlineViewers, packageErrors, metri
         <div className="breadcrumbs">分享报告 / {snapshotModuleTitle(module, domain)} / <strong>{snapshotPageLabel(page)}</strong></div>
         <div className="topbar-actions">
           <div className="share-snapshot-online"><span className="status-dot" /><strong>在线 {number(onlineViewers?.onlineCount ?? 1)} 人</strong></div>
-          <button className="account-chip" title="当前查看邮箱"><span>{report.viewerEmail.slice(0, 1).toUpperCase()}</span><small>{report.viewerEmail}</small></button>
+          <Button className="account-chip" title="当前查看邮箱"><span>{report.viewerEmail.slice(0, 1).toUpperCase()}</span><small>{report.viewerEmail}</small></Button>
         </div>
       </header>
 
       <main className="main-content">
         <section className="page-heading">
           <div><h1>{text(meta?.title ?? report.title)}</h1><p>这是和线上页面一致的只读快照。筛选、漏斗、AI诊断、页面路径和证据均来自分享时保存的数据，不会因为后来重新查询而变化。</p></div>
-          <div className="heading-actions"><button className="secondary-button" disabled>只读快照</button><button className="primary-button" disabled>分享项目报告</button></div>
+          <div className="heading-actions"><Button className="secondary-button" disabled>只读快照</Button><Button className="primary-button" disabled>分享项目报告</Button></div>
         </section>
 
         <nav className="page-nav" aria-label="分享快照页面">
-          {snapshotPages.map((item) => <button key={item.key} className={page === item.key ? "active" : ""} disabled><span>{item.label}</span><small>{item.hint}</small></button>)}
+          {snapshotPages.map((item) => <Button key={item.key} className={page === item.key ? "active" : ""} disabled><span>{item.label}</span><small>{item.hint}</small></Button>)}
         </nav>
 
         <section className="filter-bar share-snapshot-filter">
@@ -372,7 +373,7 @@ function SnapshotReportShell({ report, meta, onlineViewers, packageErrors, metri
 
         <section className="context-toolbar">
           <div className="context-summary"><span className="badge badge-blue">{snapshotPageLabel(page)}</span><span>{text(report.projectCode || snapshot.projectCode)}</span><i /> <span>{text(report.appIdentifier)}</span><i /> <span>{text(domain)}</span><i /> <span>{text(snapshot.unit ?? report.unit)}</span></div>
-          <div className="context-actions"><button disabled>保存视图</button><button disabled>导出报表</button></div>
+          <div className="context-actions"><Button disabled>保存视图</Button><Button disabled>导出报表</Button></div>
         </section>
 
         <section className="freshness-note"><div><strong>分享访问提示：</strong>必须输入公司邮箱才能查看；系统记录访问邮箱、IP、设备/浏览器、网络和查看时间。当前页面只展示快照，不发起新的经营数据查询。</div></section>
@@ -526,7 +527,7 @@ export default function ProjectReportSharePage() {
       {meta?.allowedEmailDomains?.length ? <small>允许邮箱域名：{meta.allowedEmailDomains.join("、")}</small> : null}
       <div className="public-report-form">
         <input value={email} onChange={(event) => setEmail(event.target.value)} placeholder="name@geekforest.ai" onKeyDown={(event) => { if (event.key === "Enter") void openReport(); }} />
-        <button onClick={() => void openReport()} disabled={opening}>{opening ? "验证中…" : "查看报告"}</button>
+        <Button onClick={() => void openReport()} disabled={opening}>{opening ? "验证中…" : "查看报告"}</Button>
       </div>
       {meta?.deviceNotice && <p className="public-report-device-note">{meta.deviceNotice}</p>}
       {error && <div className="public-report-error">{error}</div>}
