@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 
-const oaBaseUrl = (process.env.NEXT_PUBLIC_OA_API_BASE_URL ?? "").replace(/\/$/, "");
+const oaBaseUrl = (import.meta.env.VITE_OA_API_BASE_URL ?? import.meta.env.NEXT_PUBLIC_OA_API_BASE_URL ?? "").replace(/\/$/, "");
 export const companyAuthTokenKey = "jkcl_funnel_oa_token";
 const companyAuthExpiresAtKey = "jkcl_funnel_oa_expires_at";
 

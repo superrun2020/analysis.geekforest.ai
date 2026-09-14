@@ -63,8 +63,8 @@ export type FirebaseLogQuery = {
   pageSize?: number;
 };
 
-const baseUrl = (process.env.NEXT_PUBLIC_TRACKING_API_BASE_URL ?? "").replace(/\/$/, "");
-const securePath = (process.env.NEXT_PUBLIC_TRACKING_API_SECURE_PATH ?? "").replace(/^\//, "").replace(/\/$/, "");
+const baseUrl = (import.meta.env.VITE_TRACKING_API_BASE_URL ?? import.meta.env.NEXT_PUBLIC_TRACKING_API_BASE_URL ?? "").replace(/\/$/, "");
+const securePath = (import.meta.env.VITE_TRACKING_API_SECURE_PATH ?? import.meta.env.NEXT_PUBLIC_TRACKING_API_SECURE_PATH ?? "").replace(/^\//, "").replace(/\/$/, "");
 const adminBase = `${baseUrl}/api/v3/${securePath}/firebase-integration`;
 
 const toSearch = (query: FirebaseLogQuery) => {

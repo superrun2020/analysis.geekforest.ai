@@ -1,5 +1,5 @@
 export function trackingApiBaseUrl(): string {
-  const configured = process.env.NEXT_PUBLIC_TRACKING_API_BASE_URL?.trim();
+  const configured = import.meta.env.VITE_TRACKING_API_BASE_URL ?? import.meta.env.NEXT_PUBLIC_TRACKING_API_BASE_URL?.trim();
   if (configured) return configured.replace(/\/$/, "");
 
   if (typeof window !== "undefined" && window.location.origin) {
