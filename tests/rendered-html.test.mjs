@@ -40,7 +40,7 @@ test("compiled bundle contains current product features", async () => {
   const js = await file(`dist/assets/${jsFile}`);
   assert.match(js, /广告漏斗Overall/);
   assert.match(js, /诊断报表/);
-  assert.match(js, /V139/);
+  assert.match(js, /V140/);
   assert.match(js, /sidebar-collapsed/);
   assert.match(js, /广告链路总表/);
 });
@@ -90,4 +90,12 @@ test("sidebar serial numbers are not rendered", async () => {
   const source = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
   assert.doesNotMatch(source, /<span>\{item\.index\}<\/span>/);
   assert.match(source, /<b>\{item\.label\}<\/b>/);
+});
+
+
+test("diagnostic submenu items are explicitly left aligned", async () => {
+  const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+  assert.match(css, /V140: left align diagnostic submenu items/);
+  assert.match(css, /align-items: flex-start !important/);
+  assert.match(css, /text-align: left !important/);
 });

@@ -3186,3 +3186,19 @@ tr:hover td { background: #f5f8ff; }
 .app-shell.sidebar-collapsed .main-nav-item em { display: none; }
 .share-snapshot-shell .main-nav-item b { font: inherit; font-weight: inherit; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* V140: left align diagnostic submenu items */
+.nav-submenu-list { padding-left: 18px; }
+.nav-submenu-item.ant-btn {
+  width: 100%;
+  display: flex !important;
+  flex-direction: column;
+  align-items: flex-start !important;
+  justify-content: center !important;
+  text-align: left !important;
+  padding: 7px 12px !important;
+}
+.nav-submenu-item.ant-btn > span { width: 100%; display: block; text-align: left; }
+.nav-submenu-item strong,
+.nav-submenu-item small { width: 100%; display: block; text-align: left; }
+.nav-submenu-item.ant-btn.active { box-shadow: inset 3px 0 #2d57b8; }
+
