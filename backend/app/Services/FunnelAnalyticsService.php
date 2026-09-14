@@ -688,7 +688,7 @@ class FunnelAnalyticsService
      */
     private function cacheableQueryPages(): array
     {
-        return ['overview', 'workbench', 'diagnosis', 'path', 'evidence', 'version_comparison', 'domain_report'];
+        return ['overview', 'workbench', 'diagnosis', 'path', 'evidence', 'version_comparison', 'ad_overall', 'domain_report'];
     }
 
     /**
@@ -708,6 +708,7 @@ class FunnelAnalyticsService
             'snapshot' => $this->snapshot(),
             'network_failure_matrix' => $this->networkFailureMatrix($params),
             'version_comparison' => $this->versionComparisonPage($params),
+            'ad_overall' => $this->adOverallPage($params),
             'domain_report' => $this->domainReportPage($params),
             default => throw new InvalidArgumentException('不支持的漏斗分析页面'),
         };
@@ -5093,6 +5094,207 @@ class FunnelAnalyticsService
         return [
             'context' => $this->context($params),
             'versionComparison' => $this->versionComparisonFromDws($params),
+        ];
+    }
+
+
+    /**
+     * Overall ads funnel report for the diagnosis-report style UI. It aggregates
+     * the same DWS stage table by user-selected dimensions, so removing a
+     * dimension rolls the report up without scanning raw events.
+     *
+     * @param array<string, mixed> $params
+     * @return array<string, mixed>
+     */
+    private function adOverallPage(array $params): array
+    {
+        return [
+            'context' => $this->context($params),
+            'adOverallReport' => $this->adOverallFromDws($params),
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $params
+     * @return array<string, mixed>
+     */
+    private function adOverallFromDws(array $params): array
+    {
+        $allowedDimensions = ['stat_date', 'project_code', 'country_code', 'platform', 'app_version'];
+        $requested = array_values(array_filter(
+            (array) ($params['dimensions'] ?? ['stat_date', 'project_code', 'app_version']),
+            static fn ($dimension): bool => in_array($dimension, $allowedDimensions, true)
+        ));
+        $dimensions = array_values(array_unique(count($requested) ? $requested : ['stat_date', 'project_code', 'app_version']));
+
+        try {
+            $groupColumns = [];
+            foreach ($dimensions as $dimension) {
+                if ($dimension === 'app_version') {
+                    $groupColumns[] = 'app_version';
+                    $groupColumns[] = 'build_number';
+                    continue;
+                }
+                $groupColumns[] = $dimension;
+            }
+            $groupColumns = array_values(array_unique($groupColumns));
+
+            $query = DB::connection('adb')->table('dws_app_funnel_stage_daily')
+                ->whereBetween('stat_date', [$params['dateFrom'], $params['dateTo']])
+                ->where('funnel_code', 'ad_user_coverage')
+                ->where('scope_type', 'users');
+            $this->applySummaryProjectFilters($query, $params);
+
+            foreach ($dimensions as $dimension) {
+                $requiredColumn = $dimension === 'app_version' ? 'app_version' : $dimension;
+                $query->whereNotNull($requiredColumn);
+                if ($requiredColumn !== 'stat_date') {
+                    $query->where($requiredColumn, '!=', '');
+                }
+            }
+            if (!in_array('platform', $dimensions, true) && !empty($params['platform'])) {
+                $query->where('platform', strtolower((string) $params['platform']));
+            }
+            if (!in_array('country_code', $dimensions, true) && !empty($params['country'])) {
+                $query->where('country_code', (string) $params['country']);
+            }
+            if (!in_array('app_version', $dimensions, true) && !empty($params['appVersion'])) {
+                $query->where('app_version', (string) $params['appVersion']);
+            }
+
+            $columnsSql = implode(', ', array_map(
+                static fn (string $column): string => $column === 'stat_date' ? 'stat_date AS stat_date' : "COALESCE({$column}, '') AS {$column}",
+                $groupColumns
+            ));
+            $stageRows = $query
+                ->selectRaw($columnsSql . ', step_code, SUM(subject_count) AS users')
+                ->groupBy(array_merge($groupColumns, ['step_code']))
+                ->get();
+
+            $groups = [];
+            foreach ($stageRows as $stage) {
+                $keyParts = array_map(
+                    fn (string $column): string => trim((string) ($stage->{$column} ?? '')),
+                    $groupColumns
+                );
+                $key = implode('|', $keyParts);
+                if (!isset($groups[$key])) {
+                    $groups[$key] = $this->adOverallDimensionRow($dimensions, $stage, $groupColumns);
+                }
+                $groups[$key]['stages'][(string) $stage->step_code] = (int) ($stage->users ?? 0);
+            }
+
+            $rows = collect(array_values($groups))
+                ->map(fn (array $group): array => $this->formatAdOverallMetrics($group))
+                ->sortByDesc('dauUsers')
+                ->values();
+
+            $labels = [
+                'stat_date' => '日期',
+                'project_code' => '项目',
+                'country_code' => '国家',
+                'platform' => '平台',
+                'app_version' => '应用版本',
+            ];
+
+            return [
+                'available' => $rows->count() > 0,
+                'dimensions' => $dimensions,
+                'dimensionLabel' => implode(' × ', array_map(static fn (string $dimension): string => $labels[$dimension] ?? $dimension, $dimensions)),
+                'rows' => $rows->all(),
+                'totals' => $this->formatAdOverallMetrics(['stages' => $rows->reduce(function (array $carry, array $row): array {
+                    $carry['dau'] = ($carry['dau'] ?? 0) + (int) ($row['dauUsers'] ?? 0);
+                    $carry['eligibility'] = ($carry['eligibility'] ?? 0) + (int) ($row['eligibilityCheckUsers'] ?? 0);
+                    $carry['eligible'] = ($carry['eligible'] ?? 0) + (int) ($row['eligibleUsers'] ?? 0);
+                    $carry['opportunity'] = ($carry['opportunity'] ?? 0) + (int) ($row['opportunityUsers'] ?? 0);
+                    $carry['request'] = ($carry['request'] ?? 0) + (int) ($row['requestUsers'] ?? 0);
+                    $carry['show_attempt'] = ($carry['show_attempt'] ?? 0) + (int) ($row['showAttemptUsers'] ?? 0);
+                    $carry['impression'] = ($carry['impression'] ?? 0) + (int) ($row['impressionUsers'] ?? 0);
+                    $carry['paid'] = ($carry['paid'] ?? 0) + (int) ($row['paidUsers'] ?? 0);
+                    return $carry;
+                }, [])]),
+                'source' => 'dws_app_funnel_stage_daily',
+                'notice' => '广告漏斗 Overall 使用 DWS 用户漏斗日汇总表；维度可选并向上聚合，比例按当前维度组合的分子分母重算。',
+            ];
+        } catch (Throwable $exception) {
+            Log::warning('jkcl_ad_overall_failed', ['message' => $exception->getMessage()]);
+            return [
+                'available' => false,
+                'dimensions' => $dimensions,
+                'rows' => [],
+                'totals' => [],
+                'source' => 'dws_app_funnel_stage_daily',
+                'reason' => '广告漏斗 Overall 读取失败：' . $exception->getMessage(),
+            ];
+        }
+    }
+
+    /**
+     * @param array<int, string> $dimensions
+     * @param array<int, string> $groupColumns
+     * @return array<string, mixed>
+     */
+    private function adOverallDimensionRow(array $dimensions, object $stage, array $groupColumns): array
+    {
+        $values = [];
+        foreach ($groupColumns as $column) {
+            $values[$column] = trim((string) ($stage->{$column} ?? ''));
+        }
+        $labels = [];
+        foreach ($dimensions as $dimension) {
+            if ($dimension === 'stat_date') {
+                $labels[$dimension] = $values['stat_date'] !== '' ? $values['stat_date'] : 'unknown';
+            } elseif ($dimension === 'app_version') {
+                $version = $values['app_version'] !== '' ? $values['app_version'] : 'unknown';
+                $build = $values['build_number'] ?? '';
+                $labels[$dimension] = $build !== '' ? "{$version} ({$build})" : $version;
+            } elseif ($dimension === 'platform') {
+                $labels[$dimension] = $values['platform'] !== '' ? strtolower($values['platform']) : 'unknown';
+            } else {
+                $labels[$dimension] = $values[$dimension] !== '' ? $values[$dimension] : 'unknown';
+            }
+        }
+
+        return [
+            'dimensions' => $labels,
+            'dimensionKey' => implode('|', array_map(static fn ($value): string => (string) $value, $labels)),
+            'stages' => [],
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $group
+     * @return array<string, mixed>
+     */
+    private function formatAdOverallMetrics(array $group): array
+    {
+        $stage = $group['stages'] ?? [];
+        $dau = (int) ($stage['dau'] ?? 0);
+        $check = (int) ($stage['eligibility'] ?? 0);
+        $eligible = (int) ($stage['eligible'] ?? 0);
+        $opportunity = (int) ($stage['opportunity'] ?? 0);
+        $request = (int) ($stage['request'] ?? 0);
+        $showAttempt = (int) ($stage['show_attempt'] ?? 0);
+        $impression = (int) ($stage['impression'] ?? 0);
+        $paid = (int) ($stage['paid'] ?? 0);
+        unset($group['stages']);
+
+        return $group + [
+            'dauUsers' => $dau,
+            'eligibilityCheckUsers' => $check,
+            'eligibleUsers' => $eligible,
+            'opportunityUsers' => $opportunity,
+            'requestUsers' => $request,
+            'showAttemptUsers' => $showAttempt,
+            'impressionUsers' => $impression,
+            'paidUsers' => $paid,
+            'eligibilityPassRate' => $this->rate($eligible, $check),
+            'opportunityCoverageRate' => $this->rate($opportunity, $eligible),
+            'requestCoverageRate' => $this->rate($request, $opportunity),
+            'showAttemptRate' => $this->rate($showAttempt, $opportunity),
+            'impressionRate' => $this->rate($impression, $showAttempt),
+            'viewerRatio' => $this->rate($impression, $dau),
+            'paidRate' => $this->rate($paid, $impression),
         ];
     }
 
