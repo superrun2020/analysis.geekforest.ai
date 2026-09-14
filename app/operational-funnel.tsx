@@ -157,7 +157,11 @@ function hasMetric(metrics: AnyRow[], patterns: RegExp[]) {
 function metricNumericValue(metrics: AnyRow[], patterns: RegExp[]) {
   const row = metrics.find((metric) => patterns.some((pattern) => pattern.test(`${metric.name ?? ""} ${metric.metricKey ?? ""} ${metric.key ?? ""}`.toLowerCase())));
   if (!row) return null;
-  return numericValue(row, ["value", "count", "users", "displayValue", "metricValue", "metric_value"]);
+  const unit = `${row.unit ?? row.metricUnit ?? row.metric_unit ?? ""}`.toLowerCase();
+  const display = `${row.displayValue ?? row.display_value ?? ""}`;
+  const available = row.available ?? true;
+  if (unit === "ratio" || display.includes("%") || available === false) return null;
+  return numericValue(row, ["count", "users", "userCount", "user_count", "metricValue", "metric_value", "value"]);
 }
 
 function valueFromRows(rows: AnyRow[], patterns: RegExp[]) {
