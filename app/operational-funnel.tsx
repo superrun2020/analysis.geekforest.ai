@@ -2102,10 +2102,13 @@ function matrixDimensionLabel(key: string): string {
 const AD_DNS_DIMENSIONS: Array<{ key: string; label: string }> = [
   { key: "stat_date", label: "日期" },
   { key: "project_code", label: "项目" },
+  { key: "event_name", label: "事件" },
+  { key: "raw_event_name", label: "原始事件" },
   { key: "dns_provider", label: "DNS厂商" },
   { key: "dns_server", label: "DNS服务器" },
   { key: "target_id", label: "广告域名目标" },
   { key: "test_type", label: "测试类型" },
+  { key: "matched_route", label: "命中路由" },
   { key: "country_code", label: "国家" },
   { key: "platform", label: "平台" },
   { key: "app_version", label: "应用版本" },
@@ -2173,11 +2176,11 @@ function AdDnsReport({ data, dimensions, dates, projectCode, platform, country, 
         <label className="overall-filter-item"><span>App版本：</span><select value={appVersion} onChange={(event) => onAppVersionChange?.(event.target.value)}>{safeAppVersionOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
       </div>
       <div className="overall-action-row"><div className="overall-view-actions"><Button htmlType="button">全部项目DNS</Button><Button htmlType="button">Google Ads 域名</Button></div><div className="overall-query-actions"><Button htmlType="button">导出 CSV</Button><Button htmlType="button" onClick={() => setVisibleColumns(AD_DNS_COLUMNS.map((column) => column.key))}>重置</Button><Button htmlType="button" className="primary" onClick={() => onQuery(draftDimensions)} disabled={querying}>⌕ {querying ? "查询中…" : "查询"}</Button></div></div>
-      <div className="overall-active-hint">当前生效：{activeDimensions.map(adDnsDimensionLabel).join(" × ")} · 成功率 = result_status=success / 探测次数；DNS厂商、服务器、广告域名目标来自各项目上报的诊断参数。</div>
+      <div className="overall-active-hint">当前生效：{activeDimensions.map(adDnsDimensionLabel).join(" × ")} · 成功率 = result_status=success / 探测次数；DNS厂商、服务器、广告域名目标、命中路由来自各项目上报的诊断参数。</div>
     </section>
     <section className="surface overall-result-card ad-dns-result-card">
       <div className="overall-result-tools"><div><strong>广告DNS诊断</strong><span>{report.available === false ? "等待广告 DNS 诊断数据" : `${rows.length} 个DNS组合`}</span></div><div><Button htmlType="button" onClick={() => onQuery(draftDimensions)} disabled={querying}>刷新</Button><Button htmlType="button">设置</Button></div></div>
-      {report.available === false && <div className="diagnosis-no-reasons compact warn"><strong>当前没有可聚合的广告 DNS 诊断数据</strong><p>{text(report.reason)}。请确认所选项目已上报 <code>vpn_network_diagnostic</code>，且参数包含 <code>dns_provider</code>、<code>dns_server</code>、<code>target_id</code>。</p></div>}
+      {report.available === false && <div className="diagnosis-no-reasons compact warn"><strong>当前没有可聚合的广告 DNS 诊断数据</strong><p>{text(report.reason)}。请确认所选项目已上报 <code>vpn_network_diagnostic</code> 或 <code>jk_vpn_network_diagnostic</code>，且参数包含 <code>dns_provider</code>、<code>dns_server</code>、<code>target_id</code> 或 <code>matched_route</code>。</p></div>}
       {queryError && <div className="diagnosis-no-reasons compact warn"><strong>查询失败</strong><p>{queryError}</p></div>}
       <div className="table-wrap"><table className="version-compare-table ad-dns-table"><thead><tr>{activeDimensions.map((dimension) => <th key={dimension} className="sortable" onClick={() => setSort(`dimension:${dimension}`, "asc")}>{adDnsDimensionLabel(dimension)}{sortKey === `dimension:${dimension}` && <span className="sort-indicator">{sortDirection === "asc" ? "▲" : "▼"}</span>}</th>)}{AD_DNS_COLUMNS.filter((column) => shows(column.key)).map((column) => <th key={column.key} className="sortable" onClick={() => setSort(column.key)}>{column.label}{sortKey === column.key && <span className="sort-indicator">{sortDirection === "asc" ? "▲" : "▼"}</span>}</th>)}</tr></thead><tbody>{sortedRows.length === 0 && <tr><td colSpan={activeDimensions.length + visibleColumns.length}><div className="overall-empty-state">{querying ? "正在查询广告 DNS 诊断数据…" : "暂无数据"}</div></td></tr>}{sortedRows.slice(0, 100).map((row: AnyRow, index: number) => <tr key={`${row.dimensionKey ?? index}`} className={Number(row.successRate ?? 0) < 80 && Number(row.probes ?? 0) >= 10 ? "row-warn" : ""}>{activeDimensions.map((dimension) => <td key={dimension}><strong>{text(row.dimensions?.[dimension] ?? "unknown")}</strong></td>)}{AD_DNS_COLUMNS.filter((column) => shows(column.key)).map((column) => <td key={column.key}>{formatDnsCell(row, column.key)}</td>)}</tr>)}</tbody>{rows.length > 1 && <tfoot><tr><td colSpan={activeDimensions.length}><strong>摘要</strong><small>全部 {rows.length} 组</small></td>{AD_DNS_COLUMNS.filter((column) => shows(column.key)).map((column) => <td key={column.key}><strong>{column.key === "successRate" ? percent(totals.successRate) : column.key === "avgSuccessMs" ? "—" : number(totals[column.key])}</strong></td>)}</tr></tfoot>}</table></div>
       <div className="matrix-footnote">字段来源：{text(report.source)} / {text(report.eventName)}；{text(report.notice)}</div>

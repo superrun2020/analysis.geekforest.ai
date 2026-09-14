@@ -50,7 +50,7 @@ class FunnelAnalyticsQueryRequest extends FormRequest
             'unit' => ['nullable', Rule::in(['users', 'sessions', 'events'])],
             'dimension' => ['nullable', Rule::in(['stat_date', 'project_code', 'app_version', 'country_code', 'platform', 'network_type', 'device_model', 'ad_format', 'placement'])],
             'dimensions' => 'nullable|array|min:1|max:6',
-            'dimensions.*' => ['string', Rule::in(['event_date', 'stat_date', 'project_code', 'app_version', 'user_country_code', 'country_code', 'platform', 'asn', 'server_id', 'protocol', 'dns_provider', 'dns_server', 'target_id', 'test_type'])],
+            'dimensions.*' => ['string', Rule::in(['event_date', 'stat_date', 'project_code', 'app_version', 'user_country_code', 'country_code', 'platform', 'asn', 'server_id', 'protocol', 'event_name', 'raw_event_name', 'dns_provider', 'dns_server', 'target_id', 'test_type', 'matched_route'])],
             'startStep' => 'nullable|string|max:100',
             'endStep' => 'nullable|string|max:100',
             'screenName' => 'nullable|string|max:100',

@@ -5320,14 +5320,14 @@ class FunnelAnalyticsService
      */
     private function adDnsReport(array $params): array
     {
-        $allowedDimensions = ['stat_date', 'project_code', 'country_code', 'platform', 'app_version', 'dns_provider', 'dns_server', 'target_id', 'test_type'];
+        $allowedDimensions = ['stat_date', 'project_code', 'country_code', 'platform', 'app_version', 'event_name', 'raw_event_name', 'dns_provider', 'dns_server', 'target_id', 'test_type', 'matched_route'];
         $requested = array_values(array_filter(
             (array) ($params['dimensions'] ?? ['stat_date', 'dns_provider', 'target_id']),
             static fn ($dimension): bool => in_array($dimension, $allowedDimensions, true)
         ));
         $dimensions = array_values(array_unique(count($requested) ? $requested : ['stat_date', 'dns_provider', 'target_id']));
-        $jsonDimensions = ['dns_provider', 'dns_server', 'target_id', 'test_type'];
-        $jsonExpr = static fn (string $key): string => "COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(event_params_json, '$." . $key . "')), ''), 'unknown')";
+        $jsonDimensions = ['raw_event_name', 'dns_provider', 'dns_server', 'target_id', 'test_type', 'matched_route'];
+        $jsonExpr = static fn (string $key): string => "COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(event_params_json, '$." . ($key === 'raw_event_name' ? 'event_name' : $key) . "')), ''), 'unknown')";
 
         try {
             $selectParts = [];
@@ -5350,6 +5350,9 @@ class FunnelAnalyticsService
             $testTypeExpr = $jsonExpr('test_type');
             $providerExpr = $jsonExpr('dns_provider');
             $serverExpr = $jsonExpr('dns_server');
+            $routeExpr = $jsonExpr('matched_route');
+            $rawEventExpr = $jsonExpr('raw_event_name');
+            $adDiagnosticEvents = ['vpn_network_diagnostic', 'jk_vpn_network_diagnostic'];
             $successCase = "CASE WHEN result_status = 'success' THEN 1 ELSE 0 END";
             $timeoutCase = "CASE WHEN result_status = 'timeout' OR error_code LIKE '%timeout%' THEN 1 ELSE 0 END";
             $dnsFailureCase = "CASE WHEN result_status != 'success' AND (error_code LIKE '%UnknownHost%' OR error_code LIKE '%dns%' OR error_code LIKE '%nxdomain%') THEN 1 ELSE 0 END";
@@ -5357,10 +5360,14 @@ class FunnelAnalyticsService
 
             $query = DB::connection('adb')->table($this->eventTable())
                 ->whereBetween('event_date', [$params['dateFrom'], $params['dateTo']])
-                ->where('event_name', 'vpn_network_diagnostic')
-                ->where(function (Builder $query) use ($targetExpr): void {
+                ->where(function (Builder $query) use ($adDiagnosticEvents, $rawEventExpr): void {
+                    $query->whereIn('event_name', $adDiagnosticEvents)
+                        ->orWhereIn(DB::raw($rawEventExpr), $adDiagnosticEvents);
+                })
+                ->where(function (Builder $query) use ($targetExpr, $routeExpr): void {
                     $query->whereRaw("{$targetExpr} LIKE 'ad_%'")
-                        ->orWhereRaw("{$targetExpr} = 'unknown'");
+                        ->orWhereRaw("{$routeExpr} LIKE 'ad_%'")
+                        ->orWhereRaw("COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(event_params_json, '$.diagnostic_id')), ''), '') LIKE 'ss_ad_diag%'");
                 });
             if (!empty($params['projectCode'])) {
                 $query->where('project_code', (string) $params['projectCode']);
@@ -5382,7 +5389,7 @@ class FunnelAnalyticsService
             $groupBy = array_values(array_unique($groupBy));
 
             $rows = $query
-                ->selectRaw(implode(', ', $selectParts) . ", COUNT(*) AS probes, SUM({$successCase}) AS success_probes, SUM({$timeoutCase}) AS timeout_probes, SUM({$dnsFailureCase}) AS dns_failure_probes, COUNT(DISTINCT session_id) AS sessions, COUNT(DISTINCT my_user_id) AS users, {$avgSuccessMs} AS avg_success_ms, MIN({$providerExpr}) AS sample_dns_provider, MIN({$serverExpr}) AS sample_dns_server, MIN({$targetExpr}) AS sample_target_id, MIN({$testTypeExpr}) AS sample_test_type")
+                ->selectRaw(implode(', ', $selectParts) . ", COUNT(*) AS probes, SUM({$successCase}) AS success_probes, SUM({$timeoutCase}) AS timeout_probes, SUM({$dnsFailureCase}) AS dns_failure_probes, COUNT(DISTINCT session_id) AS sessions, COUNT(DISTINCT my_user_id) AS users, {$avgSuccessMs} AS avg_success_ms, MIN({$providerExpr}) AS sample_dns_provider, MIN({$serverExpr}) AS sample_dns_server, MIN({$targetExpr}) AS sample_target_id, MIN({$testTypeExpr}) AS sample_test_type, MIN({$routeExpr}) AS sample_matched_route, MIN({$rawEventExpr}) AS sample_raw_event_name")
                 ->groupBy($groupBy)
                 ->orderByDesc('probes')
                 ->limit((int) ($params['pageSize'] ?? 100))
@@ -5405,10 +5412,13 @@ class FunnelAnalyticsService
                 'country_code' => '国家',
                 'platform' => '平台',
                 'app_version' => '应用版本',
+                'event_name' => '事件',
+                'raw_event_name' => '原始事件',
                 'dns_provider' => 'DNS厂商',
                 'dns_server' => 'DNS服务器',
                 'target_id' => '广告域名目标',
                 'test_type' => '测试类型',
+                'matched_route' => '命中路由',
             ];
 
             return [
@@ -5418,8 +5428,8 @@ class FunnelAnalyticsService
                 'rows' => $rows->all(),
                 'totals' => $totals,
                 'source' => $this->eventTable(),
-                'eventName' => 'vpn_network_diagnostic',
-                'notice' => '广告 DNS 诊断报表读取各项目上报的 vpn_network_diagnostic；DNS厂商/服务器/广告域名目标来自 event_params_json，成功率 = result_status=success / 探测次数。',
+                'eventName' => 'vpn_network_diagnostic / jk_vpn_network_diagnostic',
+                'notice' => '广告 DNS 诊断报表读取各项目上报的 vpn_network_diagnostic/jk_vpn_network_diagnostic；仅纳入 target_id、matched_route 或 diagnostic_id 命中广告链路的诊断，成功率 = result_status=success / 探测次数。',
             ];
         } catch (Throwable $exception) {
             Log::warning('jkcl_ad_dns_report_failed', ['message' => $exception->getMessage()]);
@@ -5429,7 +5439,7 @@ class FunnelAnalyticsService
                 'rows' => [],
                 'totals' => [],
                 'source' => $this->eventTable(),
-                'eventName' => 'vpn_network_diagnostic',
+                'eventName' => 'vpn_network_diagnostic / jk_vpn_network_diagnostic',
                 'reason' => '广告 DNS 诊断读取失败：' . $exception->getMessage(),
             ];
         }
@@ -5472,6 +5482,8 @@ class FunnelAnalyticsService
             'sampleDnsServer' => (string) ($row->sample_dns_server ?? ''),
             'sampleTargetId' => (string) ($row->sample_target_id ?? ''),
             'sampleTestType' => (string) ($row->sample_test_type ?? ''),
+            'sampleMatchedRoute' => (string) ($row->sample_matched_route ?? ''),
+            'sampleRawEventName' => (string) ($row->sample_raw_event_name ?? ''),
         ];
     }
 

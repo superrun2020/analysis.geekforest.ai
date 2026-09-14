@@ -40,7 +40,7 @@ test("compiled bundle contains current product features", async () => {
   const js = await file(`dist/assets/${jsFile}`);
   assert.match(js, /广告漏斗Overall/);
   assert.match(js, /诊断报表/);
-  assert.match(js, /V144/);
+  assert.match(js, /V145/);
   assert.match(js, /sidebar-collapsed/);
   assert.match(js, /广告链路总表/);
 });
@@ -131,6 +131,8 @@ test("multi-project ad DNS report is registered in frontend and backend", async 
   assert.match(page, /广告DNS诊断/);
   assert.match(source, /AdDnsReport/);
   assert.match(source, /dns_provider/);
+  assert.match(source, /matched_route/);
+  assert.match(source, /jk_vpn_network_diagnostic/);
   assert.match(request, /ad_dns_report/);
   assert.match(request, /dns_server/);
   assert.match(service, /vpn_network_diagnostic/);
