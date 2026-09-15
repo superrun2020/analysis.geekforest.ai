@@ -2116,11 +2116,16 @@ const AD_DNS_DIMENSIONS: Array<{ key: string; label: string }> = [
 
 const AD_DNS_COLUMNS = [
   { key: "probes", label: "探测次数" },
-  { key: "successProbes", label: "成功次数" },
-  { key: "successRate", label: "解析/探测成功率", ratio: true },
-  { key: "failedProbes", label: "失败次数" },
+  { key: "dnsSuccessRate", label: "DNS解析成功率", ratio: true },
+  { key: "tcpSuccessRate", label: "TCP连接成功率", ratio: true },
+  { key: "httpsSuccessRate", label: "HTTPS探测成功率", ratio: true },
+  { key: "successRate", label: "总体广告节点探测成功率", ratio: true },
+  { key: "successProbes", label: "总体成功次数" },
+  { key: "failedProbes", label: "总体失败次数" },
   { key: "timeoutProbes", label: "超时次数" },
-  { key: "dnsFailureProbes", label: "DNS类失败" },
+  { key: "dnsFailureProbes", label: "DNS失败" },
+  { key: "tcpFailureProbes", label: "TCP失败" },
+  { key: "httpsFailureProbes", label: "HTTPS失败" },
   { key: "sessions", label: "Session" },
   { key: "users", label: "用户数" },
   { key: "avgSuccessMs", label: "成功平均耗时(ms)" },
@@ -2176,13 +2181,13 @@ function AdDnsReport({ data, dimensions, dates, projectCode, platform, country, 
         <label className="overall-filter-item"><span>App版本：</span><select value={appVersion} onChange={(event) => onAppVersionChange?.(event.target.value)}>{safeAppVersionOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
       </div>
       <div className="overall-action-row"><div className="overall-view-actions"><Button htmlType="button">全部项目DNS</Button><Button htmlType="button">Google Ads 域名</Button></div><div className="overall-query-actions"><Button htmlType="button">导出 CSV</Button><Button htmlType="button" onClick={() => setVisibleColumns(AD_DNS_COLUMNS.map((column) => column.key))}>重置</Button><Button htmlType="button" className="primary" onClick={() => onQuery(draftDimensions)} disabled={querying}>⌕ {querying ? "查询中…" : "查询"}</Button></div></div>
-      <div className="overall-active-hint">当前生效：{activeDimensions.map(adDnsDimensionLabel).join(" × ")} · 成功率 = result_status=success / 探测次数；DNS厂商、服务器、广告域名目标、命中路由来自各项目上报的诊断参数。</div>
+      <div className="overall-active-hint">当前生效：{activeDimensions.map(adDnsDimensionLabel).join(" × ")} · 已拆分 DNS / TCP / HTTPS / 总体广告节点探测成功率；总体成功率 = result_status=success / 探测次数。</div>
     </section>
     <section className="surface overall-result-card ad-dns-result-card">
       <div className="overall-result-tools"><div><strong>广告DNS诊断</strong><span>{report.available === false ? "等待广告 DNS 诊断数据" : `${rows.length} 个DNS组合`}</span></div><div><Button htmlType="button" onClick={() => onQuery(draftDimensions)} disabled={querying}>刷新</Button><Button htmlType="button">设置</Button></div></div>
       {report.available === false && <div className="diagnosis-no-reasons compact warn"><strong>当前没有可聚合的广告 DNS 诊断数据</strong><p>{text(report.reason)}。请确认所选项目已上报 <code>vpn_network_diagnostic</code> 或 <code>jk_vpn_network_diagnostic</code>，且参数包含 <code>dns_provider</code>、<code>dns_server</code>、<code>target_id</code> 或 <code>matched_route</code>。</p></div>}
       {queryError && <div className="diagnosis-no-reasons compact warn"><strong>查询失败</strong><p>{queryError}</p></div>}
-      <div className="table-wrap"><table className="version-compare-table ad-dns-table"><thead><tr>{activeDimensions.map((dimension) => <th key={dimension} className="sortable" onClick={() => setSort(`dimension:${dimension}`, "asc")}>{adDnsDimensionLabel(dimension)}{sortKey === `dimension:${dimension}` && <span className="sort-indicator">{sortDirection === "asc" ? "▲" : "▼"}</span>}</th>)}{AD_DNS_COLUMNS.filter((column) => shows(column.key)).map((column) => <th key={column.key} className="sortable" onClick={() => setSort(column.key)}>{column.label}{sortKey === column.key && <span className="sort-indicator">{sortDirection === "asc" ? "▲" : "▼"}</span>}</th>)}</tr></thead><tbody>{sortedRows.length === 0 && <tr><td colSpan={activeDimensions.length + visibleColumns.length}><div className="overall-empty-state">{querying ? "正在查询广告 DNS 诊断数据…" : "暂无数据"}</div></td></tr>}{sortedRows.slice(0, 100).map((row: AnyRow, index: number) => <tr key={`${row.dimensionKey ?? index}`} className={Number(row.successRate ?? 0) < 80 && Number(row.probes ?? 0) >= 10 ? "row-warn" : ""}>{activeDimensions.map((dimension) => <td key={dimension}><strong>{text(row.dimensions?.[dimension] ?? "unknown")}</strong></td>)}{AD_DNS_COLUMNS.filter((column) => shows(column.key)).map((column) => <td key={column.key}>{formatDnsCell(row, column.key)}</td>)}</tr>)}</tbody>{rows.length > 1 && <tfoot><tr><td colSpan={activeDimensions.length}><strong>摘要</strong><small>全部 {rows.length} 组</small></td>{AD_DNS_COLUMNS.filter((column) => shows(column.key)).map((column) => <td key={column.key}><strong>{column.key === "successRate" ? percent(totals.successRate) : column.key === "avgSuccessMs" ? "—" : number(totals[column.key])}</strong></td>)}</tr></tfoot>}</table></div>
+      <div className="table-wrap"><table className="version-compare-table ad-dns-table"><thead><tr>{activeDimensions.map((dimension) => <th key={dimension} className="sortable" onClick={() => setSort(`dimension:${dimension}`, "asc")}>{adDnsDimensionLabel(dimension)}{sortKey === `dimension:${dimension}` && <span className="sort-indicator">{sortDirection === "asc" ? "▲" : "▼"}</span>}</th>)}{AD_DNS_COLUMNS.filter((column) => shows(column.key)).map((column) => <th key={column.key} className="sortable" onClick={() => setSort(column.key)}>{column.label}{sortKey === column.key && <span className="sort-indicator">{sortDirection === "asc" ? "▲" : "▼"}</span>}</th>)}</tr></thead><tbody>{sortedRows.length === 0 && <tr><td colSpan={activeDimensions.length + visibleColumns.length}><div className="overall-empty-state">{querying ? "正在查询广告 DNS 诊断数据…" : "暂无数据"}</div></td></tr>}{sortedRows.slice(0, 100).map((row: AnyRow, index: number) => <tr key={`${row.dimensionKey ?? index}`} className={Number(row.successRate ?? 0) < 80 && Number(row.probes ?? 0) >= 10 ? "row-warn" : ""}>{activeDimensions.map((dimension) => <td key={dimension}><strong>{text(row.dimensions?.[dimension] ?? "unknown")}</strong></td>)}{AD_DNS_COLUMNS.filter((column) => shows(column.key)).map((column) => <td key={column.key}>{formatDnsCell(row, column.key)}</td>)}</tr>)}</tbody>{rows.length > 1 && <tfoot><tr><td colSpan={activeDimensions.length}><strong>摘要</strong><small>全部 {rows.length} 组</small></td>{AD_DNS_COLUMNS.filter((column) => shows(column.key)).map((column) => <td key={column.key}><strong>{(column as { ratio?: boolean }).ratio ? percent(totals[column.key]) : column.key === "avgSuccessMs" ? "—" : number(totals[column.key])}</strong></td>)}</tr></tfoot>}</table></div>
       <div className="matrix-footnote">字段来源：{text(report.source)} / {text(report.eventName)}；{text(report.notice)}</div>
     </section>
   </div>;

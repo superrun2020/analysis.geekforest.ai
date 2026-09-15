@@ -5354,8 +5354,16 @@ class FunnelAnalyticsService
             $rawEventExpr = $jsonExpr('raw_event_name');
             $adDiagnosticEvents = ['vpn_network_diagnostic', 'jk_vpn_network_diagnostic'];
             $successCase = "CASE WHEN result_status = 'success' THEN 1 ELSE 0 END";
-            $timeoutCase = "CASE WHEN result_status = 'timeout' OR error_code LIKE '%timeout%' THEN 1 ELSE 0 END";
-            $dnsFailureCase = "CASE WHEN result_status != 'success' AND (error_code LIKE '%UnknownHost%' OR error_code LIKE '%dns%' OR error_code LIKE '%nxdomain%') THEN 1 ELSE 0 END";
+            $dnsFailureCondition = "(error_code LIKE '%UnknownHost%' OR error_code LIKE '%nxdomain%' OR error_code LIKE '%dns_failed%' OR error_code LIKE '%dns fail%' OR error_code LIKE '%dns=failed%' OR error_code LIKE '%dns=timeout%')";
+            $tcpFailureCondition = "(error_code LIKE '%tcp_failed%' OR error_code LIKE '%tcp fail%' OR error_code LIKE '%tcp=failed%' OR error_code LIKE '%connectexception%' OR error_code LIKE '%connection refused%' OR error_code LIKE '%connection reset%')";
+            $httpsFailureCondition = "(error_code LIKE '%https_%' OR error_code LIKE '%https=%' OR error_code LIKE '%SocketTimeoutException%' OR error_code LIKE '%ssl%' OR error_code LIKE '%tls%')";
+            $timeoutCase = "CASE WHEN result_status = 'timeout' OR error_code LIKE '%timeout%' OR error_code LIKE '%Timeout%' THEN 1 ELSE 0 END";
+            $dnsFailureCase = "CASE WHEN result_status != 'success' AND {$dnsFailureCondition} THEN 1 ELSE 0 END";
+            $tcpFailureCase = "CASE WHEN result_status != 'success' AND NOT {$dnsFailureCondition} AND {$tcpFailureCondition} THEN 1 ELSE 0 END";
+            $httpsFailureCase = "CASE WHEN result_status != 'success' AND NOT {$dnsFailureCondition} AND NOT {$tcpFailureCondition} AND {$httpsFailureCondition} THEN 1 ELSE 0 END";
+            $dnsSuccessCase = "CASE WHEN result_status = 'success' OR error_code LIKE '%dns=success%' OR ({$testTypeExpr} IN ('http', 'https', 'tcp', 'tls') AND NOT {$dnsFailureCondition}) THEN 1 ELSE 0 END";
+            $tcpSuccessCase = "CASE WHEN result_status = 'success' OR error_code LIKE '%tcp=success%' OR ({$testTypeExpr} IN ('http', 'https') AND error_code LIKE '%https=%' AND NOT {$dnsFailureCondition} AND NOT {$tcpFailureCondition}) THEN 1 ELSE 0 END";
+            $httpsSuccessCase = "CASE WHEN result_status = 'success' OR error_code LIKE '%https=success%' THEN 1 ELSE 0 END";
             $avgSuccessMs = "AVG(CASE WHEN result_status = 'success' THEN duration_ms ELSE NULL END)";
 
             $query = DB::connection('adb')->table($this->eventTable())
@@ -5389,7 +5397,7 @@ class FunnelAnalyticsService
             $groupBy = array_values(array_unique($groupBy));
 
             $rows = $query
-                ->selectRaw(implode(', ', $selectParts) . ", COUNT(*) AS probes, SUM({$successCase}) AS success_probes, SUM({$timeoutCase}) AS timeout_probes, SUM({$dnsFailureCase}) AS dns_failure_probes, COUNT(DISTINCT session_id) AS sessions, COUNT(DISTINCT my_user_id) AS users, {$avgSuccessMs} AS avg_success_ms, MIN({$providerExpr}) AS sample_dns_provider, MIN({$serverExpr}) AS sample_dns_server, MIN({$targetExpr}) AS sample_target_id, MIN({$testTypeExpr}) AS sample_test_type, MIN({$routeExpr}) AS sample_matched_route, MIN({$rawEventExpr}) AS sample_raw_event_name")
+                ->selectRaw(implode(', ', $selectParts) . ", COUNT(*) AS probes, SUM({$successCase}) AS success_probes, SUM({$dnsSuccessCase}) AS dns_success_probes, SUM({$tcpSuccessCase}) AS tcp_success_probes, SUM({$httpsSuccessCase}) AS https_success_probes, SUM({$timeoutCase}) AS timeout_probes, SUM({$dnsFailureCase}) AS dns_failure_probes, SUM({$tcpFailureCase}) AS tcp_failure_probes, SUM({$httpsFailureCase}) AS https_failure_probes, COUNT(DISTINCT session_id) AS sessions, COUNT(DISTINCT my_user_id) AS users, {$avgSuccessMs} AS avg_success_ms, MIN({$providerExpr}) AS sample_dns_provider, MIN({$serverExpr}) AS sample_dns_server, MIN({$targetExpr}) AS sample_target_id, MIN({$testTypeExpr}) AS sample_test_type, MIN({$routeExpr}) AS sample_matched_route, MIN({$rawEventExpr}) AS sample_raw_event_name")
                 ->groupBy($groupBy)
                 ->orderByDesc('probes')
                 ->limit((int) ($params['pageSize'] ?? 100))
@@ -5398,12 +5406,15 @@ class FunnelAnalyticsService
                 ->values();
 
             $totals = $rows->reduce(function (array $carry, array $row): array {
-                foreach (['probes', 'successProbes', 'timeoutProbes', 'dnsFailureProbes', 'sessions', 'users'] as $key) {
+                foreach (['probes', 'successProbes', 'dnsSuccessProbes', 'tcpSuccessProbes', 'httpsSuccessProbes', 'timeoutProbes', 'dnsFailureProbes', 'tcpFailureProbes', 'httpsFailureProbes', 'sessions', 'users'] as $key) {
                     $carry[$key] = ($carry[$key] ?? 0) + (int) ($row[$key] ?? 0);
                 }
                 return $carry;
             }, []);
             $totals['successRate'] = ($totals['probes'] ?? 0) > 0 ? round(($totals['successProbes'] ?? 0) / $totals['probes'] * 100, 2) : null;
+            $totals['dnsSuccessRate'] = ($totals['probes'] ?? 0) > 0 ? round(($totals['dnsSuccessProbes'] ?? 0) / $totals['probes'] * 100, 2) : null;
+            $totals['tcpSuccessRate'] = ($totals['probes'] ?? 0) > 0 ? round(($totals['tcpSuccessProbes'] ?? 0) / $totals['probes'] * 100, 2) : null;
+            $totals['httpsSuccessRate'] = ($totals['probes'] ?? 0) > 0 ? round(($totals['httpsSuccessProbes'] ?? 0) / $totals['probes'] * 100, 2) : null;
             $totals['failureRate'] = ($totals['probes'] ?? 0) > 0 ? round((($totals['probes'] ?? 0) - ($totals['successProbes'] ?? 0)) / $totals['probes'] * 100, 2) : null;
 
             $labels = [
@@ -5429,7 +5440,7 @@ class FunnelAnalyticsService
                 'totals' => $totals,
                 'source' => $this->eventTable(),
                 'eventName' => 'vpn_network_diagnostic / jk_vpn_network_diagnostic',
-                'notice' => '广告 DNS 诊断报表读取各项目上报的 vpn_network_diagnostic/jk_vpn_network_diagnostic；仅纳入 target_id、matched_route 或 diagnostic_id 命中广告链路的诊断，成功率 = result_status=success / 探测次数。',
+                'notice' => '已拆分 DNS/TCP/HTTPS/总体广告节点探测成功率；DNS/TCP 阶段由 error_code 的 dns=success、tcp=success 和失败码推断，总体成功率仍按 result_status=success / 探测次数。',
             ];
         } catch (Throwable $exception) {
             Log::warning('jkcl_ad_dns_report_failed', ['message' => $exception->getMessage()]);
@@ -5470,12 +5481,20 @@ class FunnelAnalyticsService
             'dimensionKey' => implode('|', array_map(static fn ($value): string => (string) $value, $dimensionValues)),
             'probes' => $probes,
             'successProbes' => $success,
+            'dnsSuccessProbes' => (int) ($row->dns_success_probes ?? 0),
+            'tcpSuccessProbes' => (int) ($row->tcp_success_probes ?? 0),
+            'httpsSuccessProbes' => (int) ($row->https_success_probes ?? 0),
             'failedProbes' => max(0, $probes - $success),
             'timeoutProbes' => $timeouts,
             'dnsFailureProbes' => $dnsFailures,
+            'tcpFailureProbes' => (int) ($row->tcp_failure_probes ?? 0),
+            'httpsFailureProbes' => (int) ($row->https_failure_probes ?? 0),
             'sessions' => (int) ($row->sessions ?? 0),
             'users' => (int) ($row->users ?? 0),
             'successRate' => $probes > 0 ? round($success / $probes * 100, 2) : null,
+            'dnsSuccessRate' => $probes > 0 ? round((int) ($row->dns_success_probes ?? 0) / $probes * 100, 2) : null,
+            'tcpSuccessRate' => $probes > 0 ? round((int) ($row->tcp_success_probes ?? 0) / $probes * 100, 2) : null,
+            'httpsSuccessRate' => $probes > 0 ? round((int) ($row->https_success_probes ?? 0) / $probes * 100, 2) : null,
             'failureRate' => $probes > 0 ? round(($probes - $success) / $probes * 100, 2) : null,
             'avgSuccessMs' => $row->avg_success_ms !== null ? round((float) $row->avg_success_ms, 1) : null,
             'sampleDnsProvider' => (string) ($row->sample_dns_provider ?? ''),
