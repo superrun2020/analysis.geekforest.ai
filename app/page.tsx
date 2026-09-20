@@ -26,7 +26,7 @@ import { trackingApiBaseUrl } from "./api-base-url";
 import { createCodexQueryLinks } from "./codex-query-links-api";
 import { OperationsWorkspace, operationsEntries, legacyOperationsEntries, type OperationsEntry } from "./operations-workspace";
 
-const APP_VERSION = "V153";
+const APP_VERSION = "V154";
 const VERSION_MANIFEST_PATH = "/version.json";
 
 type PageKey =
@@ -290,18 +290,14 @@ async function createProjectReportShare(snapshot: OperationalReportSnapshot, mod
   return payload.data;
 }
 
-const moduleMenus: Array<{ key: ModuleKey; label: string; group: "经营分析" | "质量治理" }> = [
+const moduleMenus: Array<{ key: ModuleKey; label: string; group: "经营分析" }> = [
   { key: "funnel", label: "广告漏斗分析中心", group: "经营分析" },
   { key: "vpn", label: "VPN功能漏斗分析", group: "经营分析" },
   { key: "vpnReport", label: "诊断报表", group: "经营分析" },
   { key: "admob", label: "AdMob 分析", group: "经营分析" },
   { key: "firebase", label: "Firebase 数据", group: "经营分析" },
-  { key: "reconcile", label: "数据对账", group: "经营分析" },
-  { key: "report", label: "域名解析报表", group: "经营分析" },
-  { key: "tracking", label: "打点测试配置", group: "质量治理" },
-  { key: "tasks", label: "任务与告警", group: "质量治理" },
-  { key: "shareAlerts", label: "异常报警", group: "质量治理" },
 ];
+
 
 type VpnReportSectionKey = "matrix" | "adOverall" | "adDns" | "versions";
 const diagnosticReportMenus: Array<{ key: VpnReportSectionKey; label: string; hint: string }> = [
@@ -1697,13 +1693,10 @@ export default function Home() {
       <aside className="sidebar">
         <Button htmlType="button" className="sidebar-collapse-toggle" onClick={() => setSidebarCollapsed((value) => !value)} title={sidebarCollapsed ? "展开左侧菜单" : "折叠左侧菜单"} aria-label={sidebarCollapsed ? "展开左侧菜单" : "折叠左侧菜单"}>{sidebarCollapsed ? "›" : "‹"}</Button>
         <div className="brand"><span className="brand-mark">GF</span><span><strong>分析系统</strong><small className="version-line"><span>{APP_VERSION}</span><Button htmlType="button" onClick={checkLatestVersion} disabled={checkingLatestVersion} title="检测并打开线上最新版本">{checkingLatestVersion ? "检测中" : "刷新"}</Button></small></span></div>
-        <div className="nav-group-label">经营分析</div>
-        {moduleMenus.filter((item) => item.group === "经营分析").map((item) => item.key === "vpnReport" ? <div key={item.key} className={`nav-submenu ${module === "vpnReport" ? "active" : ""} ${diagnosticMenuOpen ? "open" : ""}`}><Button className={`main-nav-item nav-parent ${module === item.key ? "active" : ""}`} onClick={() => { openModule(item.key); setDiagnosticMenuOpen((value) => module === "vpnReport" ? !value : true); }} title={item.label}><b>{item.label}</b><em>{diagnosticMenuOpen ? "▾" : "▸"}</em></Button>{diagnosticMenuOpen && !sidebarCollapsed && <div className="nav-submenu-list">{diagnosticReportMenus.map((child) => <Button key={child.key} className={`nav-submenu-item ${vpnReportSection === child.key ? "active" : ""}`} onClick={() => openDiagnosticReport(child.key)}><strong>{child.label}</strong><small>{child.hint}</small></Button>)}</div>}</div> : <Button key={item.key} className={`main-nav-item ${module === item.key ? "active" : ""}`} onClick={() => openModule(item.key)} title={item.label}><b>{item.label}</b></Button>)}
-        <div className="nav-group-label">质量治理</div>
-        {moduleMenus.filter((item) => item.group === "质量治理").map((item) => <Button key={item.key} className={`main-nav-item ${module === item.key ? "active" : ""}`} onClick={() => openModule(item.key)} title={item.label}><b>{item.label}</b></Button>)}
-        <div className="nav-group-label">异常中心</div>
         {operationsEntries.map((item) => <Button key={item.key} className={`main-nav-item ${operationsActive && operationsEntry === item.key ? "active" : ""}`} onClick={() => { setOperationsEntry(item.key); setOperationsActive(true); const url = new URL(window.location.href); url.searchParams.set("operations", "overview"); url.searchParams.delete("operationsPage"); window.history.pushState(null, "", url); }} title={item.label}><b>{item.label}</b></Button>)}
-        <div className="sidebar-foot"><span className="status-dot" />线上数据接入<small>经营分析走线上接口；治理菜单按真实接口状态展示</small></div>
+        <div className="nav-group-label">经营分析</div>
+        {moduleMenus.filter((item) => item.group === "经营分析").map((item) => item.key === "vpnReport" ? <div key={item.key} className={`nav-submenu ${module === "vpnReport" ? "active" : ""} ${diagnosticMenuOpen ? "open" : ""}`}><Button className={`main-nav-item nav-parent ${module === item.key ? "active" : ""}`} onClick={() => { openModule(item.key); setDiagnosticMenuOpen((value) => module === "vpnReport" ? !value : true); }} title={item.label}><b>{item.label}</b><em>{diagnosticMenuOpen ? "▾" : "▸"}</em></Button>{diagnosticMenuOpen && !sidebarCollapsed && <div className="nav-submenu-list">{diagnosticReportMenus.map((child) => <Button key={child.key} className={`nav-submenu-item ${vpnReportSection === child.key ? "active" : ""}`} title={child.hint} onClick={() => openDiagnosticReport(child.key)}><strong>{child.label}</strong></Button>)}</div>}</div> : <Button key={item.key} className={`main-nav-item ${module === item.key ? "active" : ""}`} onClick={() => openModule(item.key)} title={item.label}><b>{item.label}</b></Button>)}
+        <div className="sidebar-foot"><span className="status-dot" />线上数据接入</div>
       </aside>
 
       <div className="workspace">

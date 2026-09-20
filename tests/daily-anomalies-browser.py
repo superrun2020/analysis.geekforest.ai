@@ -69,6 +69,26 @@ try:
   sidebar=page.locator('aside');assert sidebar.get_by_role('button',name='每日异常',exact=True).count()==1
   for label in ['运营总览','项目管理','问题跟进','自动监控','项目与Owner','设置与采集']:assert sidebar.get_by_role('button',name=label,exact=True).count()==0
   checks.append('only daily anomalies menu, no old management replacement entries')
+  for label in ['数据对账','域名解析报表','打点测试配置','任务与告警','异常报警']:
+   assert sidebar.get_by_role('button',name=label,exact=True).count()==0,label
+  assert sidebar.locator('.main-nav-item').first.inner_text()=='每日异常'
+  assert '质量治理' not in sidebar.inner_text()
+  geometry=[]
+  for height in [768,900]:
+   page.set_viewport_size({'width':1440,'height':height});page.wait_for_timeout(100)
+   sizes=sidebar.evaluate('(e)=>({client:e.clientHeight,scroll:e.scrollHeight,buttons:[...e.querySelectorAll(".main-nav-item,.nav-submenu-item")].map(b=>({label:b.innerText,y:b.getBoundingClientRect().y,bottom:b.getBoundingClientRect().bottom,height:b.getBoundingClientRect().height}))})')
+   main_heights=sidebar.locator('.main-nav-item').evaluate_all('(items)=>items.map(e=>e.getBoundingClientRect().height)')
+   submenu_heights=sidebar.locator('.nav-submenu-item').evaluate_all('(items)=>items.map(e=>e.getBoundingClientRect().height)')
+   assert main_heights and all(value==32 for value in main_heights),main_heights
+   assert submenu_heights and all(value==28 for value in submenu_heights),submenu_heights
+   assert sizes['scroll']<=sizes['client'],sizes
+   assert all(b['bottom']<height for b in sizes['buttons']),sizes
+   geometry.append({'viewportHeight':height,**sizes})
+   page.screenshot(path=str(scratch/f'v154-sidebar-{height}.png'))
+  sidebar.get_by_role('button',name='折叠左侧菜单',exact=True).click()
+  sidebar.get_by_role('button',name='展开左侧菜单',exact=True).click()
+  daily=sidebar.get_by_role('button',name='每日异常',exact=True);daily.focus();assert daily.evaluate('(e)=>document.activeElement===e')
+  checks.append({'compactSidebar':geometry,'collapseAndKeyboardFocus':True})
   for metric,coverage_field,visible_reason in [('广告浏览者比例','identityCoverage','当前去重展示用户/活跃用户'),('VPN连接成功率（终态）','sessionCoverage','成功终态/全部终态')]:
    page.get_by_role('button',name=metric,exact=True).click();metric_modal=page.locator('.ant-modal:visible');metric_modal.get_by_text('共 34 项（不是 Top 截取）',exact=True).wait_for();metric_rows=metric_modal.locator('tbody tr.ant-table-row');assert metric_rows.count()==20
    assert visible_reason in metric_rows.first.inner_text();assert ('缺用户标识事件' if metric.startswith('广告') else '终态') in metric_rows.first.inner_text()

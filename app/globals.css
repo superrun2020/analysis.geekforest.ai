@@ -3218,6 +3218,14 @@ tr:hover td { background: #f5f8ff; }
 .sidebar-collapse-toggle.ant-btn { right: -12px; }
 .app-shell.sidebar-collapsed .sidebar { padding: 16px 8px; }
 
+/* V154: compact expanded sidebar */
+.sidebar { padding: 12px 10px; }
+.brand { padding: 0 6px 10px; }
+.nav-group-label { padding: 8px 10px 4px; }
+.main-nav-item { min-height: 32px; }
+.nav-submenu-list { gap: 2px; padding: 2px 0 4px 10px; }
+.nav-submenu-item.ant-btn { min-height: 28px; padding: 3px 10px !important; }
+
 
 
 /* V142: simplify ad core funnel readability */
