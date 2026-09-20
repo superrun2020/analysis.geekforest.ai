@@ -12,7 +12,29 @@ from zoneinfo import ZoneInfo
 scratch=Path(os.environ['TMPDIR']).resolve(); tmp=Path(tempfile.mkdtemp(prefix='oa-phase2-qa-',dir=scratch));out=scratch/'native-anomaly-browser.json'
 now=datetime.now(ZoneInfo('Asia/Shanghai')).isoformat();dates=window(now)
 registry=[{'project_code':f'Q{i:03}','package_name':f'fixture.package.{i}'} for i in range(35)]
-sources={'ads':{'source':'fixture_only','rows':[{'projectCode':r['project_code'],'date':day,'requestCount':100,'loadSuccessCount':70,'loadFailedCount':30,'impressionCount':30} for r in registry for day in dates]}}
+def audience_rows():
+ rows=[]
+ for i,r in enumerate(registry):
+  rows.append({'projectCode':r['project_code'],'date':dates[-2],'adViewerUsers':80,'activeUsers':100,'missingUserIdEvents':2})
+  if i==34:continue
+  viewers,active=(120,100) if i==32 else (2,1) if i==33 else (1,0) if i==31 else (20,100)
+  rows.append({'projectCode':r['project_code'],'date':dates[-1],'adViewerUsers':viewers,'activeUsers':active,'missingUserIdEvents':2})
+ return rows
+def vpn_rows():
+ rows=[]
+ for i,r in enumerate(registry):
+  rows.append({'projectCode':r['project_code'],'date':dates[-2],'vpnConnectStartCount':120,'vpnConnectResultCount':100,'vpnConnectSuccessCount':90,'vpnConnectFailedCount':10,'vpnConnectUnknownStatusCount':0,'sameDayMissingTerminalCount':30,'missingConnectionIdEvents':3,'contradictoryConnectionCount':0,'sameDayUnmatchedTerminalCount':10})
+  if i==34:continue
+  terminal,success,contradiction=(100,50,0)
+  if i==32:terminal,success=(1,2)
+  if i==33:contradiction=1
+  if i==31:terminal,success,contradiction=(0,0,1)
+  rows.append({'projectCode':r['project_code'],'date':dates[-1],'vpnConnectStartCount':40,'vpnConnectResultCount':terminal,'vpnConnectSuccessCount':success,'vpnConnectFailedCount':max(0,terminal-success),'vpnConnectUnknownStatusCount':0,'sameDayMissingTerminalCount':15,'missingConnectionIdEvents':3,'contradictoryConnectionCount':contradiction,'sameDayUnmatchedTerminalCount':60})
+ return rows
+sources={
+ 'ads':{'source':'fixture_only','rows':[{'projectCode':r['project_code'],'date':day,'requestCount':100,'loadSuccessCount':70,'loadFailedCount':30,'impressionCount':30} for r in registry for day in dates]},
+ 'ad_audience':{'source':'fixture_final_selected_project_day','rows':audience_rows()},
+ 'vpn_connection':{'source':'fixture_final_result_project_day','rows':vpn_rows()}}
 publish(tmp/'anomalies.sqlite',build(registry,sources,dates,now))
 env={**os.environ,'OA_PHASE2_QA_DATA':str(tmp),'OA_PHASE2_BACKEND_PORT':'51981','OA_PHASE2_PROXY_PORT':'51982'}
 logs=[open(tmp/(n+'.log'),'w') for n in ('backend','proxy','static')]
@@ -47,6 +69,16 @@ try:
   sidebar=page.locator('aside');assert sidebar.get_by_role('button',name='每日异常',exact=True).count()==1
   for label in ['运营总览','项目管理','问题跟进','自动监控','项目与Owner','设置与采集']:assert sidebar.get_by_role('button',name=label,exact=True).count()==0
   checks.append('only daily anomalies menu, no old management replacement entries')
+  for metric,coverage_field,visible_reason in [('广告浏览者比例','identityCoverage','当前去重展示用户/活跃用户'),('VPN连接成功率（终态）','sessionCoverage','成功终态/全部终态')]:
+   page.get_by_role('button',name=metric,exact=True).click();metric_modal=page.locator('.ant-modal:visible');metric_modal.get_by_text('共 34 项（不是 Top 截取）',exact=True).wait_for();metric_rows=metric_modal.locator('tbody tr.ant-table-row');assert metric_rows.count()==20
+   assert visible_reason in metric_rows.first.inner_text();assert ('缺用户标识事件' if metric.startswith('广告') else '终态') in metric_rows.first.inner_text()
+   metric_rows.first.locator('td').first.click();assert metric_modal.get_by_text('实际错误消息 / 探测目标明细（不是推断根因）：',exact=True).count()>=1
+   with page.expect_download() as metric_dl:metric_modal.get_by_role('button',name='导出当前筛选全部 CSV').click()
+   metric_csv=list(csv.DictReader(io.StringIO(Path(metric_dl.value.path()).read_text(encoding='utf-8-sig'))));assert len(metric_csv)==34 and all(r[coverage_field] for r in metric_csv);assert any(r['status']=='data_anomaly' and r['denominator']=='1' for r in metric_csv);assert any(r['status']=='data_anomaly' and r['current']=='' for r in metric_csv)
+   metric_modal.get_by_label('异常明细范围').click();page.get_by_text('全部项目（含未命中/缺数）',exact=True).click();metric_modal.get_by_text('共 35 项（不是 Top 截取）',exact=True).wait_for()
+   metric_modal.get_by_label('异常明细范围').click();page.get_by_text('不可计算/缺数项目',exact=True).click();metric_modal.get_by_text('共 2 项（不是 Top 截取）',exact=True).wait_for()
+   metric_modal.locator('.ant-modal-close').click()
+  checks.append('both new metrics show reason/coverage, expand, affected/all/missing filters, >100/small/zero fixtures, and CSV coverage parity')
   page.get_by_role('button',name='广告加载终态成功率',exact=True).click();modal=page.locator('.ant-modal:visible');modal.get_by_text('共 35 项（不是 Top 截取）',exact=True).wait_for();rows=modal.locator('tbody tr.ant-table-row');assert rows.count()==20
   first=rows.all_inner_texts();modal.locator('.ant-pagination-item-2').click();page.wait_for_timeout(400);assert rows.count()==15 and not set(first)&set(rows.all_inner_texts())
   with page.expect_download() as dl:modal.get_by_role('button',name='导出当前筛选全部 CSV').click()

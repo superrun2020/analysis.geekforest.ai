@@ -12,6 +12,18 @@ test("Analysis exposes only native daily anomalies and retains authenticated API
   assert.match(page,/popstate/);assert.match(page,/legacyOperationsEntries/);
 });
 
+test("daily anomalies visibly explain package reasons, denominators, and coverage", async () => {
+  const source = await readFile(new URL("../app/daily-anomalies.jsx", import.meta.url), "utf8");
+  assert.match(source, /命中原因 \/ 样本/);
+  assert.match(source, /当前分子 \/ 分母/);
+  assert.match(source, /identityCoverage/);
+  assert.match(source, /sessionCoverage/);
+  assert.match(source, /广告浏览者比例/);
+  assert.match(source, /TCP明确握手低于.*或下降/);
+  assert.match(source, /广告加载终态低于.*或下降/);
+  assert.match(source, /VPN连接成功率（终态）=结果日成功终态/);
+});
+
 test("legacy nine operations URLs map only to fixed Analysis destinations", async () => {
   const source = await readFile(new URL("../scripts/operations-bridge.mjs", import.meta.url), "utf8");
   for (const view of ["Overview", "Projects", "Issues", "Team", "Acceptance", "Rules", "Alerts", "Runs", "Status"]) assert.match(source, new RegExp(`operations${view}`));
