@@ -335,7 +335,7 @@ function SnapshotReportShell({ report, meta, onlineViewers, packageErrors, metri
   const activeMenu = module === "vpn" || domain === "vpn" ? "vpn" : "funnel";
   return <div className="app-shell share-snapshot-shell">
     <aside className="sidebar">
-      <div className="brand"><span className="brand-mark">GF</span><span><strong>GeekForest 产品大脑</strong><small className="version-line"><span>质量分析中心 · V103</span><Button htmlType="button" disabled title="分享快照不刷新数据">快照</Button></small></span></div>
+      <div className="brand"><span className="brand-mark">GF</span><span><strong>分析系统</strong><small className="version-line"><span>质量分析中心 · V103</span><Button htmlType="button" disabled title="分享快照不刷新数据">快照</Button></small></span></div>
       <div className="nav-group-label">经营分析</div>
       {snapshotMenus.filter((item) => item.group === "经营分析").map((item) => <Button key={item.key} className={`main-nav-item ${activeMenu === item.key ? "active" : ""}`} disabled><b>{item.label}</b></Button>)}
       <div className="nav-group-label">质量治理</div>
@@ -509,7 +509,7 @@ export default function ProjectReportSharePage() {
   return <main className="public-report-shell">
     <section className="public-report-card public-report-hero">
       <div>
-        <span className="public-report-badge">GeekForest 产品大脑 · 项目报告快照</span>
+        <span className="public-report-badge">分析系统 · 项目报告快照</span>
         <h1>{text(meta?.title ?? report?.title)}</h1>
         <p>这是分享人固定保存的页面查询结果快照。打开报告不会重新查询线上数据，便于产品、运营、研发围绕同一份证据讨论。</p>
       </div>

@@ -140,7 +140,7 @@ export default function SharedReportPage() {
   return <main className="shared-report-shell">
     <section className="shared-report-card">
       <header className="shared-report-header">
-        <div className="shared-report-brand"><span>GF</span><strong>GeekForest 产品大脑</strong></div>
+        <div className="shared-report-brand"><span>GF</span><strong>分析系统</strong></div>
         <div>
           <h1>{meta?.title || "AI 诊断报告"}</h1>
           <p>外部分享报告无需系统登录；带访问 token 的链接会自动打开，打开次数不限制。</p>

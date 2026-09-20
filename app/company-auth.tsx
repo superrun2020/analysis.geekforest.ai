@@ -231,7 +231,7 @@ export function CompanyLogin({ onSignedIn }: { onSignedIn: (result: AuthResult) 
   }
 
   return <main className="company-login-shell"><section className="company-login-card">
-    <div className="company-login-brand"><span>GF</span><div><strong>GeekForest 产品大脑</strong><small>企业内部数据平台</small></div></div>
+    <div className="company-login-brand"><span>GF</span><div><strong>分析系统</strong><small>企业内部数据平台</small></div></div>
     <div className="company-login-copy"><h1>{step === "login" ? "使用企业账号登录" : "首次登录请修改密码"}</h1><p>{step === "login" ? "使用企业邮箱验证码或密码登录；系统会通过 OA/HRBP 核验极客主体在职员工身份。" : `当前账号：${email}`}</p></div>
     {step === "login" && <div className="company-login-tabs" role="tablist" aria-label="登录方式"><Button htmlType="button" role="tab" aria-selected={loginMode === "code"} className={loginMode === "code" ? "active" : ""} onClick={() => { setLoginMode("code"); setMessage(""); }}>验证码登录</Button><Button htmlType="button" role="tab" aria-selected={loginMode === "password"} className={loginMode === "password" ? "active" : ""} onClick={() => { setLoginMode("password"); setMessage(""); }}>密码登录</Button></div>}
     {step === "login" && loginMode === "code" ? <form onSubmit={submitCodeLogin}>
