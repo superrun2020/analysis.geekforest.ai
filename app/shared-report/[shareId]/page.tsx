@@ -49,6 +49,14 @@ function formatTime(value?: string) {
   return value.replace("T", " ").replace(/\.\d+Z?$/, "").slice(0, 19);
 }
 
+function isUnlimitedAccess(maxAccessCount?: number) {
+  return (maxAccessCount ?? 0) >= 999999;
+}
+
+function accessLimitLabel(maxAccessCount?: number, remainingAccessCount?: number) {
+  return isUnlimitedAccess(maxAccessCount) ? "不限制" : `${remainingAccessCount ?? 0}/${maxAccessCount ?? 3}`;
+}
+
 export default function SharedReportPage({ params }: PageProps) {
   const shareId = params.shareId;
   const [meta, setMeta] = useState<ShareMeta | null>(null);
@@ -123,7 +131,7 @@ export default function SharedReportPage({ params }: PageProps) {
         <div className="shared-report-brand"><span>GF</span><strong>GeekForest 产品大脑</strong></div>
         <div>
           <h1>{meta?.title || "AI 诊断报告"}</h1>
-          <p>外部分享报告无需系统登录；带访问 token 的链接会自动打开，每个链接最多成功打开 3 次。</p>
+          <p>外部分享报告无需系统登录；带访问 token 的链接会自动打开，打开次数不限制。</p>
         </div>
       </header>
 
@@ -132,7 +140,7 @@ export default function SharedReportPage({ params }: PageProps) {
       {!loading && meta && <div className="shared-report-meta">
         <div><span>项目</span><strong>{meta.projectCode || "—"}</strong></div>
         <div><span>报告类型</span><strong>{domainLabel(meta.domain)}</strong></div>
-        <div><span>剩余次数</span><strong>{meta.remainingAccessCount ?? 0}/{meta.maxAccessCount ?? 3}</strong></div>
+        <div><span>打开次数</span><strong>{accessLimitLabel(meta.maxAccessCount, meta.remainingAccessCount)}</strong></div>
         <div><span>生成时间</span><strong>{formatTime(meta.createdAt)}</strong></div>
       </div>}
 
@@ -142,15 +150,15 @@ export default function SharedReportPage({ params }: PageProps) {
           <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="请输入复制链接时附带的密码" autoComplete="off" />
         </label>
         <Button className="primary-button" disabled={opening || (meta?.status ?? "").toUpperCase() === "EXPIRED"}>{opening ? "正在打开…" : "打开报告"}</Button>
-        <small>密码错误不会扣次数；报告成功打开一次才扣 1 次。</small>
+        <small>带 token 的链接会自动打开；手动输入仅用于兼容旧链接。</small>
       </form>}
 
       {message && <div className="shared-report-message">{message}</div>}
 
       {report && <article className="shared-report-content">
         <div className="shared-report-opened">
-          <span>已打开：{report.accessCount}/{report.maxAccessCount}</span>
-          <span>剩余：{report.remainingAccessCount}</span>
+          <span>已打开：{report.accessCount}</span>
+          <span>次数限制：{accessLimitLabel(report.maxAccessCount, report.remainingAccessCount)}</span>
           <span>打开时间：{formatTime(report.openedAt)}</span>
         </div>
         <pre>{report.markdown}</pre>
