@@ -32,9 +32,15 @@ def vpn_rows():
   rows.append({'projectCode':r['project_code'],'date':dates[-1],'vpnConnectStartCount':40,'vpnConnectResultCount':terminal,'vpnConnectSuccessCount':success,'vpnConnectFailedCount':max(0,terminal-success),'vpnConnectUnknownStatusCount':0,'sameDayMissingTerminalCount':15,'missingConnectionIdEvents':3,'contradictoryConnectionCount':contradiction,'sameDayUnmatchedTerminalCount':60})
  return rows
 sources={
- 'ads':{'source':'fixture_only','rows':[{'projectCode':r['project_code'],'date':day,'requestCount':100,'loadSuccessCount':70,'loadFailedCount':30,'impressionCount':30} for r in registry for day in dates]},
+ 'ads':{'source':'fixture_only','checkedAt':now,'rows':[{'projectCode':r['project_code'],'date':day,'requestCount':100,'loadSuccessCount':70,'loadFailedCount':30,'impressionCount':30} for r in registry for day in dates]},
  'ad_audience':{'source':'fixture_final_selected_project_day','rows':audience_rows()},
- 'vpn_connection':{'source':'fixture_final_result_project_day','rows':vpn_rows()}}
+ 'vpn_connection':{'source':'fixture_final_result_project_day','rows':vpn_rows()},
+ 'errors':{'source':'fixture_all_source_raw_COUNT','checkedAt':now,'rows':[
+  {'project_code':'Q000','event_date':dates[-1],'error_category':'internal_error','error_code':'JavaScriptEngine','error_message':'JavaScriptEngine crashed <script>window.__injected=1</script>','n':30},
+  {'project_code':'Q000','event_date':dates[-1],'error_category':'internal_error','error_code':'DNS','error_message':'DNS host reset','n':29},
+  {'project_code':'Q000','event_date':dates[-1],'error_category':'internal_error','error_code':'INTERNAL','error_message':'plain Internal error','n':28},
+  *[{'project_code':'Q000','event_date':dates[-1],'error_category':'internal_error','error_code':f'CODE-{i}','error_message':f'long-tail-{i}','n':30-i} for i in range(3,15)],
+  {'project_code':'Q000','event_date':dates[-1],'error_category':None,'error_code':None,'error_message':None,'n':1}]}}
 publish(tmp/'anomalies.sqlite',build(registry,sources,dates,now))
 env={**os.environ,'OA_PHASE2_QA_DATA':str(tmp),'OA_PHASE2_BACKEND_PORT':'51981','OA_PHASE2_PROXY_PORT':'51982'}
 logs=[open(tmp/(n+'.log'),'w') for n in ('backend','proxy','static')]
@@ -99,8 +105,19 @@ try:
    metric_modal.get_by_label('异常明细范围').click();page.get_by_text('不可计算/缺数项目',exact=True).click();metric_modal.get_by_text('共 2 项（不是 Top 截取）',exact=True).wait_for()
    metric_modal.locator('.ant-modal-close').click()
   checks.append('both new metrics show reason/coverage, expand, affected/all/missing filters, >100/small/zero fixtures, and CSV coverage parity')
-  page.get_by_role('button',name='广告加载终态成功率',exact=True).click();modal=page.locator('.ant-modal:visible');modal.get_by_text('共 35 项（不是 Top 截取）',exact=True).wait_for();rows=modal.locator('tbody tr.ant-table-row');assert rows.count()==20
-  first=rows.all_inner_texts();modal.locator('.ant-pagination-item-2').click();page.wait_for_timeout(400);assert rows.count()==15 and not set(first)&set(rows.all_inner_texts())
+  page.get_by_role('button',name='广告加载终态成功率',exact=True).click();modal=page.locator('.ant-modal:visible');modal.get_by_text('共 35 项（不是 Top 截取）',exact=True).wait_for();rows=modal.locator('.ant-table-wrapper').first.locator('tbody').first.locator(':scope > tr.ant-table-row');assert rows.count()==20
+  first_row=rows.first
+  direct=first_row.inner_text();assert 'JavaScriptEngine crashed <script>window.__injected=1</script>' in direct;assert 'DNS host reset' in direct;assert 'plain Internal error' in direct
+  assert '错误日志分布（事件口径）' in direct and 'raw event total' in direct and 'all-source incl retries' in direct
+  assert 'request/final scope' in direct and '差异（未对账）' in direct and 'checkedAt' in direct
+  unknown=rows.nth(1).inner_text();assert '无观测' in unknown and 'raw event total —' in unknown and '来源不可用' in unknown
+  project_left=first_row.locator('td').nth(0).bounding_box()['x'];reason_left=first_row.get_by_test_id('failure-reasons').bounding_box()['x'];assert reason_left-project_left<620
+  assert page.evaluate('window.__injected') is None
+  reason_head=first_row.locator('.ant-table-wrapper thead').first.inner_text();assert '类别' in reason_head and '错误码' in reason_head and '消息' in reason_head
+  first_row.get_by_text('另13类，展开全部',exact=True).click();first_row.get_by_text('long-tail-9',exact=True).wait_for();first_row.locator('.ant-pagination-item-2').last.click();first_row.get_by_text('long-tail-14',exact=True).wait_for();first_row.get_by_text('(空错误消息)',exact=True).wait_for()
+  first_row.locator('td').first.click();expanded=modal.locator('tr.ant-table-expanded-row').first;expanded.wait_for()
+  checks.append('ad_load directly shows real top3 category/code/message; escaped HTML; full long-tail+unknown pagination; raw/summary denominators and provenance')
+  first=rows.all_inner_texts();modal.locator('.ant-pagination-item-2').last.click();page.wait_for_timeout(400);assert rows.count()==15 and not set(first)&set(rows.all_inner_texts())
   with page.expect_download() as dl:modal.get_by_role('button',name='导出当前筛选全部 CSV').click()
   records=list(csv.DictReader(io.StringIO(Path(dl.value.path()).read_text(encoding='utf-8-sig'))));assert len(records)==35
   checks.append('real isolated API: all 35 packages paginated 20+15 and CSV count identical')

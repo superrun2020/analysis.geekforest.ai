@@ -14,7 +14,16 @@ test("Analysis exposes only native daily anomalies and retains authenticated API
 
 test("daily anomalies visibly explain package reasons, denominators, and coverage", async () => {
   const source = await readFile(new URL("../app/daily-anomalies.jsx", import.meta.url), "utf8");
-  assert.match(source, /命中原因 \/ 样本/);
+  assert.match(source, /筛选依据 \/ 样本/);
+  assert.match(source, /失败原因/);
+  assert.match(source, /另.*类.*展开全部/);
+  assert.match(source, /错误日志分布（事件口径）/);
+  assert.match(source, /failureReasonDistribution/);
+  assert.match(source, /raw event total/);
+  assert.match(source, /all-source incl retries/);
+  assert.match(source, /request\/final scope/);
+  assert.match(source, /checkedAt/);
+  assert.match(source, /来源不可用|无观测/);
   assert.match(source, /当前分子 \/ 分母/);
   assert.match(source, /identityCoverage/);
   assert.match(source, /sessionCoverage/);
