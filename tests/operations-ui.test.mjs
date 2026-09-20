@@ -2,19 +2,14 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-test("Analysis exposes four operations entries while retaining one mounted iframe", async () => {
+test("Analysis exposes only native daily anomalies and retains authenticated API session", async () => {
   const source = await readFile(new URL("../app/operations-workspace.tsx", import.meta.url), "utf8");
-  for (const label of ["运营总览", "项目管理", "问题跟进", "自动监控"]) assert.match(source, new RegExp(label));
-  for (const label of ["经营", "团队", "项目", "问题", "告警", "验收", "规则", "运行", "状态"]) assert.match(source, new RegExp(`label: "${label}"`));
-  assert.equal((source.match(/<iframe/g) || []).length, 1);
-  assert.match(source, /display:\s*active/);
-  assert.match(source, /正在建立安全运营会话/);
-  assert.match(source, /运营服务连接较慢/);
-  assert.match(source, /运营服务暂不可用/);
-  assert.match(source, /data-bootstrap-count/);
-  assert.match(source, /retryGeneration/);
-  assert.match(source, /src="\/operations\/\?embedded=1#\/overview"/);
-  assert.doesNotMatch(source, /src=\{[^}]*page/);
+  assert.match(source,/DailyAnomalies/);assert.match(source,/每日异常/);
+  assert.doesNotMatch(source,/<iframe|contentWindow|operations-subnav|embedded=1/);
+  assert.doesNotMatch(source,/label:\s*["'](?:运营总览|项目管理|问题跟进|自动监控|项目与Owner|设置与采集)/);
+  assert.match(source,/\/operations\/session/);assert.match(source,/getCompanyAuthToken/);
+  const page=await readFile(new URL("../app/page.tsx",import.meta.url),"utf8");
+  assert.match(page,/popstate/);assert.match(page,/legacyOperationsEntries/);
 });
 
 test("legacy nine operations URLs map only to fixed Analysis destinations", async () => {

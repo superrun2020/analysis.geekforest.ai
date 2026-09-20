@@ -24,9 +24,9 @@ import { ShareAlertsPage } from "./share-alerts-page";
 import { DomainReportPage } from "./domain-report";
 import { trackingApiBaseUrl } from "./api-base-url";
 import { createCodexQueryLinks } from "./codex-query-links-api";
-import { OperationsWorkspace, operationsEntries, type OperationsEntry } from "./operations-workspace";
+import { OperationsWorkspace, operationsEntries, legacyOperationsEntries, type OperationsEntry } from "./operations-workspace";
 
-const APP_VERSION = "V151";
+const APP_VERSION = "V152";
 const VERSION_MANIFEST_PATH = "/version.json";
 
 type PageKey =
@@ -1023,8 +1023,18 @@ export default function Home() {
   const [module, setModule] = useState<ModuleKey>("funnel");
   const initialOperationsEntry = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("operations") as OperationsEntry | null : null;
   const initialOperationsPage = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("operationsPage") : null;
-  const [operationsActive, setOperationsActive] = useState(() => operationsEntries.some((item) => item.key === initialOperationsEntry));
-  const [operationsEntry, setOperationsEntry] = useState<OperationsEntry>(() => operationsEntries.some((item) => item.key === initialOperationsEntry) ? initialOperationsEntry as OperationsEntry : "overview");
+  const [operationsActive, setOperationsActive] = useState(() => legacyOperationsEntries.has(initialOperationsEntry || ""));
+  const [operationsEntry, setOperationsEntry] = useState<OperationsEntry>("overview");
+  useEffect(() => {
+    const sync = () => {
+      const url = new URL(window.location.href);
+      const active = legacyOperationsEntries.has(url.searchParams.get("operations") || "");
+      setOperationsActive(active); setOperationsEntry("overview");
+      if (active) { url.searchParams.set("operations", "overview"); url.searchParams.delete("operationsPage"); window.history.replaceState(null, "", url); }
+    };
+    sync(); window.addEventListener("popstate", sync);
+    return () => window.removeEventListener("popstate", sync);
+  }, []);
   const [page, setPage] = useState<PageKey>("overview");
   const [embedded, setEmbedded] = useState(false);
   const [project, setProject] = useState(initialProjectCode);
@@ -1541,7 +1551,7 @@ export default function Home() {
   }
 
   function openModule(next: ModuleKey) {
-    setOperationsActive(false);
+    setOperationsActive(false); const url = new URL(window.location.href); url.searchParams.delete("operations"); url.searchParams.delete("operationsPage"); window.history.pushState(null, "", url);
     setReportSnapshot(null);
     setConfigWorkspaceOpen(false);
     setEditingConfig(null);
@@ -1691,8 +1701,8 @@ export default function Home() {
         {moduleMenus.filter((item) => item.group === "经营分析").map((item) => item.key === "vpnReport" ? <div key={item.key} className={`nav-submenu ${module === "vpnReport" ? "active" : ""} ${diagnosticMenuOpen ? "open" : ""}`}><Button className={`main-nav-item nav-parent ${module === item.key ? "active" : ""}`} onClick={() => { openModule(item.key); setDiagnosticMenuOpen((value) => module === "vpnReport" ? !value : true); }} title={item.label}><b>{item.label}</b><em>{diagnosticMenuOpen ? "▾" : "▸"}</em></Button>{diagnosticMenuOpen && !sidebarCollapsed && <div className="nav-submenu-list">{diagnosticReportMenus.map((child) => <Button key={child.key} className={`nav-submenu-item ${vpnReportSection === child.key ? "active" : ""}`} onClick={() => openDiagnosticReport(child.key)}><strong>{child.label}</strong><small>{child.hint}</small></Button>)}</div>}</div> : <Button key={item.key} className={`main-nav-item ${module === item.key ? "active" : ""}`} onClick={() => openModule(item.key)} title={item.label}><b>{item.label}</b></Button>)}
         <div className="nav-group-label">质量治理</div>
         {moduleMenus.filter((item) => item.group === "质量治理").map((item) => <Button key={item.key} className={`main-nav-item ${module === item.key ? "active" : ""}`} onClick={() => openModule(item.key)} title={item.label}><b>{item.label}</b></Button>)}
-        <div className="nav-group-label">运营管理</div>
-        {operationsEntries.map((item) => <Button key={item.key} className={`main-nav-item ${operationsActive && operationsEntry === item.key ? "active" : ""}`} onClick={() => { setOperationsEntry(item.key); setOperationsActive(true); }} title={item.label}><b>{item.label}</b></Button>)}
+        <div className="nav-group-label">异常中心</div>
+        {operationsEntries.map((item) => <Button key={item.key} className={`main-nav-item ${operationsActive && operationsEntry === item.key ? "active" : ""}`} onClick={() => { setOperationsEntry(item.key); setOperationsActive(true); const url = new URL(window.location.href); url.searchParams.set("operations", "overview"); url.searchParams.delete("operationsPage"); window.history.pushState(null, "", url); }} title={item.label}><b>{item.label}</b></Button>)}
         <div className="sidebar-foot"><span className="status-dot" />线上数据接入<small>经营分析走线上接口；治理菜单按真实接口状态展示</small></div>
       </aside>
 
