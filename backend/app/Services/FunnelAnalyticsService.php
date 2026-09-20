@@ -83,7 +83,7 @@ class FunnelAnalyticsService
     /** Return the lightweight project selector without calculating every analysis dimension. */
     public function projects(): array
     {
-        return Cache::remember('jkcl_funnel:projects:firebase-first:v18', 300, function (): array {
+        return Cache::remember('jkcl_funnel:projects:firebase-first:v18', 21600, function (): array {
             $firebaseProjects = $this->firebaseConfiguredProjects(['ACTIVE']);
             if ($firebaseProjects) {
                 return $firebaseProjects;
@@ -265,39 +265,41 @@ class FunnelAnalyticsService
      */
     public function options(): array
     {
-        $table = 'dws_app_funnel_stage_daily';
-        $connection = DB::connection('adb');
-        $projects = $this->projects();
+        return Cache::remember('jkcl_funnel:options:summary-v18', 21600, function (): array {
+            $table = 'dws_app_funnel_stage_daily';
+            $connection = DB::connection('adb');
+            $projects = $this->projects();
 
-        $today = Carbon::now(config('app.timezone', 'Asia/Shanghai'))->toDateString();
-        $dimensions = $connection->table($table)
-            ->where('stat_date', '<=', $today)
-            ->selectRaw('MIN(stat_date) AS min_date, MAX(stat_date) AS max_date')
-            ->first();
+            $today = Carbon::now(config('app.timezone', 'Asia/Shanghai'))->toDateString();
+            $dimensions = $connection->table($table)
+                ->where('stat_date', '<=', $today)
+                ->selectRaw('MIN(stat_date) AS min_date, MAX(stat_date) AS max_date')
+                ->first();
 
-        return [
-            'projects' => $projects,
-            'platforms' => $this->summaryDistinctValues('platform'),
-            'countries' => $this->summaryDistinctValues('country_code'),
-            'appVersions' => $this->summaryDistinctValues('app_version'),
-            'buildNumbers' => $this->summaryDistinctValues('build_number', 100, false),
-            'versions' => $this->summaryVersionOptions(),
-            'networkTypes' => $this->summaryDistinctValues('network_type'),
-            'placements' => $this->summaryDistinctValues('placement', table: 'dws_ad_fulfillment_daily'),
-            'adFormats' => $this->summaryDistinctValues('ad_format', table: 'dws_ad_fulfillment_daily'),
-            'adSources' => $this->summaryDistinctValues('ad_source', table: 'dws_ad_fulfillment_daily'),
-            'eventModules' => [],
-            'qualityStatuses' => $this->summaryDistinctValues('data_status'),
-            'sourceTypes' => $this->summarySourceTypeOptions(),
-            'events' => DB::connection('adb')->table('dws_app_event_quality_daily')
-                ->whereNotNull('event_name')->where('event_name', '!=', '')
-                ->distinct()->orderBy('event_name')->limit(200)->pluck('event_name')->values()->all(),
-            'dateRange' => [
-                'min' => $dimensions?->min_date,
-                'max' => $dimensions?->max_date,
-            ],
-            'metricDictionary' => self::METRIC_DICTIONARY,
-        ];
+            return [
+                'projects' => $projects,
+                'platforms' => $this->summaryDistinctValues('platform'),
+                'countries' => $this->summaryDistinctValues('country_code'),
+                'appVersions' => $this->summaryDistinctValues('app_version'),
+                'buildNumbers' => $this->summaryDistinctValues('build_number', 100, false),
+                'versions' => $this->summaryVersionOptions(),
+                'networkTypes' => $this->summaryDistinctValues('network_type'),
+                'placements' => $this->summaryDistinctValues('placement', table: 'dws_ad_fulfillment_daily'),
+                'adFormats' => $this->summaryDistinctValues('ad_format', table: 'dws_ad_fulfillment_daily'),
+                'adSources' => $this->summaryDistinctValues('ad_source', table: 'dws_ad_fulfillment_daily'),
+                'eventModules' => [],
+                'qualityStatuses' => $this->summaryDistinctValues('data_status'),
+                'sourceTypes' => $this->summarySourceTypeOptions(),
+                'events' => DB::connection('adb')->table('dws_app_event_quality_daily')
+                    ->whereNotNull('event_name')->where('event_name', '!=', '')
+                    ->distinct()->orderBy('event_name')->limit(200)->pluck('event_name')->values()->all(),
+                'dateRange' => [
+                    'min' => $dimensions?->min_date,
+                    'max' => $dimensions?->max_date,
+                ],
+                'metricDictionary' => self::METRIC_DICTIONARY,
+            ];
+        });
     }
 
     /**
