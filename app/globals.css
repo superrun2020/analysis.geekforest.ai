@@ -63,7 +63,10 @@ button { color: inherit; }
 .app-shell.sidebar-collapsed { grid-template-columns: 66px minmax(0, 1fr); }
 .app-shell.embedded { grid-template-columns: minmax(0, 1fr); }
 .app-shell.embedded .sidebar { display: none; }
-.sidebar { min-height: 100vh; position: sticky; top: 0; align-self: start; height: 100vh; background: var(--nav); color: var(--nav-muted); padding: 20px 14px; display: flex; flex-direction: column; transition: width .18s ease, padding .18s ease; }
+.sidebar { min-height: 100vh; position: sticky; top: 0; align-self: start; height: 100vh; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; background: var(--nav); color: var(--nav-muted); padding: 20px 14px; display: flex; flex-direction: column; transition: width .18s ease, padding .18s ease; }
+.sidebar::-webkit-scrollbar { width: 7px; }
+.sidebar::-webkit-scrollbar-thumb { border-radius: 999px; background: rgba(143,160,187,.35); }
+.sidebar::-webkit-scrollbar-track { background: transparent; }
 .sidebar-collapse-toggle.ant-btn { position: absolute; z-index: 5; top: 184px; right: -13px; width: 26px; height: 42px; padding: 0; border: 1px solid #d7e0eb; border-radius: 999px; background: #fff; color: #23406d; box-shadow: 0 8px 18px rgba(18,29,48,.14); font-size: 18px; font-weight: 900; }
 .sidebar-collapse-toggle.ant-btn:hover { border-color: #6d8ee4; color: var(--blue); }
 .brand { display: flex; align-items: center; gap: 11px; color: white; padding: 0 9px 22px; }
