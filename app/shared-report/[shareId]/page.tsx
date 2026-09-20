@@ -59,9 +59,10 @@ export default function SharedReportPage({ params }: PageProps) {
   const [message, setMessage] = useState("");
   const autoOpened = useRef(false);
 
-  const passwordFromUrl = useMemo(() => {
+  const accessTokenFromUrl = useMemo(() => {
     if (typeof window === "undefined") return "";
-    return new URLSearchParams(window.location.search).get("password") ?? "";
+    const params = new URLSearchParams(window.location.search);
+    return params.get("token") ?? params.get("password") ?? "";
   }, []);
 
   async function loadMeta() {
@@ -91,8 +92,11 @@ export default function SharedReportPage({ params }: PageProps) {
       const next = await publicApi<ShareReport>(`/api/v3/jkcl-funnel/shared-reports/${encodeURIComponent(shareId)}/open`, { password: nextPassword.trim() });
       setReport(next);
       setMeta(next);
-      if (typeof window !== "undefined" && window.location.search.includes("password=")) {
-        window.history.replaceState(null, "", window.location.pathname);
+      if (typeof window !== "undefined" && (window.location.search.includes("password=") || window.location.search.includes("token="))) {
+        const clean = new URL(window.location.href);
+        clean.searchParams.delete("password");
+        clean.searchParams.delete("token");
+        window.history.replaceState(null, "", clean.toString());
       }
     } catch (error) {
       setReport(null);
@@ -107,11 +111,11 @@ export default function SharedReportPage({ params }: PageProps) {
   }, [shareId]);
 
   useEffect(() => {
-    if (autoOpened.current || loading || !passwordFromUrl) return;
+    if (autoOpened.current || loading || !accessTokenFromUrl) return;
     autoOpened.current = true;
-    setPassword(passwordFromUrl);
-    void openReport(passwordFromUrl);
-  }, [loading, passwordFromUrl]);
+    setPassword(accessTokenFromUrl);
+    void openReport(accessTokenFromUrl);
+  }, [loading, accessTokenFromUrl]);
 
   return <main className="shared-report-shell">
     <section className="shared-report-card">
@@ -119,7 +123,7 @@ export default function SharedReportPage({ params }: PageProps) {
         <div className="shared-report-brand"><span>GF</span><strong>GeekForest 产品大脑</strong></div>
         <div>
           <h1>{meta?.title || "AI 诊断报告"}</h1>
-          <p>外部分享报告无需系统登录，但需要访问密码；每个链接最多成功打开 3 次。</p>
+          <p>外部分享报告无需系统登录；带访问 token 的链接会自动打开，每个链接最多成功打开 3 次。</p>
         </div>
       </header>
 
