@@ -24,8 +24,9 @@ import { ShareAlertsPage } from "./share-alerts-page";
 import { DomainReportPage } from "./domain-report";
 import { trackingApiBaseUrl } from "./api-base-url";
 import { createCodexQueryLinks } from "./codex-query-links-api";
+import { OperationsWorkspace, operationsEntries, type OperationsEntry } from "./operations-workspace";
 
-const APP_VERSION = "V146";
+const APP_VERSION = "V147";
 const VERSION_MANIFEST_PATH = "/version.json";
 
 type PageKey =
@@ -1020,6 +1021,10 @@ export default function Home() {
   const isProjectReportShareMode = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("projectReportShare") === "1";
   const initialProjectCode = readInitialProjectCode();
   const [module, setModule] = useState<ModuleKey>("funnel");
+  const initialOperationsEntry = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("operations") as OperationsEntry | null : null;
+  const initialOperationsPage = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("operationsPage") : null;
+  const [operationsActive, setOperationsActive] = useState(() => operationsEntries.some((item) => item.key === initialOperationsEntry));
+  const [operationsEntry, setOperationsEntry] = useState<OperationsEntry>(() => operationsEntries.some((item) => item.key === initialOperationsEntry) ? initialOperationsEntry as OperationsEntry : "overview");
   const [page, setPage] = useState<PageKey>("overview");
   const [embedded, setEmbedded] = useState(false);
   const [project, setProject] = useState(initialProjectCode);
@@ -1536,6 +1541,7 @@ export default function Home() {
   }
 
   function openModule(next: ModuleKey) {
+    setOperationsActive(false);
     setReportSnapshot(null);
     setConfigWorkspaceOpen(false);
     setEditingConfig(null);
@@ -1685,16 +1691,18 @@ export default function Home() {
         {moduleMenus.filter((item) => item.group === "经营分析").map((item) => item.key === "vpnReport" ? <div key={item.key} className={`nav-submenu ${module === "vpnReport" ? "active" : ""} ${diagnosticMenuOpen ? "open" : ""}`}><Button className={`main-nav-item nav-parent ${module === item.key ? "active" : ""}`} onClick={() => { openModule(item.key); setDiagnosticMenuOpen((value) => module === "vpnReport" ? !value : true); }} title={item.label}><b>{item.label}</b><em>{diagnosticMenuOpen ? "▾" : "▸"}</em></Button>{diagnosticMenuOpen && !sidebarCollapsed && <div className="nav-submenu-list">{diagnosticReportMenus.map((child) => <Button key={child.key} className={`nav-submenu-item ${vpnReportSection === child.key ? "active" : ""}`} onClick={() => openDiagnosticReport(child.key)}><strong>{child.label}</strong><small>{child.hint}</small></Button>)}</div>}</div> : <Button key={item.key} className={`main-nav-item ${module === item.key ? "active" : ""}`} onClick={() => openModule(item.key)} title={item.label}><b>{item.label}</b></Button>)}
         <div className="nav-group-label">质量治理</div>
         {moduleMenus.filter((item) => item.group === "质量治理").map((item) => <Button key={item.key} className={`main-nav-item ${module === item.key ? "active" : ""}`} onClick={() => openModule(item.key)} title={item.label}><b>{item.label}</b></Button>)}
+        <div className="nav-group-label">运营管理</div>
+        {operationsEntries.map((item) => <Button key={item.key} className={`main-nav-item ${operationsActive && operationsEntry === item.key ? "active" : ""}`} onClick={() => { setOperationsEntry(item.key); setOperationsActive(true); }} title={item.label}><b>{item.label}</b></Button>)}
         <div className="sidebar-foot"><span className="status-dot" />线上数据接入<small>经营分析走线上接口；治理菜单按真实接口状态展示</small></div>
       </aside>
 
       <div className="workspace">
-        <header className="topbar">
+        <header className="topbar" style={{ display: operationsActive ? "none" : undefined }}>
           <div className="breadcrumbs">{moduleMenus.find((item) => item.key === module)?.group} / {currentModule.title}{configWorkspaceOpen ? <> / <strong>{editingConfig ? "编辑打点配置" : "新建打点配置"}</strong></> : module === "funnel" ? <> / <strong>{currentPage.label}</strong></> : module === "vpnReport" ? <> / <strong>{diagnosticReportMenus.find((item) => item.key === vpnReportSection)?.label}</strong></> : null}</div>
           <div className="topbar-actions"><div className="global-search">搜索项目、事件、问题单</div><Button className="share-report-button" disabled={!["funnel", "vpn"].includes(module) || !project || creatingCodexLinks} onClick={() => void copyCodexQueryLinks()} title="生成广告打点/VPN打点 JSON 查询链接，发给 Codex 后可直接查线上数据">{creatingCodexLinks ? "生成中…" : "复制Codex查询"}</Button><Button className="share-report-button" disabled={!["funnel", "vpn"].includes(module) || !reportSnapshot || sharingReport} onClick={() => void shareCurrentProjectReport()} title={reportSnapshot ? "将当前页面已查询出的全部数据固定成分享快照" : "请先等待当前页面查询完成"}>{sharingReport ? "生成中…" : "分享项目报告"}</Button><Button className="icon-button" aria-label="通知">3</Button><Button className="account-chip" onClick={() => void companyAuth.signOut()} title="退出登录"><span>{companyAuth.user.employee?.name?.slice(0, 1) || companyAuth.user.email.slice(0, 1).toUpperCase()}</span><small>{companyAuth.user.employee?.name || companyAuth.user.email}</small></Button></div>
         </header>
 
-        <main className="main-content">
+        <main className="main-content" style={{ display: operationsActive ? "none" : undefined }}>
           {configWorkspaceOpen ? <TrackingConfigWorkspace editingConfig={editingConfig} onlineProjects={onlineProjects} onCancel={() => { setConfigWorkspaceOpen(false); setEditingConfig(null); }} onSave={saveTrackingConfig} /> : <>
           <section className="page-heading">
             <div><h1>{currentModule.title}</h1><p>{currentModule.description}</p></div>
@@ -1930,6 +1938,7 @@ export default function Home() {
 
           </>}
         </main>
+        <OperationsWorkspace active={operationsActive} entry={operationsEntry} initialPage={initialOperationsPage} />
       </div>
       {dialog && <ActionDialog dialog={dialog} project={project} configs={configRecords} editingConfig={dialog === "config-version" ? editingConfig : null} onClose={() => { setDialog(null); setEditingConfig(null); }} onSubmit={(result: DialogResult) => {
         if (dialog === "retest-run" || dialog === "tracking-run") setIssueStatus("重测中");

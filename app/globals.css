@@ -3257,3 +3257,8 @@ tr:hover td { background: #f5f8ff; }
 .ad-dns-table td strong{font-size:12px;color:#1f2e46}
 .ad-dns-table .row-warn td:first-child{border-left:3px solid #f59e0b}
 .ad-dns-result-card .matrix-footnote{line-height:1.65}
+.operations-workspace { height: 100vh; min-height: 720px; background: #f6f8fb; }
+.operations-workspace iframe { width: 100%; height: calc(100% - 48px); min-height: 672px; border: 0; display: block; background: #f6f8fb; }
+.operations-subnav { min-height: 48px; padding: 6px 16px; display: flex; gap: 8px; align-items: center; border-bottom: 1px solid #dfe5ec; background: #fff; }
+.operations-state { min-height: 320px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: #425466; }
+.operations-state.error strong { color: #b42318; }

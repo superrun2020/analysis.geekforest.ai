@@ -89,6 +89,7 @@ export function useCompanyAuth() {
     },
     async signOut() {
       const token = localStorage.getItem(companyAuthTokenKey) ?? "";
+      await fetch("/operations/session", { method: "DELETE", credentials: "include" }).catch(() => undefined);
       localStorage.removeItem(companyAuthTokenKey);
       localStorage.removeItem(companyAuthExpiresAtKey);
       setUser(null);
