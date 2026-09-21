@@ -97,8 +97,9 @@ export function createOperationsBridge({ oaOrigin = "http://127.0.0.1:3000", oaP
     if (!session || session.expiresAt <= Date.now()) { if (id) sessions.delete(id); json(res, 401, { error: "OPERATIONS_SESSION_REQUIRED" }); return null; }
     const identity = await oaIdentity(oaOrigin, session.token, req, res);
       if (!isOperationsAdminIdentity(identity.status, identity.payload)) {
+      if (identity.status >= 500) { json(res, 503, { error: "AUTH_UNAVAILABLE" }); return null; }
       sessions.delete(id); res.setHeader("set-cookie", clearCookie);
-      json(res, identity.status === 401 ? 401 : 403, { error: identity.status === 503 ? "AUTH_UNAVAILABLE" : "OPERATIONS_ADMIN_REQUIRED" }); return null;
+      json(res, identity.status === 401 ? 401 : 403, { error: "OPERATIONS_ADMIN_REQUIRED" }); return null;
     }
     return { id, session, user: identity.payload.user };
   }
@@ -121,6 +122,7 @@ export function createOperationsBridge({ oaOrigin = "http://127.0.0.1:3000", oaP
       const token = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
       if (!token) return json(res, 401, { error: "UNAUTHENTICATED" });
       const identity = await oaIdentity(oaOrigin, token, req, res);
+      if (identity.status >= 500) return json(res, 503, { error: "AUTH_UNAVAILABLE" });
       if (!isOperationsAdminIdentity(identity.status, identity.payload)) return json(res, identity.status === 401 ? 401 : 403, { error: "OPERATIONS_ADMIN_REQUIRED" });
       const priorId = cookies(req)[cookieName]; if (priorId) sessions.delete(priorId);
       sweep();

@@ -95,6 +95,26 @@ test("bridge denies missing/cross-site write origin and does not expose bearer i
   assert.equal(opened.status, 204); assert.doesNotMatch(opened.body, /secret/); assert.equal(opened.headers.location, undefined);
 });
 
+test("identity availability failures stay 503 and never bypass canonical validation", async (t) => {
+  let status = 503, proxyCalls = 0;
+  const oa = http.createServer((req, res) => {
+    if (req.url === '/api/operations/identity') { res.statusCode = status; return res.end(JSON.stringify(status === 200 ? {user:{role:'admin',employee:{id:'fixture-admin'}}} : {error:'unavailable'})); }
+    proxyCalls++; res.end('{}');
+  });
+  const oaPort = await listen(oa); t.after(() => oa.close());
+  const bridge = createOperationsBridge({oaOrigin:`http://127.0.0.1:${oaPort}`}); t.after(() => bridge.close());
+  const server = http.createServer(bridge), port = await listen(server); t.after(() => server.close());
+  const base = `http://127.0.0.1:${port}`;
+  const open = () => request(base+'/operations/session',{method:'POST',headers:{authorization:'Bearer fixture-admin',origin:'https://analysis.geekforest.ai'}});
+  for (status of [500,502,503,504]) { const response=await open(); assert.equal(response.status,503); assert.equal(JSON.parse(response.body).error,'AUTH_UNAVAILABLE'); }
+  status=200; const opened=await open(), cookie=opened.headers['set-cookie'][0].split(';')[0];
+  status=503; const failed=await request(base+'/operations/api/anomalies/summary',{headers:{cookie}});
+  assert.equal(failed.status,503); assert.equal(proxyCalls,0);
+  assert.equal(bridge.sessionCount(),1,'availability failure is not a revocation; each retry still revalidates');
+  status=403; assert.equal((await request(base+'/operations/api/anomalies/summary',{headers:{cookie}})).status,403);
+  assert.equal(bridge.sessionCount(),0); assert.equal(proxyCalls,0);
+});
+
 test("normalized traversal cannot hang a standalone bridge", async (t) => {
   const bridge = createOperationsBridge(); t.after(() => bridge.close());
   const server = http.createServer(bridge); const port = await listen(server); t.after(() => server.close());

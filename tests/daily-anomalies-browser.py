@@ -11,7 +11,14 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 scratch=Path(os.environ['TMPDIR']).resolve(); tmp=Path(tempfile.mkdtemp(prefix='oa-phase2-qa-',dir=scratch));out=scratch/'native-anomaly-browser.json'
 now=datetime.now(ZoneInfo('Asia/Shanghai')).isoformat();dates=window(now)
-registry=[{'project_code':f'Q{i:03}','package_name':f'fixture.package.{i}'} for i in range(35)]
+registry=[]
+for i in range(35):
+ row={'project_code':f'Q{i:03}','package_name':f'fixture.package.{i}'}
+ if i<2:row.update(owner_ids=['9007199254740993'],owners=[{'id':'9007199254740993','display_name':'Alice QA','status':1,'login_status':1,'banned':0}])
+ elif i==2:row.update(owner_ids=['2'],owners=[{'id':'2','display_name':'Inactive QA','status':0,'login_status':1,'banned':0}])
+ elif i==3:row.update(owner_ids=['404'],owners=[])
+ elif i>4:row.update(owner_ids=['5'],owners=[{'id':'5','display_name':'Bob QA','status':1,'login_status':1,'banned':0}])
+ registry.append(row)
 def audience_rows():
  rows=[]
  for i,r in enumerate(registry):
@@ -54,11 +61,13 @@ try:
   browser=pw.chromium.launch(executable_path='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless=True)
   page=browser.new_page(viewport={'width':1600,'height':1000},accept_downloads=True)
   page.add_init_script("localStorage.setItem('jkcl_funnel_oa_token','ISOLATED_FIXTURE_ONLY');localStorage.setItem('jkcl_funnel_oa_expires_at',new Date(Date.now()+3600000).toISOString())")
-  pending=[]
+  pending=[];summary_failure={'status':None}
   def route(r):
    u=urllib.parse.urlsplit(r.request.url)
    if u.path=='/operations/session':pending.append(r);return
    if u.path.startswith('/operations/api/'):
+    if u.path.endswith('/anomalies/summary') and summary_failure['status']:
+     status=summary_failure['status'];r.fulfill(status=status,json={'ok':False,'error':'FIXTURE','message':'fixture summary failure'});return
     res=urllib.request.urlopen('http://127.0.0.1:51982'+u.path.removeprefix('/operations')+('?' + u.query if u.query else ''))
     r.fulfill(status=res.status,content_type=res.headers.get('Content-Type','application/json'),body=res.read());return
    if u.path=='/api/auth/me':r.fulfill(json={'user':{'email':'fixture@example.test','employee':{'name':'Fixture','status':'在职'}}});return
@@ -72,6 +81,23 @@ try:
   checks.append('native table header before session/API ready; legacy link canonicalized; no iframe')
   for r in pending:r.fulfill(json={'ok':True})
   pending.clear();page.get_by_role('button',name='广告加载终态成功率',exact=True).wait_for()
+  page.get_by_label('分组方式').click();page.get_by_text('按开发者分组',exact=True).click();page.get_by_role('button',name='Alice QA · 9007199254740993',exact=True).click()
+  page.get_by_role('button',name='广告加载终态成功率',exact=True).click();developer_modal=page.locator('.ant-modal:visible');developer_modal.get_by_text('共 2 项（不是 Top 截取）',exact=True).wait_for()
+  with page.expect_download() as developer_dl:developer_modal.get_by_role('button',name='导出当前筛选全部 CSV').click()
+  developer_records=list(csv.DictReader(io.StringIO(Path(developer_dl.value.path()).read_text(encoding='utf-8-sig'))));assert len(developer_records)==2 and all('9007199254740993' in row['developerIds'] for row in developer_records)
+  developer_modal.locator('.ant-modal-close').click()
+  summary_failure['status']=503
+  page.get_by_label('开发者筛选').click();page.get_by_text('Bob QA · 5',exact=True).click()
+  page.get_by_role('button',name='重试数据',exact=True).wait_for()
+  page.get_by_text('当前已应用：Alice QA · 9007199254740993',exact=True).wait_for()
+  before_failed_detail=len(requests)
+  page.get_by_role('button',name='广告加载终态成功率',exact=True).click();failed_switch_modal=page.locator('.ant-modal:visible')
+  failed_switch_modal.get_by_text('共 2 项（不是 Top 截取）',exact=True).wait_for()
+  assert any('developerId=9007199254740993' in item['url'] and '/details?' in item['url'] for item in requests[before_failed_detail:])
+  failed_switch_modal.locator('.ant-modal-close').click();summary_failure['status']=None
+  page.get_by_label('分组方式').click();page.get_by_text('按问题分组',exact=True).click()
+  checks.append('developer → category → affected details and CSV use the same lossless bigint filter')
+  checks.append('failed developer switch keeps the Alice snapshot, headline label, details count, and exact pinned filter')
   sidebar=page.locator('aside');assert sidebar.get_by_role('button',name='每日异常',exact=True).count()==1
   for label in ['运营总览','项目管理','问题跟进','自动监控','项目与Owner','设置与采集']:assert sidebar.get_by_role('button',name=label,exact=True).count()==0
   checks.append('only daily anomalies menu, no old management replacement entries')
@@ -122,6 +148,10 @@ try:
   records=list(csv.DictReader(io.StringIO(Path(dl.value.path()).read_text(encoding='utf-8-sig'))));assert len(records)==35
   checks.append('real isolated API: all 35 packages paginated 20+15 and CSV count identical')
   modal.locator('.ant-modal-close').click()
+  summary_failure['status']=503;page.get_by_role('button',name='刷新已汇总结果',exact=True).click();page.get_by_role('button',name='重试数据',exact=True).wait_for();assert page.get_by_test_id('anomaly-groups').count()==1
+  summary_failure['status']=401;page.get_by_role('button',name='刷新已汇总结果',exact=True).click();page.get_by_role('button',name='重试认证',exact=True).wait_for();assert page.get_by_test_id('anomaly-groups').count()==1
+  summary_failure['status']=None;page.get_by_role('button',name='刷新已汇总结果',exact=True).click();page.get_by_role('button',name='广告加载终态成功率',exact=True).wait_for()
+  checks.append('summary data failure uses retry data, 401 uses retry authentication, and both retain last-good table')
   page.reload(wait_until='domcontentloaded');page.get_by_test_id('native-daily-anomalies').wait_for()
   for r in pending:r.fulfill(json={'ok':True})
   pending.clear();page.get_by_role('button',name='广告加载终态成功率',exact=True).wait_for()
