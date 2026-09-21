@@ -79,6 +79,13 @@ test("tracked pages no longer render native button elements", async () => {
 });
 
 
+test("all analysis login actions submit their forms", async () => {
+  const source = await file("app/company-auth.tsx");
+  const submitButtons = source.match(/<Button htmlType="submit" disabled=\{loading\}>/g) ?? [];
+  assert.equal(submitButtons.length, 3, "code, password, and password-change actions must submit their forms");
+});
+
+
 test("oa workspace visual style token is shipped", async () => {
   const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
   assert.match(css, /OA workspace inspired light dashboard polish/);

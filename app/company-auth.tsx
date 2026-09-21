@@ -237,15 +237,15 @@ export function CompanyLogin({ onSignedIn }: { onSignedIn: (result: AuthResult) 
     {step === "login" && loginMode === "code" ? <form onSubmit={submitCodeLogin}>
       <label>企业邮箱<input autoFocus type="email" autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="name@geekforest.ai" required /></label>
       <label>邮箱验证码<div className="company-code-row"><input type="text" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="输入 6 位验证码" required /><Button htmlType="button" disabled={sendingCode || codeCooldown > 0} onClick={() => void requestLoginCode()}>{sendingCode ? "发送中…" : codeCooldown > 0 ? `${codeCooldown}s 后重发` : "获取验证码"}</Button></div></label>
-      <Button disabled={loading}>{loading ? "正在验证…" : "登录漏斗分析中心"}</Button>
+      <Button htmlType="submit" disabled={loading}>{loading ? "正在验证…" : "登录漏斗分析中心"}</Button>
     </form> : step === "login" ? <form onSubmit={submitLogin}>
       <label>企业邮箱<input autoFocus type="email" autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="name@geekforest.ai" required /></label>
       <label>密码<input type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="首次登录请输入企业邮箱" required /></label>
-      <Button disabled={loading}>{loading ? "正在登录…" : "登录漏斗分析中心"}</Button>
+      <Button htmlType="submit" disabled={loading}>{loading ? "正在登录…" : "登录漏斗分析中心"}</Button>
     </form> : <form onSubmit={submitChangePassword}>
       <label>新密码<input autoFocus type="password" autoComplete="new-password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} placeholder="至少 8 位，不能等于邮箱" required /></label>
       <label>确认新密码<input type="password" autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} placeholder="再次输入新密码" required /></label>
-      <Button disabled={loading}>{loading ? "正在保存…" : "保存新密码并进入系统"}</Button>
+      <Button htmlType="submit" disabled={loading}>{loading ? "正在保存…" : "保存新密码并进入系统"}</Button>
       <Button htmlType="button" className="login-back" onClick={() => { setStep("login"); setPendingResult(null); setNewPassword(""); setConfirmPassword(""); setMessage(""); }}>返回登录</Button>
     </form>}
     {message && <div className="company-login-error" role="alert">{message}</div>}
