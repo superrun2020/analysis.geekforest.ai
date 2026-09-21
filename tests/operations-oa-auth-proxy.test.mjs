@@ -1,9 +1,17 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import http from "node:http";
+import path from "node:path";
+import { createRequire } from "node:module";
+import { pathToFileURL } from "node:url";
 import test from "node:test";
-import express from "/Users/oliver/Documents/Codex/2026-06-22/dev-performance-system-ip-43-98/dev-performance-system/node_modules/express/index.js";
-import { registerOperationsApi } from "/Users/oliver/Documents/Codex/2026-06-22/dev-performance-system-ip-43-98/dev-performance-system/lib/operations-proxy.mjs";
-import { registerOperationsIdentityApi } from "/Users/oliver/Documents/Codex/2026-06-22/dev-performance-system-ip-43-98/dev-performance-system/lib/operations-identity.mjs";
+
+const oaRoot = path.resolve(process.env.OA_REPO_ROOT || "/Users/oliver/Documents/Codex/2026-06-22/dev-performance-system-ip-43-98/dev-performance-system");
+if (!fs.existsSync(path.join(oaRoot, "server.js"))) throw new Error(`OA_REPO_ROOT is not an OA checkout: ${oaRoot}`);
+const oaDependencyRoot = path.resolve(process.env.OA_DEPENDENCY_ROOT || "/Users/oliver/Documents/Codex/2026-06-22/dev-performance-system-ip-43-98/dev-performance-system");
+const express = createRequire(path.join(oaDependencyRoot, "package.json"))("express");
+const { registerOperationsApi } = await import(pathToFileURL(path.join(oaRoot, "lib/operations-proxy.mjs")));
+const { registerOperationsIdentityApi } = await import(pathToFileURL(path.join(oaRoot, "lib/operations-identity.mjs")));
 
 const listen = (server) => new Promise((resolve) => server.listen(0, "127.0.0.1", () => resolve(server.address().port)));
 const request = (url, { method = "GET", headers = {}, body } = {}) => new Promise((resolve, reject) => { const req = http.request(url, { method, headers }, (res) => { const chunks = []; res.on("data", (c) => chunks.push(c)); res.on("end", () => resolve({ status: res.statusCode, body: Buffer.concat(chunks).toString() })); }); req.on("error", reject); req.end(body); });

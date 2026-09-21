@@ -2,13 +2,16 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import test from "node:test";
 
-import { createOperationsBridge, isOperationsAdminIdentity, isSafeOperationsPath, legacyOperationsLocation, legacyOperationsRedirects } from "../scripts/operations-bridge.mjs";
+import { createOperationsBridge, isOperationsAdminIdentity, isOperationsAnomalyReaderIdentity, isSafeOperationsPath, legacyOperationsLocation, legacyOperationsRedirects } from "../scripts/operations-bridge.mjs";
 
 test("authoritative role, stable employee id, paths, and redirects fail closed", () => {
   assert.equal(isOperationsAdminIdentity(200, { user: { role: "admin", employee: { id: "e1" } } }), true);
   assert.equal(isOperationsAdminIdentity(200, { user: { role: "employee", employee: { id: "e1" } } }), false);
   assert.equal(isOperationsAdminIdentity(200, { user: { role: "admin", employee: {} } }), false);
   assert.equal(isOperationsAdminIdentity(403, { user: { role: "admin", employee: { id: "e1" } } }), false);
+  assert.equal(isOperationsAnomalyReaderIdentity(200, { user: { role: "employee", capabilities: { dailyAnomalyRead: true }, employee: { id: "e1" } } }), true);
+  assert.equal(isOperationsAnomalyReaderIdentity(200, { user: { role: "anomaly-reader", employee: { id: "e1" } } }), false);
+  assert.equal(isOperationsAnomalyReaderIdentity(200, { user: { role: "admin", capabilities: { dailyAnomalyRead: false }, employee: { id: "e1" } } }), false);
   assert.equal(isSafeOperationsPath("/operations/api/employees"), true);
   assert.equal(isSafeOperationsPath("/operations/%2e%2e/api/state"), false);
   assert.equal(isSafeOperationsPath("/operations/api/x\\y"), false);
@@ -39,10 +42,12 @@ test("bridge uses real OA auth/admin on every request and revokes session on log
   const calls = [];
   const oa = http.createServer((req, res) => {
     calls.push({ url: req.url, method: req.method, authorization: req.headers.authorization, origin: req.headers.origin, actor: req.headers["x-oa-actor-id"] });
-    if (req.url === "/api/operations/identity") {
+    if (["/api/operations/identity", "/api/operations/anomaly-reader-identity"].includes(req.url)) {
       const token = req.headers.authorization?.replace("Bearer ", "");
-      if (token === "admin") return void res.end(JSON.stringify({ user: { role: "admin", email: "admin@geekforest.ai", employee: { id: "e-admin", status: "正式" } } }));
-      if (token === "employee") return void res.end(JSON.stringify({ user: { role: "employee", email: "user@geekforest.ai", employee: { id: "e-user", status: "正式" } } }));
+      const reader = req.url.endsWith("anomaly-reader-identity");
+      if (token === "admin") return void res.end(JSON.stringify({ user: { role: "admin", ...(reader && { capabilities: { dailyAnomalyRead: true } }), email: "admin@geekforest.ai", employee: { id: "e-admin", status: "正式" } } }));
+      if (token === "employee" && reader) return void res.end(JSON.stringify({ user: { role: "employee", capabilities: { dailyAnomalyRead: true }, email: "user@geekforest.ai", employee: { id: "e-user", status: "正式" } } }));
+      if (token === "employee") { res.statusCode = 403; return void res.end(JSON.stringify({ error: "forbidden" })); }
       if (token === "terminated") { res.statusCode = 403; return void res.end(JSON.stringify({ error: "business_entity_account_forbidden" })); }
       res.statusCode = 401; return void res.end(JSON.stringify({ error: "unauthorized" }));
     }
@@ -58,7 +63,10 @@ test("bridge uses real OA auth/admin on every request and revokes session on log
   const base = `http://127.0.0.1:${port}`;
   const open = (token, origin = "https://analysis.geekforest.ai") => request(`${base}/operations/session`, { method: "POST", headers: { authorization: `Bearer ${token}`, origin, host: "analysis.geekforest.ai" } });
 
-  assert.equal((await open("employee")).status, 403);
+  const employeeSession = await open("employee"); assert.equal(employeeSession.status, 204);
+  const employeeCookie = employeeSession.headers["set-cookie"][0].split(";")[0];
+  assert.equal((await request(`${base}/operations/api/anomalies/summary`, { headers: { cookie: employeeCookie } })).status, 200);
+  assert.equal((await request(`${base}/operations/api/bootstrap`, { headers: { cookie: employeeCookie } })).status, 403);
   assert.equal((await open("terminated")).status, 403);
   assert.equal((await open("admin", "https://evil.example")).status, 403);
   const session = await open("admin"); assert.equal(session.status, 204);
@@ -77,15 +85,16 @@ test("bridge uses real OA auth/admin on every request and revokes session on log
   assert.equal((await request(`${base}/operations/api/bootstrap`, { headers: { cookie, host: "analysis.geekforest.ai" } })).status, 401);
 
   const proxied = calls.filter((call) => call.url.startsWith("/operations"));
-  assert.ok(calls.filter((call) => call.url === "/api/operations/identity").length >= 5, "every authenticated bridge operation must revalidate OA");
-  assert.ok(proxied.every((call) => call.authorization === "Bearer admin"));
+  assert.ok(calls.filter((call) => call.url === "/api/operations/identity").length >= 3, "every legacy bridge operation must revalidate canonical OA admin identity");
+  assert.ok(calls.filter((call) => call.url === "/api/operations/anomaly-reader-identity").length >= 3, "session and anomaly reads must revalidate OA reader identity");
+  assert.ok(proxied.every((call) => ["Bearer admin", "Bearer employee"].includes(call.authorization)));
   assert.ok(proxied.every((call) => call.origin === "https://oa.geekforest.ai"));
   assert.ok(proxied.every((call) => !call.actor), "client cannot forge actor headers");
 });
 
 test("bridge denies missing/cross-site write origin and does not expose bearer in redirects or responses", async (t) => {
-  const oa = http.createServer((req, res) => req.url === "/api/operations/identity"
-    ? res.end(JSON.stringify({ user: { role: "admin", email: "a@geekforest.ai", employee: { id: "e1", status: "正式" } } }))
+  const oa = http.createServer((req, res) => req.url === "/api/operations/anomaly-reader-identity"
+    ? res.end(JSON.stringify({ user: { role: "employee", capabilities: { dailyAnomalyRead: true }, email: "a@geekforest.ai", employee: { id: "e1", status: "正式" } } }))
     : res.end("ok"));
   const oaPort = await listen(oa); t.after(() => oa.close());
   const server = http.createServer(createOperationsBridge({ oaOrigin: `http://127.0.0.1:${oaPort}`, publicOrigin: "https://analysis.geekforest.ai" }));
@@ -98,7 +107,7 @@ test("bridge denies missing/cross-site write origin and does not expose bearer i
 test("identity availability failures stay 503 and never bypass canonical validation", async (t) => {
   let status = 503, proxyCalls = 0;
   const oa = http.createServer((req, res) => {
-    if (req.url === '/api/operations/identity') { res.statusCode = status; return res.end(JSON.stringify(status === 200 ? {user:{role:'admin',employee:{id:'fixture-admin'}}} : {error:'unavailable'})); }
+    if (req.url === '/api/operations/anomaly-reader-identity') { res.statusCode = status; return res.end(JSON.stringify(status === 200 ? {user:{role:'admin',capabilities:{dailyAnomalyRead:true},employee:{id:'fixture-admin'}}} : {error:'unavailable'})); }
     proxyCalls++; res.end('{}');
   });
   const oaPort = await listen(oa); t.after(() => oa.close());
@@ -124,7 +133,7 @@ test("normalized traversal cannot hang a standalone bridge", async (t) => {
 });
 
 test("sessions rotate, remain bounded, expire by sweep, and logout always clears", async (t) => {
-  const oa = http.createServer((req, res) => res.end(JSON.stringify({ user: { role: "admin", employee: { id: "admin-1" } } })));
+  const oa = http.createServer((req, res) => res.end(JSON.stringify({ user: { role: "admin", ...(req.url.endsWith("anomaly-reader-identity") && { capabilities: { dailyAnomalyRead: true } }), employee: { id: "admin-1" } } })));
   const oaPort = await listen(oa); t.after(() => oa.close());
   const bridge = createOperationsBridge({ oaOrigin: `http://127.0.0.1:${oaPort}`, sessionTtlMs: 40, sweepIntervalMs: 10, maxSessions: 2 });
   t.after(() => bridge.close());
@@ -145,7 +154,7 @@ test("sessions rotate, remain bounded, expire by sweep, and logout always clears
 });
 
 test("every GET rejects explicit foreign Origin and cross-site fetch metadata", async (t) => {
-  const oa = http.createServer((req, res) => res.end(JSON.stringify(req.url === "/api/operations/identity" ? { user: { role: "admin", employee: { id: "admin-1" } } } : { ok: true })));
+  const oa = http.createServer((req, res) => res.end(JSON.stringify(req.url === "/api/operations/anomaly-reader-identity" ? { user: { role: "admin", capabilities: { dailyAnomalyRead: true }, employee: { id: "admin-1" } } } : req.url === "/api/operations/identity" ? { user: { role: "admin", employee: { id: "admin-1" } } } : { ok: true })));
   const oaPort = await listen(oa); t.after(() => oa.close());
   const bridge = createOperationsBridge({ oaOrigin: `http://127.0.0.1:${oaPort}` }); t.after(() => bridge.close());
   const server = http.createServer(bridge); const port = await listen(server); t.after(() => server.close()); const base = `http://127.0.0.1:${port}`;
@@ -162,9 +171,9 @@ test("identity and operations upstream sockets close when the downstream request
   let identityReceivedResolve; const identityReceived = new Promise((resolve) => { identityReceivedResolve = resolve; });
   let operationReceivedResolve; const operationReceived = new Promise((resolve) => { operationReceivedResolve = resolve; });
   const oa = http.createServer((req, res) => {
-    if (req.url === "/api/operations/identity") {
-      if (holdIdentity) { identitySocket = req.socket; identityReceivedResolve(); return; }
-      return void res.end(JSON.stringify({ user: { role: "admin", employee: { id: "admin-1" } } }));
+    if (["/api/operations/anomaly-reader-identity", "/api/operations/identity"].includes(req.url)) {
+      if (holdIdentity && req.url.endsWith("anomaly-reader-identity")) { identitySocket = req.socket; identityReceivedResolve(); return; }
+      return void res.end(JSON.stringify({ user: { role: "admin", ...(req.url.endsWith("anomaly-reader-identity") && { capabilities: { dailyAnomalyRead: true } }), employee: { id: "admin-1" } } }));
     }
     operationsSocket = req.socket; operationReceivedResolve();
   });

@@ -21,6 +21,7 @@ export function legacyOperationsLocation(view) {
 const cookieName = "jkcl_operations_bridge";
 const safePath = /^(?:\/operations)(?:\/|\/index\.html|\/assets\/[a-zA-Z0-9_.-]+|\/api\/[a-zA-Z0-9_/-]+)?(?:\?[^\s]*)?$/;
 export const isOperationsAdminIdentity = (status, payload) => status === 200 && payload?.user?.role === "admin" && Boolean(payload?.user?.employee?.id);
+export const isOperationsAnomalyReaderIdentity = (status, payload) => status === 200 && payload?.user?.capabilities?.dailyAnomalyRead === true && Boolean(payload?.user?.employee?.id);
 export function isSafeOperationsPath(value) {
   let decoded; try { decoded = decodeURIComponent(String(value || "").split("?")[0]); } catch { return false; }
   return !decoded.includes("..") && !decoded.includes("\\") && safePath.test(String(value || ""));
@@ -65,11 +66,11 @@ function readOriginAllowed(req, publicOrigin) {
   return req.headers["sec-fetch-site"] !== "cross-site" && (!origin || origin === publicOrigin);
 }
 
-async function oaIdentity(oaOrigin, token, downstreamReq, downstreamRes) {
+async function oaIdentity(oaOrigin, token, downstreamReq, downstreamRes, identityPath = "/api/operations/identity") {
   return new Promise((resolve) => {
     let settled = false;
     const finish = (value) => { if (!settled) { settled = true; cleanup(); resolve(value); } };
-    const url = new URL("/api/operations/identity", oaOrigin);
+    const url = new URL(identityPath, oaOrigin);
     const request = http.request(url, { headers: { authorization: `Bearer ${token}`, accept: "application/json" }, timeout: 8000 }, (response) => {
       const chunks = []; response.on("data", (chunk) => chunks.push(chunk)); response.on("end", () => {
         let payload = {}; try { payload = JSON.parse(Buffer.concat(chunks).toString()); } catch {}
@@ -92,14 +93,21 @@ export function createOperationsBridge({ oaOrigin = "http://127.0.0.1:3000", oaP
   const clearCookie = `${cookieName}=; Path=/operations; HttpOnly; Secure; SameSite=Strict; Max-Age=0`;
   const sweep = () => { const now = Date.now(); for (const [id, session] of sessions) if (session.expiresAt <= now) sessions.delete(id); };
   const sweepTimer = setInterval(sweep, Math.max(10, sweepIntervalMs)); sweepTimer.unref?.();
-  async function authenticate(req, res) {
+  const anomalyPaths = new Set(["/operations/api/anomalies/summary", "/operations/api/anomalies/details", "/operations/api/anomalies/export"]);
+  function isAnomalyRead(req) {
+    if (!["GET", "HEAD"].includes(req.method)) return false;
+    return anomalyPaths.has(String(req.url || "").split("?")[0]);
+  }
+  async function authenticate(req, res, anomalyRead) {
     const id = cookies(req)[cookieName]; const session = id && sessions.get(id);
     if (!session || session.expiresAt <= Date.now()) { if (id) sessions.delete(id); json(res, 401, { error: "OPERATIONS_SESSION_REQUIRED" }); return null; }
-    const identity = await oaIdentity(oaOrigin, session.token, req, res);
-      if (!isOperationsAdminIdentity(identity.status, identity.payload)) {
+    const identityPath = anomalyRead ? "/api/operations/anomaly-reader-identity" : "/api/operations/identity";
+    const identity = await oaIdentity(oaOrigin, session.token, req, res, identityPath);
+    const valid = anomalyRead ? isOperationsAnomalyReaderIdentity(identity.status, identity.payload) : isOperationsAdminIdentity(identity.status, identity.payload);
+      if (!valid) {
       if (identity.status >= 500) { json(res, 503, { error: "AUTH_UNAVAILABLE" }); return null; }
       sessions.delete(id); res.setHeader("set-cookie", clearCookie);
-      json(res, identity.status === 401 ? 401 : 403, { error: "OPERATIONS_ADMIN_REQUIRED" }); return null;
+      json(res, identity.status === 401 ? 401 : 403, { error: anomalyRead ? "OPERATIONS_ANOMALY_READER_REQUIRED" : "OPERATIONS_ADMIN_REQUIRED" }); return null;
     }
     return { id, session, user: identity.payload.user };
   }
@@ -121,9 +129,9 @@ export function createOperationsBridge({ oaOrigin = "http://127.0.0.1:3000", oaP
       if (!originAllowed(req, publicOrigin)) return json(res, 403, { error: "FORBIDDEN_ORIGIN" });
       const token = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
       if (!token) return json(res, 401, { error: "UNAUTHENTICATED" });
-      const identity = await oaIdentity(oaOrigin, token, req, res);
+      const identity = await oaIdentity(oaOrigin, token, req, res, "/api/operations/anomaly-reader-identity");
       if (identity.status >= 500) return json(res, 503, { error: "AUTH_UNAVAILABLE" });
-      if (!isOperationsAdminIdentity(identity.status, identity.payload)) return json(res, identity.status === 401 ? 401 : 403, { error: "OPERATIONS_ADMIN_REQUIRED" });
+      if (!isOperationsAnomalyReaderIdentity(identity.status, identity.payload)) return json(res, identity.status === 401 ? 401 : 403, { error: "OPERATIONS_ANOMALY_READER_REQUIRED" });
       const priorId = cookies(req)[cookieName]; if (priorId) sessions.delete(priorId);
       sweep();
       while (sessions.size >= maxSessions) sessions.delete(sessions.keys().next().value);
@@ -137,7 +145,7 @@ export function createOperationsBridge({ oaOrigin = "http://127.0.0.1:3000", oaP
     }
     if (!isSafeOperationsPath(req.url)) return json(res, 404, { error: "NOT_FOUND" });
     if (!["GET", "HEAD"].includes(req.method) && !originAllowed(req, publicOrigin)) return json(res, 403, { error: "FORBIDDEN_ORIGIN" });
-    const authenticated = await authenticate(req, res); if (!authenticated) return;
+    const authenticated = await authenticate(req, res, isAnomalyRead(req)); if (!authenticated) return;
     let body; try { body = ["GET", "HEAD"].includes(req.method) ? undefined : await collect(req); } catch (error) { return json(res, error.status || 400, { error: error.message }); }
     const upstreamUrl = new URL(req.url, oaOrigin);
     const headers = { authorization: `Bearer ${authenticated.session.token}`, origin: oaPublicOrigin, host: new URL(oaPublicOrigin).host, accept: req.headers.accept || "*/*" };
