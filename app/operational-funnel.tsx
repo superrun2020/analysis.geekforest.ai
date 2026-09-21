@@ -2714,25 +2714,20 @@ function Overview({ data, onPageChange, onProjectSelect, context }: { data: AnyR
   </div>;
 }
 
-type VersionCompareColumn = { key: string; label: string; unit: "count" | "ratio"; num?: string; den?: string };
+type VersionCompareColumn = { key: string; label: string; unit: "count" | "ratio"; num?: string; den?: string; help?: string };
 
 function versionCompareColumns(domain: string): VersionCompareColumn[] {
   if (domain === "vpn") {
     return [
-      { key: "newUsers", label: "新增用户", unit: "count" },
-      { key: "dauUsers", label: "DAU", unit: "count" },
-      { key: "vpnSessionCount", label: "VPN session", unit: "count" },
-      { key: "connectAttemptUsers", label: "连接发起", unit: "count" },
-      { key: "connectSuccessUsers", label: "连接成功", unit: "count" },
-      { key: "connectSuccessRate", label: "连接成功率", unit: "ratio", num: "connectSuccessUsers", den: "connectAttemptUsers" },
-      { key: "vpnProbeSuccessRate", label: "节点探测成功率", unit: "ratio" },
-      { key: "vpnIpProbeSuccessRate", label: "出口IP探测成功率", unit: "ratio" },
-      { key: "vpnFallbackCount", label: "协议回退", unit: "count" },
-      { key: "vpnAvgLatencyMs", label: "平均延迟ms", unit: "count" },
-      { key: "requestCount", label: "广告请求", unit: "count" },
-      { key: "loadSuccessRate", label: "加载成功率", unit: "ratio", num: "loadSuccessCount", den: "requestCount" },
-      { key: "impressionCount", label: "Impression", unit: "count" },
-      { key: "revenue", label: "收入", unit: "count" },
+      { key: "paidAttributedNewUsers", label: "付费归因新人", unit: "count", help: "同区间首次打开且归因结果为 attributed 的去重新人" },
+      { key: "dauUsers", label: "DAU", unit: "count", help: "发生 app_foreground 的去重用户" },
+      { key: "languagePageExposureUsers", label: "语言页曝光UV", unit: "count", help: "真正看到语言选择页的去重用户" },
+      { key: "languageConfirmRate", label: "语言确认率", unit: "ratio", num: "languageConfirmUsers", den: "languagePageExposureUsers", help: "语言确认UV ÷ 语言页曝光UV" },
+      { key: "launcherGuideExposureUsers", label: "Launcher引导曝光UV", unit: "count", help: "真正看到默认 Launcher 授权引导的去重用户" },
+      { key: "launcherSetupSuccessRate", label: "Launcher设置成功率", unit: "ratio", num: "launcherSetupSuccessUsers", den: "launcherSetupClickUsers", help: "设置成功UV ÷ 点击立即设置UV" },
+      { key: "launcherHomeUsers", label: "Launcher首页UV", unit: "count", help: "真正进入 Launcher 首页的去重用户" },
+      { key: "coreFeatureCompleteUsers", label: "核心功能完成UV", unit: "count", help: "成功扫码或生成码的去重用户" },
+      { key: "coreFeatureActivationRate", label: "核心功能激活率", unit: "ratio", num: "coreFeatureCompleteUsers", den: "paidAttributedNewUsers", help: "核心功能完成UV ÷ 付费归因新人" },
     ];
   }
   return [
@@ -2753,8 +2748,7 @@ function versionCompareColumns(domain: string): VersionCompareColumn[] {
 const versionCompareDimensions = [
   { key: "stat_date", label: "日期" },
   { key: "app_version", label: "应用版本" },
-  { key: "user_country_code", label: "入口国家" },
-  { key: "country_code", label: "VPN出口国家" },
+  { key: "country_code", label: "国家" },
   { key: "platform", label: "平台" },
 ];
 
@@ -2809,7 +2803,7 @@ function VersionComparison({ data, domain, projectCode, appIdentifier, platform,
     return map;
   });
   const [comparison, setComparison] = useState<AnyRow>(data.versionComparison ?? {});
-  const versionDimensionOptions = useMemo(() => domain === "vpn" ? versionCompareDimensions : versionCompareDimensions.filter((item) => item.key !== "user_country_code"), [domain]);
+  const versionDimensionOptions = versionCompareDimensions;
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -2902,12 +2896,13 @@ function VersionComparison({ data, domain, projectCode, appIdentifier, platform,
   const renderDimensionValue = (row: AnyRow, key: string) => text(row.dimensionLabels?.[key] ?? row.dimensionValues?.[key] ?? (activeDimensions.length === 1 ? row.dimensionLabel : "—"));
 
   const rateDelta = (value: unknown, base: unknown) => {
-    const delta = Number(value ?? 0) - Number(base ?? 0);
+    if (value === null || value === undefined || base === null || base === undefined) return null;
+    const delta = Number(value) - Number(base);
     return <span className={delta < -3 ? "version-delta bad" : delta > 3 ? "version-delta good" : "version-delta"}>{delta > 0 ? "+" : ""}{delta.toFixed(2)}pp</span>;
   };
 
   const totals = useMemo(() => {
-    const result: Record<string, number> = {};
+    const result: Record<string, number | null> = {};
     selectedColumns.forEach((column) => {
       if (column.unit === "count") {
         result[column.key] = rows.reduce((sum, row) => sum + Number(row[column.key] ?? 0), 0);
@@ -2919,7 +2914,7 @@ function VersionComparison({ data, domain, projectCode, appIdentifier, platform,
         const denKey = column.den;
         const num = result[numKey] ?? rows.reduce((sum, row) => sum + Number(row[numKey] ?? 0), 0);
         const den = result[denKey] ?? rows.reduce((sum, row) => sum + Number(row[denKey] ?? 0), 0);
-        result[column.key] = den > 0 ? (num / den) * 100 : 0;
+        result[column.key] = den > 0 ? (num / den) * 100 : null;
       }
     });
     return result;
@@ -2938,7 +2933,7 @@ function VersionComparison({ data, domain, projectCode, appIdentifier, platform,
         {!rows.length && !loading ? <section className="surface"><div className="empty-table-state"><strong>当前筛选范围没有可对比数据</strong><span>请确认所选维度字段已上报，并选择包含多个分组的日期范围。</span></div></section> : <section className="surface"><div className="table-wrap"><table className="version-compare-table">
           <thead><tr>
             {activeDimensions.map((item) => <th key={item} className="sortable dimension-sortable" onClick={() => toggleSort(`dimension:${item}`)}><span>{versionCompareDimensionLabel(item)}</span>{(item === "stat_date" || item === "app_version") && <Button htmlType="button" className="inline-sort-desc" onClick={(event) => { event.stopPropagation(); setDimensionSortDesc(item); }}>降序</Button>}{sortKey === `dimension:${item}` && <span className="sort-indicator">{sortDirection === "asc" ? "▲" : "▼"}</span>}</th>)}
-            {selectedColumns.map((column) => <th key={column.key} className="sortable" onClick={() => toggleSort(column.key)}><span>{column.label}</span>{column.unit === "ratio" && <small title="同组分子分母计算的比例">%</small>}{sortKey === column.key && <span className="sort-indicator">{sortDirection === "asc" ? "▲" : "▼"}</span>}</th>)}
+            {selectedColumns.map((column) => <th key={column.key} className="sortable" title={column.help} onClick={() => toggleSort(column.key)}><span>{column.label}</span>{column.unit === "ratio" && <small title={column.help ?? "同组分子分母计算的比例"}>%</small>}{sortKey === column.key && <span className="sort-indicator">{sortDirection === "asc" ? "▲" : "▼"}</span>}</th>)}
           </tr></thead>
           <tbody>{sortedRows.map((row) => {
             const sampleSmall = Number(row.dauUsers ?? 0) < 100;
