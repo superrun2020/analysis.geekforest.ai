@@ -690,7 +690,7 @@ class FunnelAnalyticsService
      */
     private function cacheableQueryPages(): array
     {
-        return ['overview', 'workbench', 'diagnosis', 'path', 'evidence', 'version_comparison', 'ad_overall', 'ad_dns_report', 'domain_report'];
+        return ['overview', 'workbench', 'diagnosis', 'path', 'evidence', 'version_comparison', 'ad_overall', 'ad_dns_report', 'exit_ip_quality', 'domain_report'];
     }
 
     /**
@@ -712,6 +712,7 @@ class FunnelAnalyticsService
             'version_comparison' => $this->versionComparisonPage($params),
             'ad_overall' => $this->adOverallPage($params),
             'ad_dns_report' => $this->adDnsReportPage($params),
+            'exit_ip_quality' => $this->exitIpQualityPage($params),
             'domain_report' => $this->domainReportPage($params),
             default => throw new InvalidArgumentException('不支持的漏斗分析页面'),
         };
@@ -5643,6 +5644,430 @@ class FunnelAnalyticsService
      * @param array<string, mixed> $params
      * @return array<string, mixed>
      */
+    private function exitIpQualityPage(array $params): array
+    {
+        if (empty($params['projectCode'])) {
+            return [
+                'context' => $this->context($params),
+                'exitIpQuality' => [
+                    'available' => false,
+                    'reason' => '请选择一个项目后查询出口IP质量。',
+                    'rows' => [],
+                    'sessions' => [],
+                    'totals' => $this->emptyExitIpQualityTotals(),
+                ],
+            ];
+        }
+
+        try {
+            $allRows = $this->exitIpQualityRows($params);
+            $pageSize = min(100, max(1, (int) ($params['pageSize'] ?? 100)));
+            $rows = array_slice($allRows, 0, $pageSize);
+            $sessions = !empty($params['ipKey']) ? $this->exitIpQualitySessions($params) : [];
+
+            return [
+                'context' => $this->context($params),
+                'exitIpQuality' => [
+                    'available' => count($allRows) > 0,
+                    'reason' => count($allRows) > 0 ? null : '当前筛选范围没有可关联到公网出口IP的session。',
+                    'source' => $this->eventTable(),
+                    'associationPolicy' => '每个vpn_session_id（缺失时回退session_id）使用该session内最后一次观测到的合法公网IPv4；一个session出现多个公网IPv4时标记ipChanged，不把内部/私网/CGNAT/fake-IP当公网出口。',
+                    'classificationPolicy' => '状态仅表示健康、观察或疑似受限；超时、403、429都不能单独证明IP被拉黑。疑似受限要求独立session、明确TCP样本、失败session占比及同目标其他IP对照同时满足。',
+                    'rows' => $rows,
+                    'sessions' => $sessions,
+                    'totals' => $this->exitIpQualityTotals($allRows, $pageSize, count($rows)),
+                    'selectedIpKey' => $params['ipKey'] ?? null,
+                    'selectedIpTarget' => $params['ipTarget'] ?? null,
+                    'sessionPage' => (int) ($params['pageIndex'] ?? 1),
+                    'sessionPageSize' => (int) ($params['pageSize'] ?? 50),
+                ],
+            ];
+        } catch (Throwable $exception) {
+            Log::warning('jkcl_exit_ip_quality_failed', [
+                'message' => $exception->getMessage(),
+                'projectCode' => $params['projectCode'] ?? null,
+                'dateFrom' => $params['dateFrom'] ?? null,
+                'dateTo' => $params['dateTo'] ?? null,
+            ]);
+
+            return [
+                'context' => $this->context($params),
+                'exitIpQuality' => [
+                    'available' => false,
+                    'reason' => '出口IP质量查询失败，请缩小日期范围后重试或联系管理员查看服务日志。',
+                    'rows' => [],
+                    'sessions' => [],
+                    'totals' => $this->emptyExitIpQualityTotals(),
+                ],
+            ];
+        }
+    }
+
+    private function exitIpContextQuery(array $params): Builder
+    {
+        $sessionSql = "COALESCE(NULLIF(vpn_session_id, ''), NULLIF(session_id, ''))";
+        $latestJson = static fn (string $key): string => "SUBSTRING_INDEX(GROUP_CONCAT(COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(event_params_json, '$.{$key}')), ''), 'unknown') ORDER BY event_time_utc DESC SEPARATOR '||'), '||', 1)";
+
+        return $this->baseQuery($params)
+            ->whereIn('event_name', ['vpn_ip_probe_result', 'ad_request'])
+            ->whereNotNull('ip_after_connect')
+            ->whereRaw("TRIM(ip_after_connect) <> ''")
+            ->whereRaw($this->publicExitIpSql('ip_after_connect'))
+            ->whereRaw("{$sessionSql} IS NOT NULL")
+            ->selectRaw('project_code AS ctx_project_code')
+            ->selectRaw('app_identifier AS ctx_app_identifier')
+            ->selectRaw("{$sessionSql} AS session_key")
+            ->selectRaw("SUBSTRING_INDEX(GROUP_CONCAT(TRIM(ip_after_connect) ORDER BY event_time_utc DESC SEPARATOR '||'), '||', 1) AS exit_ip")
+            ->selectRaw("SUBSTRING_INDEX(GROUP_CONCAT(COALESCE(NULLIF(server_id, ''), 'unknown') ORDER BY event_time_utc DESC SEPARATOR '||'), '||', 1) AS server_id")
+            ->selectRaw($latestJson('proxy_provider') . ' AS proxy_provider')
+            ->selectRaw($latestJson('proxy_id') . ' AS proxy_id')
+            ->selectRaw($latestJson('exit_ip_asn') . ' AS exit_ip_asn')
+            ->selectRaw($latestJson('exit_ip_country') . ' AS exit_ip_country')
+            ->selectRaw("SUBSTRING_INDEX(GROUP_CONCAT(event_name ORDER BY event_time_utc DESC SEPARATOR '||'), '||', 1) AS ip_source_event")
+            ->selectRaw('COUNT(DISTINCT TRIM(ip_after_connect)) AS session_ip_count')
+            ->selectRaw('MIN(event_time_utc) AS first_ip_observed_at')
+            ->selectRaw('MAX(event_time_utc) AS last_ip_observed_at')
+            ->groupBy('project_code', 'app_identifier')
+            ->groupByRaw($sessionSql);
+    }
+
+    private function exitIpEventQuery(array $params): Builder
+    {
+        $sessionSql = "COALESCE(NULLIF(vpn_session_id, ''), NULLIF(session_id, ''))";
+
+        return $this->baseQuery($params)
+            ->whereIn('event_name', [
+                'vpn_network_diagnostic',
+                'vpn_ip_probe_result',
+                'ad_request',
+                'ad_load_success',
+                'ad_load_failed',
+            ])
+            ->whereRaw("{$sessionSql} IS NOT NULL")
+            ->select([
+                'project_code', 'app_identifier', 'event_id', 'event_name', 'event_time_utc',
+                'vpn_session_id', 'session_id', 'connection_id', 'server_id', 'request_id',
+                'result_status', 'error_code', 'error_category', 'error_message', 'target_id',
+                'event_params_json',
+            ])
+            ->selectRaw("{$sessionSql} AS session_key");
+    }
+
+    private function exitIpTcpResultSql(string $alias): string
+    {
+        $jsonResult = "LOWER(NULLIF(JSON_UNQUOTE(JSON_EXTRACT({$alias}.event_params_json, '$.tcp_result')), ''))";
+        $error = "LOWER(COALESCE({$alias}.error_code, JSON_UNQUOTE(JSON_EXTRACT({$alias}.event_params_json, '$.error_code')), ''))";
+
+        return "CASE WHEN {$alias}.event_name <> 'vpn_network_diagnostic' THEN 'not_executed' "
+            . "WHEN {$jsonResult} IN ('success','succeeded','ok','true') THEN 'success' "
+            . "WHEN {$jsonResult} IN ('failed','failure','timeout','error','false') THEN 'failed' "
+            . "WHEN {$error} LIKE '%tcp=success%' THEN 'success' "
+            . "WHEN {$error} LIKE '%tcp=tcp probe failed%' OR {$error} LIKE '%tcp probe failed%' THEN 'failed' "
+            . "WHEN LOWER(COALESCE({$alias}.result_status, '')) = 'success' THEN 'success' ELSE 'unknown' END";
+    }
+
+    private function exitIpTargetSql(string $alias): string
+    {
+        return "COALESCE(NULLIF({$alias}.target_id, ''), "
+            . "NULLIF(JSON_UNQUOTE(JSON_EXTRACT({$alias}.event_params_json, '$.tcp_target_host')), ''), "
+            . "NULLIF(JSON_UNQUOTE(JSON_EXTRACT({$alias}.event_params_json, '$.target_host')), ''), "
+            . "NULLIF(JSON_UNQUOTE(JSON_EXTRACT({$alias}.event_params_json, '$.target_id')), ''), 'default')";
+    }
+
+    private function exitIpQualityRows(array $params): array
+    {
+        $tcpResult = $this->exitIpTcpResultSql('e');
+        $target = $this->exitIpTargetSql('e');
+        $stable = 'ip_ctx.session_ip_count = 1';
+        $eventIdentity = "COALESCE(NULLIF(e.request_id, ''), NULLIF(e.event_id, ''))";
+        $errorText = "LOWER(CONCAT_WS(' ', COALESCE(e.error_code, ''), COALESCE(e.error_category, ''), COALESCE(e.error_message, ''), COALESCE(JSON_UNQUOTE(JSON_EXTRACT(e.event_params_json, '$.tcp_error_code')), '')))";
+
+        $rawRows = DB::connection('adb')->query()
+            ->fromSub($this->exitIpContextQuery($params), 'ip_ctx')
+            ->leftJoinSub($this->exitIpEventQuery($params), 'e', function ($join): void {
+                $join->on('e.project_code', '=', 'ip_ctx.ctx_project_code')
+                    ->on('e.app_identifier', '=', 'ip_ctx.ctx_app_identifier')
+                    ->on('e.session_key', '=', 'ip_ctx.session_key');
+            })
+            ->select(['ip_ctx.exit_ip'])
+            ->selectRaw("MAX(NULLIF(ip_ctx.server_id, 'unknown')) AS server_id")
+            ->selectRaw("MAX(NULLIF(ip_ctx.proxy_provider, 'unknown')) AS proxy_provider")
+            ->selectRaw("MAX(NULLIF(ip_ctx.proxy_id, 'unknown')) AS proxy_id")
+            ->selectRaw("MAX(NULLIF(ip_ctx.exit_ip_asn, 'unknown')) AS exit_ip_asn")
+            ->selectRaw("MAX(NULLIF(ip_ctx.exit_ip_country, 'unknown')) AS exit_ip_country")
+            ->selectRaw("MAX(ip_ctx.ip_source_event) AS ip_source_event")
+            ->selectRaw('COUNT(DISTINCT ip_ctx.server_id) AS route_variant_count')
+            ->selectRaw("{$target} AS target_id")
+            ->selectRaw('COUNT(DISTINCT ip_ctx.session_key) AS session_count')
+            ->selectRaw("COUNT(DISTINCT CASE WHEN {$stable} THEN ip_ctx.session_key END) AS stable_session_count")
+            ->selectRaw("COUNT(DISTINCT CASE WHEN NOT ({$stable}) THEN ip_ctx.session_key END) AS ambiguous_session_count")
+            ->selectRaw("COUNT(DISTINCT CASE WHEN {$stable} AND {$tcpResult} IN ('success','failed') THEN ip_ctx.session_key END) AS tcp_session_count")
+            ->selectRaw("SUM(CASE WHEN {$stable} AND {$tcpResult} = 'success' THEN 1 ELSE 0 END) AS tcp_success_count")
+            ->selectRaw("SUM(CASE WHEN {$stable} AND {$tcpResult} = 'failed' THEN 1 ELSE 0 END) AS tcp_failed_count")
+            ->selectRaw("COUNT(DISTINCT CASE WHEN {$stable} AND {$tcpResult} = 'failed' THEN ip_ctx.session_key END) AS tcp_failed_session_count")
+            ->selectRaw("COUNT(DISTINCT CASE WHEN {$stable} AND e.event_name = 'ad_request' THEN {$eventIdentity} END) AS ad_request_count")
+            ->selectRaw("COUNT(DISTINCT CASE WHEN {$stable} AND e.event_name = 'ad_load_success' THEN {$eventIdentity} END) AS ad_load_success_count")
+            ->selectRaw("COUNT(DISTINCT CASE WHEN {$stable} AND e.event_name = 'ad_load_failed' THEN {$eventIdentity} END) AS ad_load_failed_count")
+            ->selectRaw("SUM(CASE WHEN {$stable} AND {$errorText} LIKE '%403%' THEN 1 ELSE 0 END) AS http_403_count")
+            ->selectRaw("SUM(CASE WHEN {$stable} AND {$errorText} LIKE '%429%' THEN 1 ELSE 0 END) AS http_429_count")
+            ->selectRaw("SUM(CASE WHEN {$stable} AND ({$errorText} LIKE '%timeout%' OR {$errorText} LIKE '%timed out%') THEN 1 ELSE 0 END) AS timeout_count")
+            ->selectRaw('MIN(ip_ctx.first_ip_observed_at) AS first_seen_at')
+            ->selectRaw('MAX(ip_ctx.last_ip_observed_at) AS last_seen_at')
+            ->selectRaw("MAX(CASE WHEN {$stable} AND {$tcpResult} = 'success' THEN e.event_time_utc END) AS last_tcp_success_at")
+            ->groupBy(['ip_ctx.exit_ip'])
+            ->groupByRaw($target)
+            ->orderByDesc('tcp_failed_session_count')
+            ->orderByDesc('session_count')
+            ->get();
+
+        $rows = $rawRows
+            ->filter(fn ($row): bool => $this->isPublicExitIp((string) ($row->exit_ip ?? '')))
+            ->map(function ($row): array {
+                $ip = (string) $row->exit_ip;
+                $sessions = (int) ($row->session_count ?? 0);
+                $stableSessions = (int) ($row->stable_session_count ?? 0);
+                $success = (int) ($row->tcp_success_count ?? 0);
+                $failed = (int) ($row->tcp_failed_count ?? 0);
+                $attempts = $success + $failed;
+                $failedSessions = (int) ($row->tcp_failed_session_count ?? 0);
+                $loads = (int) ($row->ad_load_success_count ?? 0) + (int) ($row->ad_load_failed_count ?? 0);
+
+                return [
+                    'ipKey' => hash('sha256', $ip),
+                    'rowKey' => hash('sha256', $ip . '|' . (string) ($row->target_id ?? 'default')),
+                    'ipAddress' => $ip,
+                    'ipMasked' => $this->maskExitIp($ip),
+                    'ipSource' => ($row->ip_source_event ?? '') === 'vpn_ip_probe_result' ? 'vpn_ip_probe' : 'ad_request',
+                    'proxyProvider' => $this->normalizeExitIpLabel($row->proxy_provider ?? null),
+                    'proxyId' => $this->normalizeExitIpLabel($row->proxy_id ?? null),
+                    'serverId' => $this->normalizeExitIpLabel($row->server_id ?? null),
+                    'exitIpAsn' => $this->normalizeExitIpLabel($row->exit_ip_asn ?? null),
+                    'exitIpCountry' => $this->normalizeExitIpLabel($row->exit_ip_country ?? null),
+                    'targetId' => (string) ($row->target_id ?? 'default'),
+                    'sessionCount' => $sessions,
+                    'stableSessionCount' => $stableSessions,
+                    'ambiguousSessionCount' => (int) ($row->ambiguous_session_count ?? 0),
+                    'tcpSessionCount' => (int) ($row->tcp_session_count ?? 0),
+                    'tcpAttemptCount' => $attempts,
+                    'tcpSuccessCount' => $success,
+                    'tcpFailedCount' => $failed,
+                    'tcpFailedSessionCount' => $failedSessions,
+                    'tcpSuccessRate' => $attempts > 0 ? round($success * 100 / $attempts, 2) : null,
+                    'tcpFailedSessionRate' => $stableSessions > 0 ? round($failedSessions * 100 / $stableSessions, 2) : null,
+                    'http403Count' => (int) ($row->http_403_count ?? 0),
+                    'http429Count' => (int) ($row->http_429_count ?? 0),
+                    'timeoutCount' => (int) ($row->timeout_count ?? 0),
+                    'adRequestCount' => (int) ($row->ad_request_count ?? 0),
+                    'adLoadSuccessCount' => (int) ($row->ad_load_success_count ?? 0),
+                    'adLoadFailedCount' => (int) ($row->ad_load_failed_count ?? 0),
+                    'adLoadSuccessRate' => $loads > 0 ? round((int) $row->ad_load_success_count * 100 / $loads, 2) : null,
+                    'ipChanged' => (int) ($row->ambiguous_session_count ?? 0) > 0,
+                    'routeVariantCount' => (int) ($row->route_variant_count ?? 0),
+                    'firstSeenAt' => $row->first_seen_at ? (string) $row->first_seen_at : null,
+                    'lastSeenAt' => $row->last_seen_at ? (string) $row->last_seen_at : null,
+                    'lastTcpSuccessAt' => $row->last_tcp_success_at ? (string) $row->last_tcp_success_at : null,
+                ];
+            })
+            ->values()
+            ->all();
+
+        // same-target peer IP comparison: compare each IP only with other IP rows under the same target/filter snapshot.
+        $targetTotals = collect($rows)->groupBy('targetId')->map(fn ($items): array => [
+            'success' => $items->sum('tcpSuccessCount'),
+            'attempts' => $items->sum('tcpAttemptCount'),
+            'sessions' => $items->sum('tcpSessionCount'),
+        ]);
+
+        return collect($rows)->map(function (array $row) use ($targetTotals): array {
+            $totals = $targetTotals->get($row['targetId'], ['success' => 0, 'attempts' => 0, 'sessions' => 0]);
+            $peerSuccess = (int) $totals['success'] - $row['tcpSuccessCount'];
+            $peerAttempts = (int) $totals['attempts'] - $row['tcpAttemptCount'];
+            $peerSessions = (int) $totals['sessions'] - $row['tcpSessionCount'];
+            $row['peerTcpSuccessRate'] = $peerAttempts > 0 ? round($peerSuccess * 100 / $peerAttempts, 2) : null;
+            $row['peerTcpAttemptCount'] = max(0, $peerAttempts);
+            $row['peerTcpSessionCount'] = max(0, $peerSessions);
+            $row['status'] = $this->classifyExitIpQuality($row);
+            return $row;
+        })->sortBy(fn (array $row): array => [
+            ['suspect' => 0, 'watch' => 1, 'insufficient' => 2, 'healthy' => 3][$row['status']] ?? 4,
+            -$row['tcpFailedSessionCount'],
+            -$row['sessionCount'],
+        ])->values()->all();
+    }
+
+    private function exitIpQualitySessions(array $params): array
+    {
+        $tcpResult = $this->exitIpTcpResultSql('e');
+        $target = $this->exitIpTargetSql('e');
+        $pageSize = min(100, max(1, (int) ($params['pageSize'] ?? 50)));
+        $offset = (max(1, (int) ($params['pageIndex'] ?? 1)) - 1) * $pageSize;
+        $errorText = "COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(e.event_params_json, '$.tcp_error_code')), ''), NULLIF(e.error_code, ''), NULLIF(e.error_message, ''), 'unknown')";
+        $selectedTarget = (string) ($params['ipTarget'] ?? 'default');
+
+        return DB::connection('adb')->query()
+            ->fromSub($this->exitIpContextQuery($params), 'ip_ctx')
+            ->leftJoinSub($this->exitIpEventQuery($params), 'e', function ($join): void {
+                $join->on('e.project_code', '=', 'ip_ctx.ctx_project_code')
+                    ->on('e.app_identifier', '=', 'ip_ctx.ctx_app_identifier')
+                    ->on('e.session_key', '=', 'ip_ctx.session_key');
+            })
+            ->whereRaw('SHA2(ip_ctx.exit_ip, 256) = ?', [(string) $params['ipKey']])
+            ->whereRaw("{$target} = ?", [$selectedTarget])
+            ->select(['ip_ctx.session_key'])
+            ->selectRaw("MAX(NULLIF(ip_ctx.server_id, 'unknown')) AS server_id")
+            ->selectRaw("MAX(NULLIF(ip_ctx.proxy_provider, 'unknown')) AS proxy_provider")
+            ->selectRaw("MAX(NULLIF(ip_ctx.proxy_id, 'unknown')) AS proxy_id")
+            ->selectRaw('MAX(ip_ctx.session_ip_count) AS session_ip_count')
+            ->selectRaw("GROUP_CONCAT(DISTINCT NULLIF(e.connection_id, '') SEPARATOR ',') AS connection_ids")
+            ->selectRaw("GROUP_CONCAT(DISTINCT {$target} SEPARATOR ',') AS target_ids")
+            ->selectRaw("SUM(CASE WHEN {$tcpResult} = 'success' THEN 1 ELSE 0 END) AS tcp_success_count")
+            ->selectRaw("SUM(CASE WHEN {$tcpResult} = 'failed' THEN 1 ELSE 0 END) AS tcp_failed_count")
+            ->selectRaw("COUNT(DISTINCT CASE WHEN e.event_name = 'ad_request' THEN COALESCE(NULLIF(e.request_id, ''), e.event_id) END) AS ad_request_count")
+            ->selectRaw("COUNT(DISTINCT CASE WHEN e.event_name = 'ad_load_success' THEN COALESCE(NULLIF(e.request_id, ''), e.event_id) END) AS ad_load_success_count")
+            ->selectRaw("COUNT(DISTINCT CASE WHEN e.event_name = 'ad_load_failed' THEN COALESCE(NULLIF(e.request_id, ''), e.event_id) END) AS ad_load_failed_count")
+            ->selectRaw("SUBSTRING_INDEX(GROUP_CONCAT(CASE WHEN {$tcpResult} = 'failed' THEN {$errorText} END ORDER BY e.event_time_utc DESC SEPARATOR '||'), '||', 1) AS latest_tcp_error")
+            ->selectRaw('MIN(e.event_time_utc) AS first_event_at')
+            ->selectRaw('MAX(e.event_time_utc) AS last_event_at')
+            ->groupBy(['ip_ctx.session_key'])
+            ->orderByDesc('last_event_at')
+            ->offset($offset)
+            ->limit($pageSize)
+            ->get()
+            ->map(function ($row): array {
+                $success = (int) ($row->tcp_success_count ?? 0);
+                $failed = (int) ($row->tcp_failed_count ?? 0);
+                return [
+                    'sessionKey' => hash('sha256', (string) $row->session_key),
+                    'sessionId' => $this->maskEvidenceIdentifier($row->session_key),
+                    'connectionIds' => array_values(array_filter(array_map(
+                        fn (string $value): ?string => $this->maskEvidenceIdentifier($value),
+                        explode(',', (string) ($row->connection_ids ?? ''))
+                    ))),
+                    'targetIds' => array_values(array_filter(explode(',', (string) ($row->target_ids ?? '')))),
+                    'serverId' => $this->normalizeExitIpLabel($row->server_id ?? null),
+                    'proxyProvider' => $this->normalizeExitIpLabel($row->proxy_provider ?? null),
+                    'proxyId' => $this->normalizeExitIpLabel($row->proxy_id ?? null),
+                    'ipChanged' => (int) ($row->session_ip_count ?? 0) > 1,
+                    'tcpSuccessCount' => $success,
+                    'tcpFailedCount' => $failed,
+                    'tcpResult' => $failed > 0 ? 'failed' : ($success > 0 ? 'success' : 'unknown'),
+                    'latestTcpError' => $this->sanitizeEvidenceText($this->normalizeExitIpLabel($row->latest_tcp_error ?? null)),
+                    'adRequestCount' => (int) ($row->ad_request_count ?? 0),
+                    'adLoadSuccessCount' => (int) ($row->ad_load_success_count ?? 0),
+                    'adLoadFailedCount' => (int) ($row->ad_load_failed_count ?? 0),
+                    'firstEventAt' => $row->first_event_at ? (string) $row->first_event_at : null,
+                    'lastEventAt' => $row->last_event_at ? (string) $row->last_event_at : null,
+                ];
+            })
+            ->all();
+    }
+
+    private function classifyExitIpQuality(array $row): string
+    {
+        $attempts = (int) $row['tcpAttemptCount'];
+        $sessions = (int) $row['stableSessionCount'];
+        $successRate = $row['tcpSuccessRate'];
+        $failedSessionRate = $row['tcpFailedSessionRate'];
+        $peerRate = $row['peerTcpSuccessRate'];
+        $peerAttempts = (int) $row['peerTcpAttemptCount'];
+        $peerSessions = (int) $row['peerTcpSessionCount'];
+
+        if ($sessions >= 10 && $attempts >= 20 && $successRate !== null && $successRate < 30
+            && $failedSessionRate !== null && $failedSessionRate >= 70
+            && $peerAttempts >= 20 && $peerSessions >= 10
+            && $peerRate !== null && $peerRate >= 60
+        ) {
+            return 'suspect';
+        }
+        if (($attempts >= 10 && $successRate !== null && $successRate < 60)
+            || ((int) $row['http403Count'] + (int) $row['http429Count']) >= 3
+        ) {
+            return 'watch';
+        }
+        if ($attempts >= 20 && $successRate !== null && $successRate >= 80) {
+            return 'healthy';
+        }
+        return 'insufficient';
+    }
+
+    private function publicExitIpSql(string $column): string
+    {
+        $ip = "TRIM({$column})";
+        $o1 = "(SUBSTRING_INDEX({$ip}, '.', 1) + 0)";
+        $o2 = "(SUBSTRING_INDEX(SUBSTRING_INDEX({$ip}, '.', 2), '.', -1) + 0)";
+        $o3 = "(SUBSTRING_INDEX(SUBSTRING_INDEX({$ip}, '.', 3), '.', -1) + 0)";
+        $o4 = "(SUBSTRING_INDEX({$ip}, '.', -1) + 0)";
+
+        return "({$ip} REGEXP '^([0-9]{1,3}[.]){3}[0-9]{1,3}$' "
+            . "AND {$o1} BETWEEN 1 AND 223 AND {$o2} <= 255 AND {$o3} <= 255 AND {$o4} <= 255 "
+            . "AND {$o1} NOT IN (10, 127) "
+            . "AND NOT ({$o1} = 100 AND {$o2} BETWEEN 64 AND 127) "
+            . "AND NOT ({$o1} = 169 AND {$o2} = 254) "
+            . "AND NOT ({$o1} = 172 AND {$o2} BETWEEN 16 AND 31) "
+            . "AND NOT ({$o1} = 192 AND {$o2} = 168) "
+            . "AND NOT ({$o1} = 192 AND {$o2} = 0 AND {$o3} IN (0, 2)) "
+            . "AND NOT ({$o1} = 198 AND {$o2} BETWEEN 18 AND 19) "
+            . "AND NOT ({$o1} = 198 AND {$o2} = 51 AND {$o3} = 100) "
+            . "AND NOT ({$o1} = 203 AND {$o2} = 0 AND {$o3} = 113))";
+    }
+
+    private function isPublicExitIp(string $ip): bool
+    {
+        if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) === false) {
+            return false;
+        }
+        if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+            $long = ip2long($ip);
+            if ($long === false) return false;
+            $unsigned = (int) sprintf('%u', $long);
+            $inRange = static fn (string $start, string $end): bool => $unsigned >= (int) sprintf('%u', ip2long($start)) && $unsigned <= (int) sprintf('%u', ip2long($end));
+            if ($inRange('100.64.0.0', '100.127.255.255') || $inRange('198.18.0.0', '198.19.255.255')) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private function maskExitIp(string $ip): string
+    {
+        if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+            $parts = explode('.', $ip);
+            return $parts[0] . '.' . $parts[1] . '.x.x';
+        }
+        $parts = explode(':', $ip);
+        return implode(':', array_slice($parts, 0, 3)) . ':…';
+    }
+
+    private function normalizeExitIpLabel($value): ?string
+    {
+        $text = trim((string) ($value ?? ''));
+        return $text === '' || strtolower($text) === 'unknown' ? null : $text;
+    }
+
+    private function exitIpQualityTotals(array $rows, int $rowLimit, int $returnedRows): array
+    {
+        return [
+            'scope' => 'all_eligible_rows',
+            'rowLimit' => $rowLimit,
+            'returnedRows' => $returnedRows,
+            'mayBeTruncated' => count($rows) > $returnedRows,
+            'ipRows' => count($rows),
+            'distinctIps' => count(array_unique(array_column($rows, 'ipKey'))),
+            'sessionAssociationCount' => array_sum(array_column($rows, 'sessionCount')),
+            'stableSessionAssociationCount' => array_sum(array_column($rows, 'stableSessionCount')),
+            'ambiguousSessionAssociationCount' => array_sum(array_column($rows, 'ambiguousSessionCount')),
+            'tcpAttemptCount' => array_sum(array_column($rows, 'tcpAttemptCount')),
+            'tcpFailedCount' => array_sum(array_column($rows, 'tcpFailedCount')),
+            'suspectCount' => count(array_filter($rows, static fn (array $row): bool => $row['status'] === 'suspect')),
+            'watchCount' => count(array_filter($rows, static fn (array $row): bool => $row['status'] === 'watch')),
+        ];
+    }
+
+    private function emptyExitIpQualityTotals(): array
+    {
+        return ['scope' => 'all_eligible_rows', 'rowLimit' => 0, 'returnedRows' => 0, 'mayBeTruncated' => false, 'ipRows' => 0, 'distinctIps' => 0, 'sessionAssociationCount' => 0, 'stableSessionAssociationCount' => 0, 'ambiguousSessionAssociationCount' => 0, 'tcpAttemptCount' => 0, 'tcpFailedCount' => 0, 'suspectCount' => 0, 'watchCount' => 0];
+    }
+
     private function networkFailureMatrix(array $params): array
     {
         return [

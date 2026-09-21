@@ -26,7 +26,7 @@ import { trackingApiBaseUrl } from "./api-base-url";
 import { createCodexQueryLinks } from "./codex-query-links-api";
 import { OperationsWorkspace, operationsEntries, legacyOperationsEntries, type OperationsEntry } from "./operations-workspace";
 
-const APP_VERSION = "V157";
+const APP_VERSION = "V160";
 const VERSION_MANIFEST_PATH = "/version.json";
 
 type PageKey =
@@ -299,9 +299,10 @@ const moduleMenus: Array<{ key: ModuleKey; label: string; group: "经营分析" 
 ];
 
 
-type VpnReportSectionKey = "matrix" | "adOverall" | "adDns" | "versions";
+type VpnReportSectionKey = "matrix" | "exitIp" | "adOverall" | "adDns" | "versions";
 const diagnosticReportMenus: Array<{ key: VpnReportSectionKey; label: string; hint: string }> = [
   { key: "matrix", label: "VPN Overall", hint: "网络失败横向" },
+  { key: "exitIp", label: "出口IP质量", hint: "IP、Session与TCP证据" },
   { key: "adOverall", label: "广告漏斗Overall", hint: "广告链路总表" },
   { key: "adDns", label: "广告DNS诊断", hint: "DNS成功率" },
   { key: "versions", label: "版本对比", hint: "版本与日期" },
@@ -312,7 +313,7 @@ const moduleCopy: Record<ModuleKey, { title: string; description: string; action
   project: { title: "单项目诊断", description: "围绕单个项目串联用户增长、产品漏斗、广告变现和数据质量", action: "创建诊断任务" },
   funnel: { title: "广告漏斗分析中心", description: "聚焦广告变现链路：DAU、资格检查、广告机会、请求、加载、展示、AV、收入和流失诊断", action: "新建广告诊断" },
   vpn: { title: "VPN功能漏斗分析", description: "基于 V1.8 弱网专项分析 VPN 点击、权限、节点、连接阶段、协议回退、可用性、IP 与会话质量", action: "新建 VPN 诊断" },
-  vpnReport: { title: "诊断报表", description: "包含 VPN Overall、广告漏斗Overall、广告DNS诊断和版本对比；维度、筛选项、展示列可自由组合并向上聚合", action: "导出诊断报表" },
+  vpnReport: { title: "诊断报表", description: "包含 VPN Overall、出口IP质量、广告漏斗Overall、广告DNS诊断和版本对比；支持从IP下钻到关联Session证据", action: "导出诊断报表" },
   admob: { title: "AdMob 分析", description: "分析请求、匹配、展示、广告浏览用户、eCPM和收入变化", action: "导出 AdMob 报表" },
   firebase: { title: "Firebase 数据", description: "统一查看活跃、事件质量、版本覆盖、数据源连接和同步健康", action: "查看事件字典" },
   reconcile: { title: "数据对账", description: "对比 Firebase、AdMob、中台与 ADB 的用户、展示和收入口径", action: "发起重新对账" },

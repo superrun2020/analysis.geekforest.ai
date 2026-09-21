@@ -143,3 +143,39 @@ test("multi-project ad DNS report is registered in frontend and backend", async 
   assert.doesNotMatch(source, /A012 DNS/);
   assert.doesNotMatch(service, /A012 广告 DNS 诊断报表/);
 });
+
+test("exit IP quality links IP aggregates to bounded session evidence", async () => {
+  const [api, page, source, request, service] = await Promise.all([
+    file("app/funnel-analysis-api.ts"),
+    file("app/page.tsx"),
+    file("app/operational-funnel.tsx"),
+    file("backend/app/Http/Requests/Admin/FunnelAnalyticsQueryRequest.php"),
+    file("backend/app/Services/FunnelAnalyticsService.php"),
+  ]);
+  assert.match(api, /exit_ip_quality/);
+  assert.match(page, /出口IP质量/);
+  assert.match(source, /ExitIpQualityReport/);
+  assert.match(source, /疑似受限/);
+  assert.match(source, /独立Session/);
+  assert.match(request, /exit_ip_quality/);
+  assert.match(request, /ipKey/);
+  assert.match(request, /ipTarget/);
+  assert.match(request, /matched_route/);
+  assert.match(service, /exitIpQualityPage/);
+  assert.match(service, /vpn_ip_probe_result/);
+  assert.match(service, /ip_after_connect/);
+  assert.match(service, /COUNT\(DISTINCT.*vpn_session_id/s);
+  assert.match(service, /isPublicExitIp/);
+  assert.match(service, /same-target peer IP comparison/i);
+  assert.match(service, /publicExitIpSql\('ip_after_connect'\)/);
+  assert.match(service, /GROUP_CONCAT\(TRIM\(ip_after_connect\)/);
+  assert.match(service, /COUNT\(DISTINCT TRIM\(ip_after_connect\)\)/);
+  assert.match(service, /peerAttempts >= 20/);
+  assert.match(service, /peerSessions >= 10/);
+  assert.doesNotMatch(service, /出口IP质量查询失败：['" ]*\.\s*\$exception->getMessage/);
+  assert.match(service, /stable_session_count/);
+  assert.match(service, /maskEvidenceIdentifier\(\$row->session_key\)/);
+  assert.match(service, /sanitizeEvidenceText\(\$this->normalizeExitIpLabel/);
+  assert.doesNotMatch(source, /title=\{text\(session\.sessionId\)\}/);
+  assert.doesNotMatch(source, /title=\{\(session\.connectionIds/);
+});
