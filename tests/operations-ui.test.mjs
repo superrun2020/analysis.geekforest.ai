@@ -33,6 +33,19 @@ test("daily anomalies visibly explain package reasons, denominators, and coverag
   assert.match(source, /VPN连接成功率（终态）=结果日成功终态/);
 });
 
+test("daily anomalies fence stale requests and distinguish revocation from transient availability", async () => {
+  const source = await readFile(new URL("../app/daily-anomalies.jsx", import.meta.url), "utf8");
+  assert.match(source,/generationRef/);
+  assert.match(source,/abortAll/);
+  assert.match(source,/\[401,403\]\.includes/);
+  assert.match(source,/onAuthRevoked/);
+  assert.match(source,/未获取数据 \/ 采集状态暂不可读取/);
+  assert.match(source,/checkedAt/);
+  const workspace = await readFile(new URL("../app/operations-workspace.tsx", import.meta.url), "utf8");
+  assert.match(workspace,/method:\s*["']DELETE["']/);
+  assert.match(workspace,/response\.status/);
+});
+
 test("legacy nine operations URLs map only to fixed Analysis destinations", async () => {
   const source = await readFile(new URL("../scripts/operations-bridge.mjs", import.meta.url), "utf8");
   for (const view of ["Overview", "Projects", "Issues", "Team", "Acceptance", "Rules", "Alerts", "Runs", "Status"]) assert.match(source, new RegExp(`operations${view}`));

@@ -1,16 +1,18 @@
 """Native Analysis build, real local anomaly API; isolated identity fixture only."""
-import os,sys,json,time,subprocess,tempfile,urllib.request,urllib.parse,csv,io
+import os,sys,json,time,subprocess,tempfile,urllib.request,urllib.parse,csv,io,shutil
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 ROOT=Path(__file__).resolve().parents[1]
 APP=Path(os.environ['OPERATIONS_APP'])
+QA=Path(os.environ.get('OPERATIONS_QA_DIR','/Users/oliver/oa-production-deploy/phase2-qa'))
 sys.path.insert(0,str(APP/'scripts'))
 from daily_anomalies import build,publish
-from live_diagnostics import window
-from datetime import datetime
+from datetime import datetime,timedelta
 from zoneinfo import ZoneInfo
-scratch=Path(os.environ['TMPDIR']).resolve(); tmp=Path(tempfile.mkdtemp(prefix='oa-phase2-qa-',dir=scratch));out=scratch/'native-anomaly-browser.json'
-now=datetime.now(ZoneInfo('Asia/Shanghai')).isoformat();dates=window(now)
+scratch=Path(os.environ['TMPDIR']).resolve()
+# The isolated backend deliberately accepts only an OS /tmp parent; all other test artifacts stay in the mandated scratch directory.
+tmp=Path(tempfile.mkdtemp(prefix='oa-phase2-qa-',dir='/tmp'));out=scratch/'native-anomaly-browser.json'
+now_dt=datetime.now(ZoneInfo('Asia/Shanghai'));now=now_dt.isoformat();dates=[(now_dt.date()-timedelta(days=2)).isoformat(),(now_dt.date()-timedelta(days=1)).isoformat()]
 registry=[]
 for i in range(35):
  row={'project_code':f'Q{i:03}','package_name':f'fixture.package.{i}'}
@@ -51,7 +53,7 @@ sources={
 publish(tmp/'anomalies.sqlite',build(registry,sources,dates,now))
 env={**os.environ,'OA_PHASE2_QA_DATA':str(tmp),'OA_PHASE2_BACKEND_PORT':'51981','OA_PHASE2_PROXY_PORT':'51982'}
 logs=[open(tmp/(n+'.log'),'w') for n in ('backend','proxy','static')]
-procs=[subprocess.Popen(['node',str(APP/'tests/phase2-browser/backend.mjs')],env=env,stdout=logs[0],stderr=subprocess.STDOUT),subprocess.Popen([sys.executable,str(APP/'tests/phase2-browser/proxy.py')],env=env,stdout=logs[1],stderr=subprocess.STDOUT),subprocess.Popen([sys.executable,'-m','http.server','51984','--bind','127.0.0.1','--directory',str(ROOT/'dist')],stdout=logs[2],stderr=subprocess.STDOUT)]
+procs=[subprocess.Popen(['node',str(QA/'backend.mjs')],env=env,stdout=logs[0],stderr=subprocess.STDOUT),subprocess.Popen([sys.executable,str(QA/'proxy.py')],env=env,stdout=logs[1],stderr=subprocess.STDOUT),subprocess.Popen([sys.executable,'-m','http.server','51984','--bind','127.0.0.1','--directory',str(ROOT/'dist')],stdout=logs[2],stderr=subprocess.STDOUT)]
 checks=[];requests=[];errors=[]
 try:
  for _ in range(100):
@@ -61,19 +63,33 @@ try:
   browser=pw.chromium.launch(executable_path='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless=True)
   page=browser.new_page(viewport={'width':1600,'height':1000},accept_downloads=True)
   page.add_init_script("localStorage.setItem('jkcl_funnel_oa_token','ISOLATED_FIXTURE_ONLY');localStorage.setItem('jkcl_funnel_oa_expires_at',new Date(Date.now()+3600000).toISOString())")
-  pending=[];summary_failure={'status':None}
+  pending=[];held_summary=[];held_export=[];downloads=[]
+  session_failure={'status':None,'empty':False};summary_failure={'status':None,'hold':False,'empty':False};details_failure={'status':None,'empty':False};export_failure={'status':None,'hold':False}
   def route(r):
    u=urllib.parse.urlsplit(r.request.url)
-   if u.path=='/operations/session':pending.append(r);return
+   if u.path=='/operations/session':
+    if r.request.method=='DELETE':r.fulfill(json={'ok':True});return
+    if session_failure['status']:
+     status=session_failure['status'];r.fulfill(status=status,body='' if session_failure['empty'] else json.dumps({'message':'fixture session denial'}),content_type='text/plain' if session_failure['empty'] else 'application/json');return
+    pending.append(r);return
    if u.path.startswith('/operations/api/'):
+    if u.path.endswith('/anomalies/details') and details_failure['status']:
+     status=details_failure['status'];r.fulfill(status=status,body='' if details_failure['empty'] else json.dumps({'ok':False,'error':'FIXTURE','message':'fixture details denial'}),content_type='text/plain' if details_failure['empty'] else 'application/json');return
+    if u.path.endswith('/anomalies/export') and export_failure['hold']:
+     export_failure['hold']=False;held_export.append(r);return
+    if u.path.endswith('/anomalies/export') and export_failure['status']:
+     status=export_failure['status'];r.fulfill(status=status,json={'ok':False,'error':'FIXTURE','message':'fixture export denial'});return
+    if u.path.endswith('/anomalies/summary') and summary_failure['hold']:
+     summary_failure['hold']=False;held_summary.append(r);return
     if u.path.endswith('/anomalies/summary') and summary_failure['status']:
-     status=summary_failure['status'];r.fulfill(status=status,json={'ok':False,'error':'FIXTURE','message':'fixture summary failure'});return
+     status=summary_failure['status'];r.fulfill(status=status,body='' if summary_failure['empty'] else json.dumps({'ok':False,'error':'FIXTURE','message':'fixture summary failure'}),content_type='text/plain' if summary_failure['empty'] else 'application/json');return
     res=urllib.request.urlopen('http://127.0.0.1:51982'+u.path.removeprefix('/operations')+('?' + u.query if u.query else ''))
     r.fulfill(status=res.status,content_type=res.headers.get('Content-Type','application/json'),body=res.read());return
    if u.path=='/api/auth/me':r.fulfill(json={'user':{'email':'fixture@example.test','employee':{'name':'Fixture','status':'在职'}}});return
    r.fulfill(json={'data':[],'projects':[],'items':[]})
   page.route('**/api/**',route);page.route('**/operations/**',route)
   page.on('request',lambda r:requests.append({'url':r.url,'type':r.resource_type}));page.on('pageerror',lambda e:errors.append(str(e)))
+  page.on('download',lambda download:downloads.append(download.suggested_filename))
   page.goto('http://127.0.0.1:51984/?operations=projects&operationsPage=team',wait_until='domcontentloaded')
   page.get_by_test_id('native-daily-anomalies').wait_for();assert page.locator('iframe').count()==0
   assert page.get_by_test_id('anomaly-groups').locator('thead').count()==1
@@ -148,10 +164,54 @@ try:
   records=list(csv.DictReader(io.StringIO(Path(dl.value.path()).read_text(encoding='utf-8-sig'))));assert len(records)==35
   checks.append('real isolated API: all 35 packages paginated 20+15 and CSV count identical')
   modal.locator('.ant-modal-close').click()
-  summary_failure['status']=503;page.get_by_role('button',name='刷新已汇总结果',exact=True).click();page.get_by_role('button',name='重试数据',exact=True).wait_for();assert page.get_by_test_id('anomaly-groups').count()==1
-  summary_failure['status']=401;page.get_by_role('button',name='刷新已汇总结果',exact=True).click();page.get_by_role('button',name='重试认证',exact=True).wait_for();assert page.get_by_test_id('anomaly-groups').count()==1
-  summary_failure['status']=None;page.get_by_role('button',name='刷新已汇总结果',exact=True).click();page.get_by_role('button',name='广告加载终态成功率',exact=True).wait_for()
-  checks.append('summary data failure uses retry data, 401 uses retry authentication, and both retain last-good table')
+  summary_failure['status']=503;page.get_by_role('button',name='刷新已汇总结果',exact=True).click()
+  for _ in range(50):
+   if pending:break
+   page.wait_for_timeout(20)
+  assert pending
+  for r in pending:r.fulfill(json={'ok':True})
+  pending.clear();page.get_by_role('button',name='重试数据',exact=True).wait_for();assert page.get_by_test_id('anomaly-groups').locator('tbody tr.ant-table-row').count()>0
+  summary_failure['status']=None
+  checks.append('summary 503 retains the previous applied filters and last-good snapshot')
+  # A failed detail filter keeps the last-good rows and labels exactly which query/page is applied.
+  page.get_by_role('button',name='广告加载终态成功率',exact=True).click();stale_modal=page.locator('.ant-modal:visible');stale_modal.get_by_text('共 35 项（不是 Top 截取）',exact=True).wait_for()
+  details_failure['status']=503;stale_modal.get_by_label('异常明细范围').click();page.get_by_text('不可计算/缺数项目',exact=True).click()
+  stale_modal.get_by_text('fixture details denial；保留上次成功明细',exact=True).wait_for();assert '范围 affected' in stale_modal.get_by_test_id('details-provenance').inner_text();assert '当前请求尚未应用' in stale_modal.get_by_test_id('details-provenance').inner_text();assert stale_modal.get_by_role('button',name='导出当前筛选全部 CSV').is_disabled();assert '共 35 项' in stale_modal.inner_text()
+  details_failure['status']=None;stale_modal.get_by_role('button',name='重试读取',exact=True).click();stale_modal.get_by_test_id('details-provenance').filter(has_text='范围 missing').wait_for();assert stale_modal.get_by_role('button',name='导出当前筛选全部 CSV').is_enabled();stale_modal.locator('.ant-modal-close').click()
+  checks.append('detail 503 retains last-good rows with checkedAt and applied view/page provenance; mismatched export is disabled')
+
+  # Closing details aborts/fences a late export so no download can be emitted.
+  page.get_by_role('button',name='广告加载终态成功率',exact=True).click();close_modal=page.locator('.ant-modal:visible');close_modal.get_by_text('共 35 项（不是 Top 截取）',exact=True).wait_for();before_downloads=len(downloads);export_failure['hold']=True;close_modal.get_by_role('button',name='导出当前筛选全部 CSV').click()
+  for _ in range(50):
+   if held_export:break
+   page.wait_for_timeout(20)
+  assert held_export;close_modal.locator('.ant-modal-close').click();page.get_by_test_id('anomaly-details').wait_for(state='detached')
+  try:held_export.pop().fulfill(status=200,body='secret,late\n1,2',content_type='text/csv')
+  except Exception:pass
+  page.wait_for_timeout(150);assert len(downloads)==before_downloads
+  checks.append('details close aborts and generation-fences a held export before download')
+
+  # POST session denial after protected data exists revokes the child and any held export.
+  for denial in (401,403):
+   page.get_by_role('button',name='广告加载终态成功率',exact=True).click();session_modal=page.locator('.ant-modal:visible');session_modal.get_by_text('共 35 项（不是 Top 截取）',exact=True).wait_for();before_downloads=len(downloads);export_failure['hold']=True;session_modal.get_by_role('button',name='导出当前筛选全部 CSV').click()
+   for _ in range(50):
+    if held_export:break
+    page.wait_for_timeout(20)
+   assert held_export;session_failure.update(status=denial,empty=True);page.get_by_role('button',name='刷新已汇总结果',exact=True).evaluate('(button)=>button.click()');page.get_by_text('当前登录已过期，请重新登录' if denial==401 else '当前账号无权访问每日异常',exact=True).wait_for();assert page.get_by_test_id('anomaly-details').count()==0;assert page.get_by_test_id('anomaly-groups').locator('tbody tr.ant-table-row').count()==0
+   try:held_export.pop().fulfill(status=200,body='secret,late\n1,2',content_type='text/csv')
+   except Exception:pass
+   page.wait_for_timeout(100);assert len(downloads)==before_downloads;session_failure.update(status=None,empty=False)
+   if denial==401:
+    page.reload(wait_until='domcontentloaded');page.get_by_test_id('native-daily-anomalies').wait_for()
+    for r in pending:r.fulfill(json={'ok':True})
+    pending.clear();page.get_by_role('button',name='广告加载终态成功率',exact=True).wait_for()
+  checks.append('empty-body POST session 401/403 revokes loaded summary/modal and held export with distinct login/permission messages')
+
+  # Empty/non-JSON API denials preserve HTTP status and revoke instead of becoming data errors.
+  page.reload(wait_until='domcontentloaded');page.get_by_test_id('native-daily-anomalies').wait_for()
+  for r in pending:r.fulfill(json={'ok':True})
+  pending.clear();page.get_by_role('button',name='广告加载终态成功率',exact=True).wait_for();details_failure.update(status=401,empty=True);page.get_by_role('button',name='广告加载终态成功率',exact=True).click();page.get_by_text('当前登录已过期，请重新登录',exact=True).wait_for();assert page.get_by_test_id('anomaly-groups').locator('tbody tr.ant-table-row').count()==0;details_failure.update(status=None,empty=False)
+  checks.append('empty-body details 401 preserves status and revokes protected state')
   page.reload(wait_until='domcontentloaded');page.get_by_test_id('native-daily-anomalies').wait_for()
   for r in pending:r.fulfill(json={'ok':True})
   pending.clear();page.get_by_role('button',name='广告加载终态成功率',exact=True).wait_for()
@@ -172,3 +232,4 @@ finally:
   try:p.wait(5)
   except subprocess.TimeoutExpired:p.kill()
  for f in logs:f.close()
+ shutil.rmtree(tmp,ignore_errors=True)
