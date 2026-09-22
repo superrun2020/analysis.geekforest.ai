@@ -2729,15 +2729,21 @@ type VersionCompareColumn = { key: string; label: string; unit: "count" | "ratio
 function versionCompareColumns(domain: string): VersionCompareColumn[] {
   if (domain === "vpn") {
     return [
-      { key: "paidAttributedNewUsers", label: "付费归因新人", unit: "count", help: "同区间首次打开且归因结果为 attributed 的去重新人" },
-      { key: "dauUsers", label: "DAU", unit: "count", help: "发生 app_foreground 的去重用户" },
-      { key: "languagePageExposureUsers", label: "语言页曝光UV", unit: "count", help: "真正看到语言选择页的去重用户" },
-      { key: "languageConfirmRate", label: "语言确认率", unit: "ratio", num: "languageConfirmUsers", den: "languagePageExposureUsers", help: "语言确认UV ÷ 语言页曝光UV" },
-      { key: "launcherGuideExposureUsers", label: "Launcher引导曝光UV", unit: "count", help: "真正看到默认 Launcher 授权引导的去重用户" },
-      { key: "launcherSetupSuccessRate", label: "Launcher设置成功率", unit: "ratio", num: "launcherSetupSuccessUsers", den: "launcherSetupClickUsers", help: "设置成功UV ÷ 点击立即设置UV" },
-      { key: "launcherHomeUsers", label: "Launcher首页UV", unit: "count", help: "真正进入 Launcher 首页的去重用户" },
-      { key: "coreFeatureCompleteUsers", label: "核心功能完成UV", unit: "count", help: "成功扫码或生成码的去重用户" },
-      { key: "coreFeatureActivationRate", label: "核心功能激活率", unit: "ratio", num: "coreFeatureCompleteUsers", den: "paidAttributedNewUsers", help: "核心功能完成UV ÷ 付费归因新人" },
+      { key: "newUsers", label: "新增用户", unit: "count" },
+      { key: "dauUsers", label: "DAU", unit: "count" },
+      { key: "vpnSessionCount", label: "VPN session", unit: "count" },
+      { key: "connectAttemptUsers", label: "连接发起", unit: "count" },
+      { key: "connectSuccessUsers", label: "连接成功", unit: "count" },
+      { key: "connectSuccessRate", label: "连接成功率", unit: "ratio", num: "connectSuccessUsers", den: "connectAttemptUsers" },
+      { key: "vpnProbeSuccessRate", label: "节点探测成功率", unit: "ratio" },
+      { key: "vpnIpProbeSuccessRate", label: "出口IP探测成功率", unit: "ratio" },
+      { key: "vpnFallbackCount", label: "协议回退", unit: "count" },
+      { key: "vpnAvgLatencyMs", label: "平均延迟ms", unit: "count" },
+      { key: "requestCount", label: "广告请求", unit: "count" },
+      { key: "loadSuccessRate", label: "加载成功率", unit: "ratio", num: "loadSuccessCount", den: "requestCount" },
+      { key: "impressionCount", label: "Impression", unit: "count" },
+      { key: "revenue", label: "收入", unit: "count" },
+
     ];
   }
   return [
