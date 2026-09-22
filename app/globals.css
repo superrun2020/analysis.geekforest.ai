@@ -40,6 +40,14 @@
 .company-login-card form input:focus { border-color:#4771e8; box-shadow:0 0 0 3px #edf2ff; }
 .company-login-card form>button { height:42px; border:1px solid #326cff; border-radius:8px; background:#326cff; color:#fff; font-size:11px; font-weight:750; cursor:pointer; }
 .company-login-card form>button:disabled { opacity:.6; cursor:wait; }
+.company-login-actions { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px; align-items:stretch; }
+.company-login-actions>button { height:42px; border-radius:8px; font-size:11px; font-weight:750; cursor:pointer; }
+.company-login-actions>button:first-child { border:1px solid #326cff; background:#326cff; color:#fff; }
+.company-login-actions>button:first-child:disabled { opacity:.6; cursor:wait; }
+.company-login-actions .company-login-copy-log { padding:0 12px; border:1px solid #c8d6ec; background:#f6f9ff; color:#326cff; white-space:nowrap; }
+.company-login-diagnostics { margin-top:10px; border:1px solid #dce4ef; border-radius:8px; background:#f8fafc; color:#64748b; font-size:9px; }
+.company-login-diagnostics summary { padding:9px 11px; cursor:pointer; font-weight:700; }
+.company-login-diagnostics pre { max-height:160px; margin:0; padding:0 11px 11px; overflow:auto; color:#334155; font:8px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace; white-space:pre-wrap; word-break:break-all; user-select:text; }
 .company-code-row { display:flex; align-items:flex-end; gap:8px; }
 .company-code-row input { min-width:0; flex:1; }
 .company-code-row button { height:43px; margin-top:7px; padding:0 13px; border:1px solid #c8d6ec; border-radius:8px; background:#f6f9ff; color:#326cff; font-size:10px; font-weight:750; white-space:nowrap; cursor:pointer; }

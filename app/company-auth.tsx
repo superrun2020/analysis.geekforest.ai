@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "antd";
+import { appendLoginDiagnostic, formatLoginDiagnostics, type LoginDiagnosticEntry, type LoginDiagnosticValue } from "./login-diagnostics";
 
 const oaBaseUrl = (import.meta.env.VITE_OA_API_BASE_URL ?? import.meta.env.NEXT_PUBLIC_OA_API_BASE_URL ?? "").replace(/\/$/, "");
 export const companyAuthTokenKey = "jkcl_funnel_oa_token";
 const companyAuthExpiresAtKey = "jkcl_funnel_oa_expires_at";
+const loginDiagnosticsVersion = "V162";
 
 /** Return the device-scoped OA token while its server-issued expiry remains valid. */
 export function getCompanyAuthToken() {
@@ -40,20 +42,44 @@ const errorMessages: Record<string, string> = {
   auth_network_error: "验证接口连接失败，请稍后重试；如果一直失败请联系技术检查 OA 登录代理。",
   auth_proxy_unavailable: "OA 登录代理暂时不可用，请稍后重试。",
 };
+const knownAuthDiagnosticErrors = new Set([...Object.keys(errorMessages), "unauthorized", "forbidden", "too_many_requests"]);
 
-async function authRequest(path: string, body?: Record<string, unknown>, token?: string) {
+type LoginDiagnosticRecorder = (event: string, details?: Record<string, LoginDiagnosticValue>) => void;
+
+async function authRequest(path: string, body?: Record<string, unknown>, token?: string, recordDiagnostic?: LoginDiagnosticRecorder) {
+  const method = body ? "POST" : "GET";
+  const startedAt = performance.now();
+  recordDiagnostic?.("request_started", { path, method, online: navigator.onLine });
   let response: Response;
   try {
     response = await fetch(`${oaBaseUrl}${path}`, {
-      method: body ? "POST" : "GET",
+      method,
       credentials: "include",
       headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       body: body ? JSON.stringify(body) : undefined,
     });
-  } catch {
+  } catch (error) {
+    recordDiagnostic?.("request_network_error", {
+      path,
+      method,
+      elapsedMs: Math.round(performance.now() - startedAt),
+      online: navigator.onLine,
+      errorName: error instanceof Error ? error.name : "unknown",
+    });
     throw new Error("auth_network_error");
   }
   const payload = await response.json().catch(() => ({})) as AuthResult;
+  const diagnosticError = typeof payload.error === "string" && knownAuthDiagnosticErrors.has(payload.error)
+    ? payload.error
+    : response.ok ? null : `HTTP_${response.status}`;
+  recordDiagnostic?.("request_completed", {
+    path,
+    method,
+    status: response.status,
+    ok: response.ok,
+    elapsedMs: Math.round(performance.now() - startedAt),
+    responseError: diagnosticError,
+  });
   if (!response.ok) throw new Error(payload.error || `HTTP_${response.status}`);
   return payload;
 }
@@ -98,6 +124,19 @@ export function useCompanyAuth() {
   };
 }
 
+function legacyCopyDiagnosticText(text: string) {
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  document.body.appendChild(textarea);
+  textarea.select();
+  const copied = document.execCommand("copy");
+  textarea.remove();
+  if (!copied) throw new Error("copy_failed");
+}
+
 export function CompanyLogin({ onSignedIn }: { onSignedIn: (result: AuthResult) => void }) {
   const [loginMode, setLoginMode] = useState<"code" | "password">("code");
   const [email, setEmail] = useState("");
@@ -111,6 +150,63 @@ export function CompanyLogin({ onSignedIn }: { onSignedIn: (result: AuthResult) 
   const [sendingCode, setSendingCode] = useState(false);
   const [codeCooldown, setCodeCooldown] = useState(0);
   const [message, setMessage] = useState("");
+  const [diagnostics, setDiagnostics] = useState<LoginDiagnosticEntry[]>(() => appendLoginDiagnostic([], "login_page_ready", {
+    mode: "code",
+    online: navigator.onLine,
+  }));
+  const diagnosticsRef = useRef(diagnostics);
+  const diagnosticRevisionRef = useRef(0);
+  const lastCopiedRevisionRef = useRef<number | null>(null);
+  const [diagnosticCopyStatus, setDiagnosticCopyStatus] = useState("可复制");
+
+  function commitDiagnostics(entries: LoginDiagnosticEntry[]) {
+    diagnosticRevisionRef.current += 1;
+    diagnosticsRef.current = entries;
+    setDiagnostics(entries);
+    return entries;
+  }
+
+  function recordDiagnostic(event: string, details: Record<string, LoginDiagnosticValue> = {}) {
+    commitDiagnostics(appendLoginDiagnostic(diagnosticsRef.current, event, details));
+    if (lastCopiedRevisionRef.current !== null && diagnosticRevisionRef.current !== lastCopiedRevisionRef.current) {
+      setDiagnosticCopyStatus("日志已更新，请重新复制");
+    }
+  }
+
+  function diagnosticText(entries: LoginDiagnosticEntry[] = diagnostics) {
+    return formatLoginDiagnostics(entries, {
+      version: loginDiagnosticsVersion,
+      capturedAt: new Date().toISOString(),
+      path: window.location.pathname,
+      online: navigator.onLine,
+      language: navigator.language,
+      userAgent: navigator.userAgent,
+    });
+  }
+
+  async function copyDiagnosticLog() {
+    const currentEntries = diagnosticsRef.current;
+    const nextEntries = commitDiagnostics(appendLoginDiagnostic(currentEntries, "copy_requested", { eventCount: currentEntries.length }));
+    const copiedRevision = diagnosticRevisionRef.current;
+    const text = diagnosticText(nextEntries);
+    setDiagnosticCopyStatus("正在复制…");
+    try {
+      if (navigator.clipboard?.writeText) {
+        try {
+          await navigator.clipboard.writeText(text);
+        } catch {
+          legacyCopyDiagnosticText(text);
+        }
+      } else {
+        legacyCopyDiagnosticText(text);
+      }
+      lastCopiedRevisionRef.current = copiedRevision;
+      setDiagnosticCopyStatus(diagnosticRevisionRef.current === copiedRevision ? "已复制，可发给技术排查" : "日志已更新，请重新复制");
+    } catch {
+      lastCopiedRevisionRef.current = null;
+      setDiagnosticCopyStatus("复制失败，请展开日志手动复制");
+    }
+  }
 
   useEffect(() => {
     if (codeCooldown <= 0) return;
@@ -121,6 +217,7 @@ export function CompanyLogin({ onSignedIn }: { onSignedIn: (result: AuthResult) 
   function validateCompanyEmail() {
     const normalized = email.trim().toLowerCase();
     if (!normalized.endsWith("@geekforest.ai")) {
+      recordDiagnostic("validation_failed", { field: "company_email", reason: "invalid_domain" });
       setMessage(errorMessages.jkcl_company_email_required);
       return "";
     }
@@ -129,14 +226,16 @@ export function CompanyLogin({ onSignedIn }: { onSignedIn: (result: AuthResult) 
 
   async function requestLoginCode() {
     if (sendingCode || codeCooldown > 0) return;
+    recordDiagnostic("request_code_clicked", { mode: loginMode });
     const normalized = validateCompanyEmail();
     if (!normalized) return;
     setSendingCode(true);
     setMessage("");
     try {
-      const result = await authRequest("/api/auth/request-code", { email: normalized, audience: "jkcl_funnel" }) as AuthResult & { expiresInMinutes?: number };
+      const result = await authRequest("/api/auth/request-code", { email: normalized, audience: "jkcl_funnel" }, undefined, recordDiagnostic) as AuthResult & { expiresInMinutes?: number };
       setEmail(normalized);
       setCodeCooldown(60);
+      recordDiagnostic("request_code_succeeded", { expiresInMinutes: Number(result.expiresInMinutes || 10) });
       setMessage(`验证码已发送到 ${normalized}，${Number(result.expiresInMinutes || 10)} 分钟内有效。`);
     } catch (error) {
       const codeValue = error instanceof Error ? error.message : "unknown";
@@ -148,17 +247,20 @@ export function CompanyLogin({ onSignedIn }: { onSignedIn: (result: AuthResult) 
 
   async function submitCodeLogin(event: React.FormEvent) {
     event.preventDefault();
+    recordDiagnostic("login_submit_clicked", { mode: "code" });
     const normalized = validateCompanyEmail();
     if (!normalized) return;
     const normalizedCode = code.replace(/\D/g, "").slice(0, 6);
     if (normalizedCode.length !== 6) {
+      recordDiagnostic("validation_failed", { field: "verification_input", reason: "invalid_length", inputLength: normalizedCode.length });
       setMessage("请输入邮件中的 6 位验证码。");
       return;
     }
     setLoading(true);
     setMessage("");
     try {
-      const result = await authRequest("/api/auth/login-code", { email: normalized, code: normalizedCode, audience: "jkcl_funnel", trustedDevice: true });
+      const result = await authRequest("/api/auth/login-code", { email: normalized, code: normalizedCode, audience: "jkcl_funnel", trustedDevice: true }, undefined, recordDiagnostic);
+      recordDiagnostic("login_succeeded", { mode: "code" });
       onSignedIn(result);
     } catch (error) {
       const codeValue = error instanceof Error ? error.message : "unknown";
@@ -170,26 +272,31 @@ export function CompanyLogin({ onSignedIn }: { onSignedIn: (result: AuthResult) 
 
   async function submitLogin(event: React.FormEvent) {
     event.preventDefault();
+    recordDiagnostic("login_submit_clicked", { mode: "password" });
     const normalized = email.trim().toLowerCase();
     if (!normalized.endsWith("@geekforest.ai")) {
+      recordDiagnostic("validation_failed", { field: "company_email", reason: "invalid_domain" });
       setMessage(errorMessages.jkcl_company_email_required);
       return;
     }
     if (!password) {
+      recordDiagnostic("validation_failed", { field: "password", reason: "missing" });
       setMessage(errorMessages.missing_email_or_password);
       return;
     }
     setLoading(true);
     setMessage("");
     try {
-      const result = await authRequest("/api/auth/login", { email: normalized, password, audience: "jkcl_funnel", trustedDevice: true });
+      const result = await authRequest("/api/auth/login", { email: normalized, password, audience: "jkcl_funnel", trustedDevice: true }, undefined, recordDiagnostic);
       setEmail(normalized);
       if (result.user?.mustChangePassword) {
         setPendingResult(result);
         setStep("changePassword");
+        recordDiagnostic("password_change_required", { mode: "password" });
         setMessage("你当前仍在使用初始密码。为保护数据安全，请先修改密码。");
         return;
       }
+      recordDiagnostic("login_succeeded", { mode: "password" });
       onSignedIn(result);
     } catch (error) {
       const codeValue = error instanceof Error ? error.message : "unknown";
@@ -201,6 +308,7 @@ export function CompanyLogin({ onSignedIn }: { onSignedIn: (result: AuthResult) 
 
   async function submitChangePassword(event: React.FormEvent) {
     event.preventDefault();
+    recordDiagnostic("password_change_submit_clicked");
     if (!pendingResult?.token) {
       setMessage("登录状态不完整，请返回重新登录。");
       return;
@@ -220,7 +328,8 @@ export function CompanyLogin({ onSignedIn }: { onSignedIn: (result: AuthResult) 
     setLoading(true);
     setMessage("正在保存新密码…");
     try {
-      await authRequest("/api/auth/change-password", { oldPassword: password, newPassword }, pendingResult.token);
+      await authRequest("/api/auth/change-password", { oldPassword: password, newPassword }, pendingResult.token, recordDiagnostic);
+      recordDiagnostic("password_change_succeeded");
       onSignedIn({ ...pendingResult, user: pendingResult.user ? { ...pendingResult.user, mustChangePassword: false } : pendingResult.user });
     } catch (error) {
       const codeValue = error instanceof Error ? error.message : "unknown";
@@ -233,22 +342,23 @@ export function CompanyLogin({ onSignedIn }: { onSignedIn: (result: AuthResult) 
   return <main className="company-login-shell"><section className="company-login-card">
     <div className="company-login-brand"><span>GF</span><div><strong>分析系统</strong><small>企业内部数据平台</small></div></div>
     <div className="company-login-copy"><h1>{step === "login" ? "使用企业账号登录" : "首次登录请修改密码"}</h1><p>{step === "login" ? "使用企业邮箱验证码或密码登录；系统会通过 OA/HRBP 核验极客主体在职员工身份。" : `当前账号：${email}`}</p></div>
-    {step === "login" && <div className="company-login-tabs" role="tablist" aria-label="登录方式"><Button htmlType="button" role="tab" aria-selected={loginMode === "code"} className={loginMode === "code" ? "active" : ""} onClick={() => { setLoginMode("code"); setMessage(""); }}>验证码登录</Button><Button htmlType="button" role="tab" aria-selected={loginMode === "password"} className={loginMode === "password" ? "active" : ""} onClick={() => { setLoginMode("password"); setMessage(""); }}>密码登录</Button></div>}
+    {step === "login" && <div className="company-login-tabs" role="tablist" aria-label="登录方式"><Button htmlType="button" role="tab" aria-selected={loginMode === "code"} className={loginMode === "code" ? "active" : ""} onClick={() => { setLoginMode("code"); setMessage(""); recordDiagnostic("login_mode_changed", { mode: "code" }); }}>验证码登录</Button><Button htmlType="button" role="tab" aria-selected={loginMode === "password"} className={loginMode === "password" ? "active" : ""} onClick={() => { setLoginMode("password"); setMessage(""); recordDiagnostic("login_mode_changed", { mode: "password" }); }}>密码登录</Button></div>}
     {step === "login" && loginMode === "code" ? <form onSubmit={submitCodeLogin}>
       <label>企业邮箱<input autoFocus type="email" autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="name@geekforest.ai" required /></label>
       <label>邮箱验证码<div className="company-code-row"><input type="text" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="输入 6 位验证码" required /><Button htmlType="button" disabled={sendingCode || codeCooldown > 0} onClick={() => void requestLoginCode()}>{sendingCode ? "发送中…" : codeCooldown > 0 ? `${codeCooldown}s 后重发` : "获取验证码"}</Button></div></label>
-      <Button htmlType="submit" disabled={loading}>{loading ? "正在验证…" : "登录漏斗分析中心"}</Button>
+      <div className="company-login-actions"><Button htmlType="submit" disabled={loading}>{loading ? "正在验证…" : "登录漏斗分析中心"}</Button><Button htmlType="button" className="company-login-copy-log" onClick={() => void copyDiagnosticLog()}>复制登录日志</Button></div>
     </form> : step === "login" ? <form onSubmit={submitLogin}>
       <label>企业邮箱<input autoFocus type="email" autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="name@geekforest.ai" required /></label>
       <label>密码<input type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="首次登录请输入企业邮箱" required /></label>
-      <Button htmlType="submit" disabled={loading}>{loading ? "正在登录…" : "登录漏斗分析中心"}</Button>
+      <div className="company-login-actions"><Button htmlType="submit" disabled={loading}>{loading ? "正在登录…" : "登录漏斗分析中心"}</Button><Button htmlType="button" className="company-login-copy-log" onClick={() => void copyDiagnosticLog()}>复制登录日志</Button></div>
     </form> : <form onSubmit={submitChangePassword}>
       <label>新密码<input autoFocus type="password" autoComplete="new-password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} placeholder="至少 8 位，不能等于邮箱" required /></label>
       <label>确认新密码<input type="password" autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} placeholder="再次输入新密码" required /></label>
-      <Button htmlType="submit" disabled={loading}>{loading ? "正在保存…" : "保存新密码并进入系统"}</Button>
+      <div className="company-login-actions"><Button htmlType="submit" disabled={loading}>{loading ? "正在保存…" : "保存新密码并进入系统"}</Button><Button htmlType="button" className="company-login-copy-log" onClick={() => void copyDiagnosticLog()}>复制登录日志</Button></div>
       <Button htmlType="button" className="login-back" onClick={() => { setStep("login"); setPendingResult(null); setNewPassword(""); setConfirmPassword(""); setMessage(""); }}>返回登录</Button>
     </form>}
     {message && <div className="company-login-error" role="alert">{message}</div>}
+    <details className="company-login-diagnostics"><summary>登录诊断日志 · <span aria-live="polite">{diagnosticCopyStatus}</span> · {diagnostics.length} 条</summary><pre>{diagnosticText()}</pre></details>
     <div className="company-login-policy"><strong>身份验证规则</strong><span>@geekforest.ai 企业邮箱</span><span>极客主体员工</span><span>当前在职</span><span>离职自动失效</span><span>本设备 30 天免登录</span></div>
   </section></main>;
 }

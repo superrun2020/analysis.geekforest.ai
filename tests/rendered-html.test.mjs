@@ -86,6 +86,29 @@ test("all analysis login actions submit their forms", async () => {
 });
 
 
+test("analysis login exposes copyable privacy-safe diagnostics beside every submit action", async () => {
+  const [source, diagnostics, css] = await Promise.all([
+    file("app/company-auth.tsx"),
+    file("app/login-diagnostics.ts"),
+    file("app/globals.css"),
+  ]);
+  assert.match(source, /复制登录日志/);
+  assert.match(source, /navigator\.clipboard\.writeText/);
+  assert.match(source, /legacyCopyDiagnosticText/);
+  assert.match(source, /catch \{\s*legacyCopyDiagnosticText\(text\)/);
+  assert.match(source, /diagnosticsRef/);
+  assert.match(source, /aria-live="polite"/);
+  assert.match(source, /knownAuthDiagnosticErrors\.has/);
+  assert.match(source, /request_started/);
+  assert.match(source, /request_completed/);
+  assert.match(source, /company-login-actions/);
+  assert.match(css, /\.company-login-actions/);
+  assert.match(diagnostics, /SENSITIVE_KEY/);
+  assert.doesNotMatch(source, /details:\s*\{[^}]*password/);
+  assert.doesNotMatch(source, /details:\s*\{[^}]*code/);
+});
+
+
 test("oa workspace visual style token is shipped", async () => {
   const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
   assert.match(css, /OA workspace inspired light dashboard polish/);
