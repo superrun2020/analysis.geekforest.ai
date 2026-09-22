@@ -4,7 +4,7 @@ Base: deployed V163 / efd30543a3e4335cdab4c8a969f106ce8d8b5462. Existing React19
 
 ## Application shell and public report controls
 All normal routes use AnalysisShell: AntD Layout/Sider/Menu/Header/Content/Drawer/Dropdown/Button/Tooltip. Mobile drawer replaces sider; desktop248px/64px. Only selected leaf highlighted. Header56px with child flex-scroll instead of100dvh report.
-Shared report controls: 21 Select instances and 10 date input instances migrated across operational-funnel, page global filters, and domain-report (verify exact counts from source diff); ReportSelect uses AntD value callbacks, ReportDate preserves ISO date/null guard. Daily report already uses AntD Select/Input/Table/Pagination and keeps collected-date-only choices.
+Shared report controls: 21 Select instances and 10 date input instances migrated across operational-funnel, page global filters, and domain-report (counts verified from migrated source); ReportSelect uses AntD value callbacks, ReportDate preserves ISO date/null guard. Daily report already uses AntD Select/Input/Table/Pagination and keeps collected-date-only choices.
 
 ## Route matrix
 Real built Chrome, isolated employee identity and explicit API empty-response fixtures (not production-data E2E), 1440x900 and380x956. Main shell also tested1366x768 and390x844.

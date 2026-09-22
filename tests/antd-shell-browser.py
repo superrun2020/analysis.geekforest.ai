@@ -66,6 +66,13 @@ try:
     page.goto('http://127.0.0.1:51989/'+routepath);page.locator('.analysis-content').wait_for();page.wait_for_timeout(180)
     assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1'), routepath
     assert not errors, (routepath,errors)
+    for element in page.locator('.matrix-overall-config:visible').all():
+     box=element.bounding_box()
+     assert box['x']>=0 and box['x']+box['width']<=width+1,(routepath,'config clipped',box)
+     for control in element.locator('.ant-select,.ant-picker').all():
+      c=control.bounding_box()
+      assert c['x']>=box['x'] and c['x']+c['width']<=box['x']+box['width']+1,(routepath,'control clipped',c)
+    if width==380 and 'module=vpnReport' in routepath:page.screenshot(path=str(ROOT/('antd-'+routepath.split('reportSection=')[1]+'-380.png')))
     results.append({'route':routepath,'width':width,'rendered':True,'errors':list(errors)})
   queries=[]
   page.on('request',lambda req:queries.append(req.post_data_json) if '/jkcl-funnel/query' in req.url and req.method=='POST' else None)
