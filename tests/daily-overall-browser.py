@@ -62,6 +62,9 @@ try:
   pending.clear()
   page.get_by_text('每日异常 Overall · 70 组',exact=True).wait_for()
   checks.append('config and table skeleton before auth; real API 70 grouped rows')
+  if os.environ.get('SCROLL_QA'):
+   from daily_scroll_checks import check_scroll
+   check_scroll(page, browser, data, checks)
   before=len(requests);page.get_by_label('显示-昨日率',exact=True).locator('..').click();page.wait_for_timeout(150);assert len(requests)==before
   assert page.get_by_test_id('anomaly-groups').get_by_role('columnheader',name='昨日率',exact=True).count()==0
   checks.append('display toggle changes headers without backend query')

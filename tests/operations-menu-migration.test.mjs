@@ -10,9 +10,10 @@ test("Analysis owns the single native daily-anomaly entry; deleted OA menus stay
   assert.doesNotMatch(workspace, /iframe|embedded=1/);
   const menus = page.slice(page.indexOf('const moduleMenus:'), page.indexOf('type VpnReportSectionKey'));
   for (const key of ['reconcile', 'report', 'tracking', 'tasks', 'shareAlerts']) assert.doesNotMatch(menus, new RegExp(`key: "${key}"`));
-  const sidebar = page.slice(page.indexOf('<aside className="sidebar">'), page.indexOf('</aside>', page.indexOf('<aside className="sidebar">')));
+  const sidebar = page.slice(page.indexOf('<AnalysisShell'), page.indexOf('<header className="topbar"'));
   assert.doesNotMatch(sidebar, /质量治理/);
-  assert.ok(sidebar.indexOf('operationsEntries.map') < sidebar.indexOf('moduleMenus.filter'));
+  assert.ok(sidebar.indexOf('key: "daily"') < sidebar.indexOf('moduleMenus.map'));
+  assert.match(sidebar, /selectedKey=\{operationsActive \? "daily"/);
   assert.match(page, /legacyOperationsEntries/);
   assert.match(page, /searchParams\.set\("operations", "overview"\)/);
 });

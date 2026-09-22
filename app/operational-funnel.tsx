@@ -2,6 +2,7 @@
 
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { Button } from "antd";
+import { ReportSelect, ReportDate } from "./report-controls";
 import type { ReactNode } from "react";
 import { getCompanyAuthToken } from "./company-auth";
 import { trackingApiBaseUrl } from "./api-base-url";
@@ -2174,11 +2175,11 @@ function AdDnsReport({ data, dimensions, dates, projectCode, platform, country, 
       <div className="overall-config-row dimension-row"><span className="overall-config-label">维度</span>{AD_DNS_DIMENSIONS.map((dimension) => <label key={dimension.key} className={`overall-chip ${draftDimensions.includes(dimension.key) ? "active" : ""}`} title={draftDimensions.includes(dimension.key) ? "取消勾选即向上聚合" : "勾选后按此维度细分"}><input type="checkbox" checked={draftDimensions.includes(dimension.key)} onChange={() => toggleDimension(dimension.key)} disabled={draftDimensions.includes(dimension.key) && draftDimensions.length <= 1} /><span>{dimension.label}</span></label>)}</div>
       <div className="overall-config-row metric-row"><span className="overall-config-label">统计字段</span>{AD_DNS_COLUMNS.map((column) => <label key={column.key} className={`overall-chip ${shows(column.key) ? "active" : ""}`}><input type="checkbox" checked={shows(column.key)} onChange={() => toggleColumn(column.key)} /><span>{column.label}</span></label>)}</div>
       <div className="overall-filter-row">
-        <label className="overall-filter-item date-range-control"><span>日期范围：</span><input type="date" value={dates.dateFrom} onChange={(event) => { const nextFrom = event.target.value; if (!nextFrom) return; const nextTo = dates.dateTo < nextFrom ? nextFrom : dates.dateTo; onRangeChange?.(`${nextFrom}~${nextTo}`); }} /><b>→</b><input type="date" value={dates.dateTo} min={dates.dateFrom} onChange={(event) => { if (!event.target.value) return; onRangeChange?.(`${dates.dateFrom}~${event.target.value}`); }} /></label>
-        <label className="overall-filter-item"><span>项目代号：</span><select value={projectCode} onChange={(event) => onProjectSelect?.(event.target.value)}>{selectableProjects.map((item) => <option key={item.projectCode} value={item.projectCode}>{item.projectCode}{item.appName ? ` · ${item.appName}` : ""}</option>)}</select></label>
-        <label className="overall-filter-item"><span>国家：</span><select value={country} onChange={(event) => onCountryChange?.(event.target.value)}>{safeCountryOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
-        <label className="overall-filter-item"><span>平台：</span><select value={platform} onChange={(event) => onPlatformChange?.(event.target.value)}><option>Android</option><option>iOS</option><option>全部</option></select></label>
-        <label className="overall-filter-item"><span>App版本：</span><select value={appVersion} onChange={(event) => onAppVersionChange?.(event.target.value)}>{safeAppVersionOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+        <label className="overall-filter-item date-range-control"><span>日期范围：</span><ReportDate  value={dates.dateFrom} onChange={(event) => { const nextFrom = event; if (!nextFrom) return; const nextTo = dates.dateTo < nextFrom ? nextFrom : dates.dateTo; onRangeChange?.(`${nextFrom}~${nextTo}`); }} /><b>→</b><ReportDate  value={dates.dateTo} min={dates.dateFrom} onChange={(event) => { if (!event) return; onRangeChange?.(`${dates.dateFrom}~${event}`); }} /></label>
+        <label className="overall-filter-item"><span>项目代号：</span><ReportSelect value={projectCode} onChange={(event) => onProjectSelect?.(event)}>{selectableProjects.map((item) => <option key={item.projectCode} value={item.projectCode}>{item.projectCode}{item.appName ? ` · ${item.appName}` : ""}</option>)}</ReportSelect></label>
+        <label className="overall-filter-item"><span>国家：</span><ReportSelect value={country} onChange={(event) => onCountryChange?.(event)}>{safeCountryOptions.map((item) => <option key={item} value={item}>{item}</option>)}</ReportSelect></label>
+        <label className="overall-filter-item"><span>平台：</span><ReportSelect value={platform} onChange={(event) => onPlatformChange?.(event)}><option>Android</option><option>iOS</option><option>全部</option></ReportSelect></label>
+        <label className="overall-filter-item"><span>App版本：</span><ReportSelect value={appVersion} onChange={(event) => onAppVersionChange?.(event)}>{safeAppVersionOptions.map((item) => <option key={item} value={item}>{item}</option>)}</ReportSelect></label>
       </div>
       <div className="overall-action-row"><div className="overall-view-actions"><Button htmlType="button">全部项目DNS</Button><Button htmlType="button">Google Ads 域名</Button></div><div className="overall-query-actions"><Button htmlType="button">导出 CSV</Button><Button htmlType="button" onClick={() => setVisibleColumns(AD_DNS_COLUMNS.map((column) => column.key))}>重置</Button><Button htmlType="button" className="primary" onClick={() => onQuery(draftDimensions)} disabled={querying}>⌕ {querying ? "查询中…" : "查询"}</Button></div></div>
       <div className="overall-active-hint">当前生效：{activeDimensions.map(adDnsDimensionLabel).join(" × ")} · 已拆分 DNS / TCP / HTTPS / 总体广告节点探测成功率；总体成功率 = result_status=success / 探测次数。</div>
@@ -2276,11 +2277,11 @@ function AdOverallReport({ data, dimensions, dates, projectCode, platform, count
       <div className="overall-config-row dimension-row"><span className="overall-config-label">维度</span>{AD_OVERALL_DIMENSIONS.map((dimension) => <label key={dimension.key} className={`overall-chip ${draftDimensions.includes(dimension.key) ? "active" : ""}`} title={draftDimensions.includes(dimension.key) ? "取消勾选即向上聚合" : "勾选后按此维度细分"}><input type="checkbox" checked={draftDimensions.includes(dimension.key)} onChange={() => toggleDimension(dimension.key)} disabled={draftDimensions.includes(dimension.key) && draftDimensions.length <= 1} /><span>{dimension.label}</span></label>)}</div>
       <div className="overall-config-row metric-row"><span className="overall-config-label">统计字段</span>{AD_OVERALL_COLUMNS.map((column) => <label key={column.key} className={`overall-chip ${shows(column.key) ? "active" : ""}`}><input type="checkbox" checked={shows(column.key)} onChange={() => toggleColumn(column.key)} /><span>{column.label}</span></label>)}</div>
       <div className="overall-filter-row">
-        <label className="overall-filter-item date-range-control"><span>日期范围：</span><input type="date" value={dates.dateFrom} onChange={(event) => { const nextFrom = event.target.value; if (!nextFrom) return; const nextTo = dates.dateTo < nextFrom ? nextFrom : dates.dateTo; onRangeChange?.(`${nextFrom}~${nextTo}`); }} /><b>→</b><input type="date" value={dates.dateTo} min={dates.dateFrom} onChange={(event) => { if (!event.target.value) return; onRangeChange?.(`${dates.dateFrom}~${event.target.value}`); }} /></label>
-        <label className="overall-filter-item"><span>项目代号：</span><select value={projectCode} onChange={(event) => onProjectSelect?.(event.target.value)}>{selectableProjects.map((item) => <option key={item.projectCode} value={item.projectCode}>{item.projectCode}{item.appName ? ` · ${item.appName}` : ""}</option>)}</select></label>
-        <label className="overall-filter-item"><span>国家：</span><select value={country} onChange={(event) => onCountryChange?.(event.target.value)}>{safeCountryOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
-        <label className="overall-filter-item"><span>平台：</span><select value={platform} onChange={(event) => onPlatformChange?.(event.target.value)}><option>Android</option><option>iOS</option><option>全部</option></select></label>
-        <label className="overall-filter-item"><span>App版本：</span><select value={appVersion} onChange={(event) => onAppVersionChange?.(event.target.value)}>{safeAppVersionOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+        <label className="overall-filter-item date-range-control"><span>日期范围：</span><ReportDate  value={dates.dateFrom} onChange={(event) => { const nextFrom = event; if (!nextFrom) return; const nextTo = dates.dateTo < nextFrom ? nextFrom : dates.dateTo; onRangeChange?.(`${nextFrom}~${nextTo}`); }} /><b>→</b><ReportDate  value={dates.dateTo} min={dates.dateFrom} onChange={(event) => { if (!event) return; onRangeChange?.(`${dates.dateFrom}~${event}`); }} /></label>
+        <label className="overall-filter-item"><span>项目代号：</span><ReportSelect value={projectCode} onChange={(event) => onProjectSelect?.(event)}>{selectableProjects.map((item) => <option key={item.projectCode} value={item.projectCode}>{item.projectCode}{item.appName ? ` · ${item.appName}` : ""}</option>)}</ReportSelect></label>
+        <label className="overall-filter-item"><span>国家：</span><ReportSelect value={country} onChange={(event) => onCountryChange?.(event)}>{safeCountryOptions.map((item) => <option key={item} value={item}>{item}</option>)}</ReportSelect></label>
+        <label className="overall-filter-item"><span>平台：</span><ReportSelect value={platform} onChange={(event) => onPlatformChange?.(event)}><option>Android</option><option>iOS</option><option>全部</option></ReportSelect></label>
+        <label className="overall-filter-item"><span>App版本：</span><ReportSelect value={appVersion} onChange={(event) => onAppVersionChange?.(event)}>{safeAppVersionOptions.map((item) => <option key={item} value={item}>{item}</option>)}</ReportSelect></label>
       </div>
       <div className="overall-action-row"><div className="overall-view-actions"><Button htmlType="button">选择视图</Button><Button htmlType="button">＋ 新增</Button></div><div className="overall-query-actions"><Button htmlType="button">导出 CSV</Button><Button htmlType="button" onClick={() => setVisibleColumns(AD_OVERALL_COLUMNS.map((column) => column.key))}>重置</Button><Button htmlType="button" className="primary" onClick={() => onQuery(draftDimensions)} disabled={querying}>⌕ {querying ? "查询中…" : "查询"}</Button></div></div>
       <div className="overall-active-hint">当前生效：{activeDimensions.map(adOverallDimensionLabel).join(" × ")} · 展示 {visibleColumns.length} 个字段；去掉维度即向上聚合，统计比例按当前组合重算。</div>
@@ -2340,11 +2341,11 @@ function AdNetworkFailureMatrix({ data, dimensions, dates, projectCode, platform
         {MATRIX_METRIC_COLUMNS.map((column) => <label key={column.key} className={`overall-chip ${shows(column.key) ? "active" : ""}`}><input type="checkbox" checked={shows(column.key)} onChange={() => toggleColumn(column.key)} /><span>{column.label}</span></label>)}
       </div>
       <div className="overall-filter-row">
-        <label className="overall-filter-item date-range-control"><span>日期范围：</span><input type="date" value={dates.dateFrom} onChange={(event) => { const nextFrom = event.target.value; if (!nextFrom) return; const nextTo = dates.dateTo < nextFrom ? nextFrom : dates.dateTo; onRangeChange?.(`${nextFrom}~${nextTo}`); }} /><b>→</b><input type="date" value={dates.dateTo} min={dates.dateFrom} onChange={(event) => { if (!event.target.value) return; onRangeChange?.(`${dates.dateFrom}~${event.target.value}`); }} /></label>
-        <label className="overall-filter-item"><span>项目代号：</span><select value={projectCode} onChange={(event) => onProjectSelect?.(event.target.value)}>{selectableProjects.map((item) => <option key={item.projectCode} value={item.projectCode}>{item.projectCode}{item.appName ? ` · ${item.appName}` : ""}</option>)}</select></label>
-        <label className="overall-filter-item"><span>入口国家：</span><select value={country} onChange={(event) => onCountryChange?.(event.target.value)}>{safeCountryOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
-        <label className="overall-filter-item"><span>平台：</span><select value={platform} onChange={(event) => onPlatformChange?.(event.target.value)}><option>Android</option><option>iOS</option><option>全部</option></select></label>
-        <label className="overall-filter-item"><span>App版本：</span><select value={appVersion} onChange={(event) => onAppVersionChange?.(event.target.value)}>{safeAppVersionOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+        <label className="overall-filter-item date-range-control"><span>日期范围：</span><ReportDate  value={dates.dateFrom} onChange={(event) => { const nextFrom = event; if (!nextFrom) return; const nextTo = dates.dateTo < nextFrom ? nextFrom : dates.dateTo; onRangeChange?.(`${nextFrom}~${nextTo}`); }} /><b>→</b><ReportDate  value={dates.dateTo} min={dates.dateFrom} onChange={(event) => { if (!event) return; onRangeChange?.(`${dates.dateFrom}~${event}`); }} /></label>
+        <label className="overall-filter-item"><span>项目代号：</span><ReportSelect value={projectCode} onChange={(event) => onProjectSelect?.(event)}>{selectableProjects.map((item) => <option key={item.projectCode} value={item.projectCode}>{item.projectCode}{item.appName ? ` · ${item.appName}` : ""}</option>)}</ReportSelect></label>
+        <label className="overall-filter-item"><span>入口国家：</span><ReportSelect value={country} onChange={(event) => onCountryChange?.(event)}>{safeCountryOptions.map((item) => <option key={item} value={item}>{item}</option>)}</ReportSelect></label>
+        <label className="overall-filter-item"><span>平台：</span><ReportSelect value={platform} onChange={(event) => onPlatformChange?.(event)}><option>Android</option><option>iOS</option><option>全部</option></ReportSelect></label>
+        <label className="overall-filter-item"><span>App版本：</span><ReportSelect value={appVersion} onChange={(event) => onAppVersionChange?.(event)}>{safeAppVersionOptions.map((item) => <option key={item} value={item}>{item}</option>)}</ReportSelect></label>
       </div>
       <div className="overall-action-row">
         <div className="overall-view-actions"><Button htmlType="button">选择视图</Button><Button htmlType="button">＋ 新增</Button></div>
@@ -2955,17 +2956,17 @@ function VersionComparison({ data, domain, projectCode, appIdentifier, platform,
       <aside className="version-compare-config surface">
         {domain === "vpn" && <div className="config-group">
           <div className="config-title">产品</div>
-          <select className="config-select" value={projectCode} onChange={(event) => onProjectSelect?.(event.target.value)}>
+          <ReportSelect className="config-select" value={projectCode} onChange={(event) => onProjectSelect?.(event)}>
             {selectableProjects.map((item) => <option key={item.projectCode} value={item.projectCode}>{item.projectCode}{item.appName ? ` · ${item.appName}` : ""}</option>)}
-          </select>
+          </ReportSelect>
           <small className="config-hint">切换产品后会按当前日期和维度重新查询版本对比。</small>
         </div>}
         <div className="config-group">
           <div className="config-title">日期范围</div>
           <div className="overall-filter-item date-range-control version-date-range">
-            <input type="date" value={currentDates.dateFrom} onChange={(event) => { const nextFrom = event.target.value; if (!nextFrom) return; const nextTo = currentDates.dateTo < nextFrom ? nextFrom : currentDates.dateTo; setRange(`${nextFrom}~${nextTo}`); }} />
+            <ReportDate  value={currentDates.dateFrom} onChange={(event) => { const nextFrom = event; if (!nextFrom) return; const nextTo = currentDates.dateTo < nextFrom ? nextFrom : currentDates.dateTo; setRange(`${nextFrom}~${nextTo}`); }} />
             <b>→</b>
-            <input type="date" value={currentDates.dateTo} min={currentDates.dateFrom} onChange={(event) => { if (!event.target.value) return; setRange(`${currentDates.dateFrom}~${event.target.value}`); }} />
+            <ReportDate  value={currentDates.dateTo} min={currentDates.dateFrom} onChange={(event) => { if (!event) return; setRange(`${currentDates.dateFrom}~${event}`); }} />
           </div>
           <div className="config-options">{[initialRange, "昨天", "近7天", "近30天"].filter((item, index, arr) => arr.indexOf(item) === index).map((item) => <Button key={item} className={range === item ? "active" : ""} onClick={() => setRange(item)}>{item}</Button>)}</div>
           <small className="config-hint">日期既可作为筛选区间，也可在上方维度中勾选“日期”做日期聚合。</small>
@@ -2977,8 +2978,8 @@ function VersionComparison({ data, domain, projectCode, appIdentifier, platform,
         </div>
         <div className="config-group">
           <div className="config-title">版本筛选</div>
-          <select className="config-select" value={versionFilter} onChange={(event) => {
-            const nextVersion = event.target.value;
+          <ReportSelect className="config-select" value={versionFilter} onChange={(event) => {
+            const nextVersion = event;
             setVersionFilter(nextVersion);
             if (nextVersion && dimensions.includes("app_version")) {
               setDimensions((current) => {
@@ -2989,7 +2990,7 @@ function VersionComparison({ data, domain, projectCode, appIdentifier, platform,
           }}>
             <option value="">全部版本</option>
             {versionOptions.map((item) => <option key={`${item.appVersion}-${item.buildNumber ?? ""}`} value={text(item.appVersion)}>{text(item.label ?? item.appVersion)}</option>)}
-          </select>
+          </ReportSelect>
           <small className="config-hint">可直接选择版本；若当前按“应用版本”聚合，选择后会自动切到“日期”维度看该版本每天数据。</small>
         </div>
 

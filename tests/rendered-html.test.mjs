@@ -42,7 +42,8 @@ test("compiled bundle contains current product features", async () => {
   assert.match(js, /诊断报表/);
   const version = JSON.parse(await file("public/version.json")).appVersion;
   assert.ok(js.includes(version), "compiled bundle matches published version manifest");
-  assert.match(js, /sidebar-collapsed/);
+  assert.match(js, /analysis-sider/);
+  assert.match(js, /打开导航菜单/);
   assert.match(js, /广告链路总表/);
 });
 
@@ -120,7 +121,7 @@ test("oa workspace visual style token is shipped", async () => {
 test("sidebar serial numbers are not rendered", async () => {
   const source = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
   assert.doesNotMatch(source, /<span>\{item\.index\}<\/span>/);
-  assert.match(source, /<b>\{item\.label\}<\/b>/);
+  assert.match(source, /label: item\.label/);
 });
 
 

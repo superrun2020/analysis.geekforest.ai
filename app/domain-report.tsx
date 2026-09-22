@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "antd";
+import { ReportSelect } from "./report-controls";
 import { queryFunnel } from "./funnel-analysis-api";
 
 type DomainReportRow = {
@@ -121,9 +122,9 @@ export function DomainReportPage({ range, refreshKey }: { range: string; refresh
       <aside className="version-compare-config surface domain-report-config">
         <div className="config-group">
           <div className="config-title">项目（特别注册）</div>
-          <select className="config-select" value={projectCode} onChange={(event) => setProjectCode(event.target.value)}>
+          <ReportSelect className="config-select" value={projectCode} onChange={(event) => setProjectCode(event)}>
             {REPORT_PROJECTS.map((project) => <option key={project.projectCode} value={project.projectCode}>{project.projectCode}{project.appName !== project.projectCode ? ` · ${project.appName}` : ""}</option>)}
-          </select>
+          </ReportSelect>
           <small className="config-hint">仅 A003 / A005 / C002 参与本报表，不做全量项目。</small>
         </div>
         <div className="config-group">

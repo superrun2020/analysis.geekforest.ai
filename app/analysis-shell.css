@@ -1,0 +1,39 @@
+/* The shell owns one bounded scroll area per report, never a narrow mobile sider. */
+.analysis-shell.app-shell { display:flex; flex-direction:row; height:100dvh; min-height:0; width:100%; overflow:clip; }
+.analysis-shell .analysis-sider { height:100%; flex-shrink:0; border-right:1px solid #e5e7eb; }
+.analysis-sider .ant-layout-sider-children { display:flex; flex-direction:column; min-height:0; }
+.analysis-brand { height:56px; display:flex; align-items:center; justify-content:center; font-weight:700; white-space:nowrap; }
+.analysis-navigation { flex:1; min-height:0; overflow:auto; }
+.analysis-shell .analysis-workspace { min-width:0; min-height:0; flex:1; width:0; }
+.analysis-shell .analysis-header { display:flex; align-items:center; gap:10px; padding:0 16px; height:56px; line-height:normal; flex:none; background:#fff; border-bottom:1px solid #e5e7eb; }
+.analysis-header-title { margin-right:auto; }
+.analysis-account { max-width:220px; overflow:hidden; }
+.analysis-shell .analysis-content { display:flex; flex-direction:column; flex:1; min-height:0; min-width:0; overflow:hidden; }
+.analysis-content > .topbar { flex:none; height:auto; min-height:48px; flex-wrap:wrap; }
+.analysis-content > .main-content { flex:1; min-height:0; min-width:0; overflow:auto; width:auto; }
+.analysis-content > .operations-workspace { flex:1; height:auto; min-height:0; min-width:0; overflow-y:auto; width:100%; }
+.analysis-content .native-anomalies { min-width:0; width:100%; box-sizing:border-box; }
+.analysis-content .overall-config-row { min-width:0; flex-wrap:wrap; }
+.analysis-content .overall-config-row > * { min-width:0; max-width:100%; }
+.analysis-content .topbar-actions { flex-wrap:wrap; }
+.analysis-content .page-heading { flex-wrap:wrap; }
+.analysis-content .overall-filter-row { min-width:0; }
+.analysis-content .overall-filter-item { min-width:0; max-width:100%; flex-wrap:wrap; padding:6px 10px; }
+.analysis-content .overall-filter-item > span:not(.ant-select) { flex-shrink:0; white-space:nowrap; }
+.analysis-content .overall-filter-item .ant-select { max-width:100%; }
+.analysis-content .overall-action-row { flex-wrap:wrap; }
+.analysis-content .overall-action-row > * { min-width:0; }
+@media(max-width:767px) {
+ .analysis-content .overall-filter-row { padding:12px; gap:10px; }
+ .analysis-content .overall-filter-item { width:100%; }
+ .analysis-content .overall-filter-item > span:first-child { width:100%; }
+ .analysis-content .overall-action-row { padding:12px; }
+ .analysis-shell .analysis-header { padding:0 8px; gap:6px; }
+ .analysis-account { max-width:44px; }
+ .analysis-account > span:not(.ant-btn-icon) { display:none; }
+ .analysis-content > .main-content { padding:12px; }
+ .analysis-content .global-search { display:none; }
+ .analysis-content > .topbar { padding:8px 12px; }
+ .analysis-content .filter-grid { grid-template-columns:minmax(0,1fr); }
+ .analysis-content .heading-actions { flex-wrap:wrap; }
+}

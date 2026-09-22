@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "antd";
+import { AnalysisShell } from "./analysis-shell";
+import { ReportSelect, ReportDate } from "./report-controls";
 import { ActionDialog, type DialogKey, type DialogResult } from "./action-dialog";
 import { FirebaseConfiguration } from "./firebase-configuration";
 import { trackingConfigs, trackingEventCatalog, trackingConfigDataSource, type TrackingConfigRecord } from "./tracking-config-data";
@@ -26,7 +28,7 @@ import { trackingApiBaseUrl } from "./api-base-url";
 import { createCodexQueryLinks } from "./codex-query-links-api";
 import { OperationsWorkspace, operationsEntries, legacyOperationsEntries, type OperationsEntry } from "./operations-workspace";
 
-const APP_VERSION = "V163";
+const APP_VERSION = "V164";
 const VERSION_MANIFEST_PATH = "/version.json";
 
 type PageKey =
@@ -1017,7 +1019,7 @@ export default function Home() {
   const isSharedReportMode = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("sharedReport") === "1";
   const isProjectReportShareMode = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("projectReportShare") === "1";
   const initialProjectCode = readInitialProjectCode();
-  const [module, setModule] = useState<ModuleKey>("funnel");
+  const [module, setModule] = useState<ModuleKey>(() => readInitialAnalysisView().module);
   const initialOperationsEntry = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("operations") as OperationsEntry | null : null;
   const initialOperationsPage = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("operationsPage") : null;
   const [operationsActive, setOperationsActive] = useState(() => legacyOperationsEntries.has(initialOperationsEntry || ""));
@@ -1027,12 +1029,14 @@ export default function Home() {
       const url = new URL(window.location.href);
       const active = legacyOperationsEntries.has(url.searchParams.get("operations") || "");
       setOperationsActive(active); setOperationsEntry("overview");
+      const view = readInitialAnalysisView(); setModule(view.module); setPage(view.page);
+      const section = diagnosticReportMenus.find(item => item.key === url.searchParams.get("reportSection"))?.key ?? "matrix"; setVpnReportSection(section);
       if (active) { url.searchParams.set("operations", "overview"); url.searchParams.delete("operationsPage"); window.history.replaceState(null, "", url); }
     };
     sync(); window.addEventListener("popstate", sync);
     return () => window.removeEventListener("popstate", sync);
   }, []);
-  const [page, setPage] = useState<PageKey>("overview");
+  const [page, setPage] = useState<PageKey>(() => readInitialAnalysisView().page);
   const [embedded, setEmbedded] = useState(false);
   const [project, setProject] = useState(initialProjectCode);
   const [onlineProjects, setOnlineProjects] = useState<OnlineProject[]>([]);
@@ -1090,9 +1094,8 @@ export default function Home() {
   const [diagnosticQualityStatus, setDiagnosticQualityStatus] = useState("全部状态");
   const [workbenchSection, setWorkbenchSection] = useState("diagnosis-overview");
   const [reportSnapshot, setReportSnapshot] = useState<OperationalReportSnapshot | null>(null);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [diagnosticMenuOpen, setDiagnosticMenuOpen] = useState(true);
-  const [vpnReportSection, setVpnReportSection] = useState<VpnReportSectionKey>("matrix");
+  const [vpnReportSection, setVpnReportSection] = useState<VpnReportSectionKey>(() => { const key = typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("reportSection"); return diagnosticReportMenus.find(item => item.key === key)?.key ?? "matrix"; });
   const [sharingReport, setSharingReport] = useState(false);
   const [sharedReportResult, setSharedReportResult] = useState<{ shareUrl: string; copyText?: string } | null>(null);
   const [creatingCodexLinks, setCreatingCodexLinks] = useState(false);
@@ -1571,6 +1574,8 @@ export default function Home() {
 
 
   function openDiagnosticReport(section: VpnReportSectionKey) {
+    setOperationsActive(false);
+    const url = new URL(window.location.href); url.searchParams.delete("operations"); url.searchParams.delete("operationsPage"); url.searchParams.set("module", "vpnReport"); url.searchParams.set("reportSection", section); window.history.pushState(null, "", url);
     setModule("vpnReport");
     setPage("network_failure_matrix");
     setDiagnosticMenuOpen(true);
@@ -1690,17 +1695,15 @@ export default function Home() {
 
   return (
     <MetricInspectContext.Provider value={openMetricDefinition}>
-    <div className={`app-shell ${embedded ? "embedded" : ""} ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
-      <aside className="sidebar">
-        <Button htmlType="button" className="sidebar-collapse-toggle" onClick={() => setSidebarCollapsed((value) => !value)} title={sidebarCollapsed ? "展开左侧菜单" : "折叠左侧菜单"} aria-label={sidebarCollapsed ? "展开左侧菜单" : "折叠左侧菜单"}>{sidebarCollapsed ? "›" : "‹"}</Button>
-        <div className="brand"><span className="brand-mark">GF</span><span><strong>分析系统</strong><small className="version-line"><span>{APP_VERSION}</span><Button htmlType="button" onClick={checkLatestVersion} disabled={checkingLatestVersion} title="检测并打开线上最新版本">{checkingLatestVersion ? "检测中" : "刷新"}</Button></small></span></div>
-        {operationsEntries.map((item) => <Button key={item.key} className={`main-nav-item ${operationsActive && operationsEntry === item.key ? "active" : ""}`} onClick={() => { setOperationsEntry(item.key); setOperationsActive(true); const url = new URL(window.location.href); url.searchParams.set("operations", "overview"); url.searchParams.delete("operationsPage"); window.history.pushState(null, "", url); }} title={item.label}><b>{item.label}</b></Button>)}
-        <div className="nav-group-label">经营分析</div>
-        {moduleMenus.filter((item) => item.group === "经营分析").map((item) => item.key === "vpnReport" ? <div key={item.key} className={`nav-submenu ${module === "vpnReport" ? "active" : ""} ${diagnosticMenuOpen ? "open" : ""}`}><Button className={`main-nav-item nav-parent ${module === item.key ? "active" : ""}`} onClick={() => { openModule(item.key); setDiagnosticMenuOpen((value) => module === "vpnReport" ? !value : true); }} title={item.label}><b>{item.label}</b><em>{diagnosticMenuOpen ? "▾" : "▸"}</em></Button>{diagnosticMenuOpen && !sidebarCollapsed && <div className="nav-submenu-list">{diagnosticReportMenus.map((child) => <Button key={child.key} className={`nav-submenu-item ${vpnReportSection === child.key ? "active" : ""}`} title={child.hint} onClick={() => openDiagnosticReport(child.key)}><strong>{child.label}</strong></Button>)}</div>}</div> : <Button key={item.key} className={`main-nav-item ${module === item.key ? "active" : ""}`} onClick={() => openModule(item.key)} title={item.label}><b>{item.label}</b></Button>)}
-        <div className="sidebar-foot"><span className="status-dot" />线上数据接入</div>
-      </aside>
-
-      <div className="workspace">
+    <AnalysisShell
+      entries={[{ key: "daily", label: "每日异常" }, ...moduleMenus.map(item => ({ key: item.key, label: item.label, ...(item.key === "vpnReport" ? { children: diagnosticReportMenus.map(child => ({ key: `diagnostic:${child.key}`, label: child.label })) } : {}) }))]}
+      selectedKey={operationsActive ? "daily" : module === "vpnReport" ? `diagnostic:${vpnReportSection}` : module}
+      onNavigate={(key) => {
+        if (key === "daily") { setOperationsEntry("overview"); setOperationsActive(true); const url = new URL(window.location.href); url.searchParams.set("operations", "overview"); url.searchParams.delete("operationsPage"); window.history.pushState(null, "", url); }
+        else if (key.startsWith("diagnostic:")) openDiagnosticReport(key.slice(11) as VpnReportSectionKey);
+        else openModule(key as ModuleKey);
+      }} version={APP_VERSION} onRefresh={checkLatestVersion} checking={checkingLatestVersion}
+      account={companyAuth.user.employee?.name || companyAuth.user.email} onSignOut={() => void companyAuth.signOut()} embedded={embedded}>
         <header className="topbar" style={{ display: operationsActive ? "none" : undefined }}>
           <div className="breadcrumbs">{moduleMenus.find((item) => item.key === module)?.group} / {currentModule.title}{configWorkspaceOpen ? <> / <strong>{editingConfig ? "编辑打点配置" : "新建打点配置"}</strong></> : module === "funnel" ? <> / <strong>{currentPage.label}</strong></> : module === "vpnReport" ? <> / <strong>{diagnosticReportMenus.find((item) => item.key === vpnReportSection)?.label}</strong></> : null}</div>
           <div className="topbar-actions"><div className="global-search">搜索项目、事件、问题单</div><Button className="share-report-button" disabled={!["funnel", "vpn"].includes(module) || !project || creatingCodexLinks} onClick={() => void copyCodexQueryLinks()} title="生成广告打点/VPN打点 JSON 查询链接，发给 Codex 后可直接查线上数据">{creatingCodexLinks ? "生成中…" : "复制Codex查询"}</Button><Button className="share-report-button" disabled={!["funnel", "vpn"].includes(module) || !reportSnapshot || sharingReport} onClick={() => void shareCurrentProjectReport()} title={reportSnapshot ? "将当前页面已查询出的全部数据固定成分享快照" : "请先等待当前页面查询完成"}>{sharingReport ? "生成中…" : "分享项目报告"}</Button><Button className="icon-button" aria-label="通知">3</Button><Button className="account-chip" onClick={() => void companyAuth.signOut()} title="退出登录"><span>{companyAuth.user.employee?.name?.slice(0, 1) || companyAuth.user.email.slice(0, 1).toUpperCase()}</span><small>{companyAuth.user.employee?.name || companyAuth.user.email}</small></Button></div>
@@ -1710,7 +1713,7 @@ export default function Home() {
           {configWorkspaceOpen ? <TrackingConfigWorkspace editingConfig={editingConfig} onlineProjects={onlineProjects} onCancel={() => { setConfigWorkspaceOpen(false); setEditingConfig(null); }} onSave={saveTrackingConfig} /> : <>
           <section className="page-heading">
             <div><h1>{currentModule.title}</h1><p>{currentModule.description}</p></div>
-            <div className="heading-actions">{module === "vpnReport" && <label className="diagnostic-report-select"><span>报表</span><select value={vpnReportSection} onChange={(event) => openDiagnosticReport(event.target.value as VpnReportSectionKey)}>{diagnosticReportMenus.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select></label>}<Button className="secondary-button" onClick={() => openMetricDefinition("dau")}>指标口径字典</Button>{module !== "tracking" && <Button className="primary-button" onClick={() => module === "config" ? openConfigEditor(null) : setDialog(moduleDialog[module])}>{["project", "funnel", "config", "firebaseSetup", "tasks"].includes(module) ? "＋ " : ""}{currentModule.action}</Button>}</div>
+            <div className="heading-actions">{module === "vpnReport" && <label className="diagnostic-report-select"><span>报表</span><ReportSelect value={vpnReportSection} onChange={(event) => openDiagnosticReport(event as VpnReportSectionKey)}>{diagnosticReportMenus.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</ReportSelect></label>}<Button className="secondary-button" onClick={() => openMetricDefinition("dau")}>指标口径字典</Button>{module !== "tracking" && <Button className="primary-button" onClick={() => module === "config" ? openConfigEditor(null) : setDialog(moduleDialog[module])}>{["project", "funnel", "config", "firebaseSetup", "tasks"].includes(module) ? "＋ " : ""}{currentModule.action}</Button>}</div>
           </section>
 
           {module === "funnel" && <section className="workflow-strip" aria-label="漏斗诊断流程">
@@ -1737,8 +1740,8 @@ export default function Home() {
           </section>}
 
           {module !== "firebaseSetup" && module !== "report" && module !== "vpnReport" && <section className={`filter-bar ${isFunnelOverview ? "overview-filter-bar" : ""}`}>
-            {isFunnelOverview ? <div className="overview-no-project-filter"><span>项目</span><strong>全部项目问题预览</strong><small>不做项目筛选；每天 08:00 汇总前一天数据，09:30 补充延迟入库数据，点击项目进入单项目分析。</small>{(projectLoadError || projectSourceWarning) && <small className="filter-error">{projectLoadError || projectSourceWarning}</small>}</div> : <label>项目<select value={draftProject} disabled={projectLoading || onlineProjects.length === 0} onChange={(event) => {
-              const nextProject = event.target.value;
+            {isFunnelOverview ? <div className="overview-no-project-filter"><span>项目</span><strong>全部项目问题预览</strong><small>不做项目筛选；每天 08:00 汇总前一天数据，09:30 补充延迟入库数据，点击项目进入单项目分析。</small>{(projectLoadError || projectSourceWarning) && <small className="filter-error">{projectLoadError || projectSourceWarning}</small>}</div> : <label>项目<ReportSelect value={draftProject} disabled={projectLoading || onlineProjects.length === 0} onChange={(event) => {
+              const nextProject = event;
               setDraftProject(nextProject);
               setProject(nextProject);
               setDateSessionSummary(null);
@@ -1746,11 +1749,11 @@ export default function Home() {
               setReportSnapshot(null);
               setFiltersApplied((value) => value + 1);
               notify(`${nextProject} 已切换，正在读取数据量并查询`);
-            }}>{projectLoading && <option>正在读取 Firebase 配置项目…</option>}{!projectLoading && onlineProjects.length === 0 && <option>Firebase 配置项目不可用</option>}{onlineProjects.map((item) => <option key={item.projectCode} value={item.projectCode}>{item.projectCode}{item.appName ? ` · ${item.appName}` : ""}{item.projectSource === "firebase_bindings" ? ` · 已接Firebase${item.firebaseBindingCount ? `(${item.firebaseBindingCount})` : ""}` : ""}</option>)}</select>{(projectLoadError || projectSourceWarning) && <small className="filter-error">{projectLoadError || projectSourceWarning}</small>}</label>}
+            }}>{projectLoading && <option>正在读取 Firebase 配置项目…</option>}{!projectLoading && onlineProjects.length === 0 && <option>Firebase 配置项目不可用</option>}{onlineProjects.map((item) => <option key={item.projectCode} value={item.projectCode}>{item.projectCode}{item.appName ? ` · ${item.appName}` : ""}{item.projectSource === "firebase_bindings" ? ` · 已接Firebase${item.firebaseBindingCount ? `(${item.firebaseBindingCount})` : ""}` : ""}</option>)}</ReportSelect>{(projectLoadError || projectSourceWarning) && <small className="filter-error">{projectLoadError || projectSourceWarning}</small>}</label>}
             <label className="date-filter-label">日期
               <div className="date-selector-grid">
-                <select value={draftRange} onChange={(event) => {
-                  const nextRange = event.target.value;
+                <ReportSelect value={draftRange} onChange={(event) => {
+                  const nextRange = event;
                   setDraftRange(nextRange);
                   setRange(nextRange);
                   setReportSnapshot(null);
@@ -1768,46 +1771,44 @@ export default function Home() {
                   {exactDateOptions.length > 0
                     ? exactDateOptions.map((row) => <option key={row.date} value={row.date}>{row.date} · {shortCount(row.sessionCount)} sessions{row.date === bestDateRow?.date ? " · 推荐" : ""}</option>)
                     : <option disabled>{dateSessionLoading ? "正在读取每日数据量…" : "暂无每日 session 数据，右侧可手动选日期"}</option>}
-                </select>
-                <input
-                  type="date"
+                </ReportSelect>
+                <ReportDate
                   value={selectedCustomRange ? selectedCustomRange[1] : dateInputValue}
                   min={filterOptions.dateRange?.min ?? undefined}
                   max={filterOptions.dateRange?.max ?? isoDate(0)}
                   onChange={(event) => {
-                    if (!event.target.value) return;
+                    if (!event) return;
                     if (module === "vpnReport") {
-                      const nextTo = customDateTo < event.target.value ? event.target.value : customDateTo;
-                      setCustomDateFrom(event.target.value);
+                      const nextTo = customDateTo < event ? event : customDateTo;
+                      setCustomDateFrom(event);
                       setCustomDateTo(nextTo);
-                      const nextRange = `${event.target.value}~${nextTo}`;
+                      const nextRange = `${event}~${nextTo}`;
                       setDraftRange(nextRange);
                       setRange(nextRange);
-                      notify(`${draftProject} · ${event.target.value} 至 ${nextTo} 已开始查询`);
+                      notify(`${draftProject} · ${event} 至 ${nextTo} 已开始查询`);
                     } else {
-                      setDraftRange(event.target.value);
-                      setRange(event.target.value);
-                      notify(`${draftProject} · ${event.target.value} 已开始查询`);
+                      setDraftRange(event);
+                      setRange(event);
+                      notify(`${draftProject} · ${event} 已开始查询`);
                     }
                     setReportSnapshot(null);
                     setFiltersApplied((value) => value + 1);
                   }}
                   title={module === "vpnReport" ? "选择起始日期" : "直接选择某一天查询"}
                 />
-                {module === "vpnReport" && <input
-                  type="date"
+                {module === "vpnReport" && <ReportDate
                   value={selectedCustomRange ? selectedCustomRange[2] : customDateTo}
                   min={selectedCustomRange ? selectedCustomRange[1] : customDateFrom}
                   max={filterOptions.dateRange?.max ?? isoDate(0)}
                   onChange={(event) => {
-                    if (!event.target.value) return;
-                    setCustomDateTo(event.target.value);
-                    const nextRange = `${customDateFrom}~${event.target.value}`;
+                    if (!event) return;
+                    setCustomDateTo(event);
+                    const nextRange = `${customDateFrom}~${event}`;
                     setDraftRange(nextRange);
                     setRange(nextRange);
                     setReportSnapshot(null);
                     setFiltersApplied((value) => value + 1);
-                    notify(`${draftProject} · ${customDateFrom} 至 ${event.target.value} 已开始查询`);
+                    notify(`${draftProject} · ${customDateFrom} 至 ${event} 已开始查询`);
                   }}
                   title="选择结束日期"
                 />}
@@ -1841,9 +1842,9 @@ export default function Home() {
                 ))}
               </div>
             </div>
-            <label>平台<select value={draftPlatform} onChange={(event)=>setDraftPlatform(event.target.value)}>{platformOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
-            <label>国家<select value={draftCountry} onChange={(event)=>setDraftCountry(event.target.value)}>{countryOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
-            <label>App版本<select value={draftAppVersion} onChange={(event)=>setDraftAppVersion(event.target.value)}>{appVersionOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+            <label>平台<ReportSelect value={draftPlatform} onChange={(event)=>setDraftPlatform(event)}>{platformOptions.map((item) => <option key={item} value={item}>{item}</option>)}</ReportSelect></label>
+            <label>国家<ReportSelect value={draftCountry} onChange={(event)=>setDraftCountry(event)}>{countryOptions.map((item) => <option key={item} value={item}>{item}</option>)}</ReportSelect></label>
+            <label>App版本<ReportSelect value={draftAppVersion} onChange={(event)=>setDraftAppVersion(event)}>{appVersionOptions.map((item) => <option key={item} value={item}>{item}</option>)}</ReportSelect></label>
             <div className="filter-actions"><Button onClick={resetFilters}>重置</Button><Button className={filtersDirty ? "primary-button" : ""} disabled={projectLoading || onlineProjects.length === 0} onClick={applyFilters}>{filtersDirty ? "应用并查询" : "刷新数据"}</Button></div>
             <div className="data-state"><span className={`status-dot ${filtersDirty ? "warn" : ""}`} /><strong>{sourceStatus[module].title}</strong><small>{filtersDirty ? "筛选已修改，点击应用后查询" : `${sourceStatus[module].detail} · 刷新#${filtersApplied}`}</small></div>
           </section>}
@@ -1943,7 +1944,6 @@ export default function Home() {
           </>}
         </main>
         <OperationsWorkspace active={operationsActive} entry={operationsEntry} initialPage={initialOperationsPage} />
-      </div>
       {dialog && <ActionDialog dialog={dialog} project={project} configs={configRecords} editingConfig={dialog === "config-version" ? editingConfig : null} onClose={() => { setDialog(null); setEditingConfig(null); }} onSubmit={(result: DialogResult) => {
         if (dialog === "retest-run" || dialog === "tracking-run") setIssueStatus("重测中");
         if (dialog === "config-version") {
@@ -1987,7 +1987,7 @@ export default function Home() {
         </section>
       </div>}
       {notice && <div className="toast" role="status"><span>✓</span>{notice}</div>}
-    </div>
+    </AnalysisShell>
     <MetricDictionaryDrawer open={metricDictionaryOpen} selectedMetric={selectedMetric} onSelect={setSelectedMetric} onClose={() => setMetricDictionaryOpen(false)} />
     </MetricInspectContext.Provider>
   );
