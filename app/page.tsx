@@ -26,7 +26,7 @@ import { trackingApiBaseUrl } from "./api-base-url";
 import { createCodexQueryLinks } from "./codex-query-links-api";
 import { OperationsWorkspace, operationsEntries, legacyOperationsEntries, type OperationsEntry } from "./operations-workspace";
 
-const APP_VERSION = "V166";
+const APP_VERSION = "V167";
 const VERSION_MANIFEST_PATH = "/version.json";
 
 type PageKey =
@@ -299,13 +299,14 @@ const moduleMenus: Array<{ key: ModuleKey; label: string; group: "经营分析" 
 ];
 
 
-type VpnReportSectionKey = "matrix" | "exitIp" | "adOverall" | "adDns" | "versions";
+type VpnReportSectionKey = "matrix" | "exitIp" | "adOverall" | "adDns" | "vpnVersions" | "launcherVersions";
 const diagnosticReportMenus: Array<{ key: VpnReportSectionKey; label: string; hint: string }> = [
   { key: "matrix", label: "VPN Overall", hint: "网络失败横向" },
   { key: "exitIp", label: "出口IP质量", hint: "IP、Session与TCP证据" },
   { key: "adOverall", label: "广告漏斗Overall", hint: "广告链路总表" },
   { key: "adDns", label: "广告DNS诊断", hint: "DNS成功率" },
-  { key: "versions", label: "版本对比", hint: "版本与日期" },
+  { key: "vpnVersions", label: "VPN版本对比", hint: "VPN连接、探测与广告指标" },
+  { key: "launcherVersions", label: "Launcher版本对比", hint: "仅L开头项目与Launcher打点" },
 ];
 
 const moduleCopy: Record<ModuleKey, { title: string; description: string; action: string }> = {
@@ -313,7 +314,7 @@ const moduleCopy: Record<ModuleKey, { title: string; description: string; action
   project: { title: "单项目诊断", description: "围绕单个项目串联用户增长、产品漏斗、广告变现和数据质量", action: "创建诊断任务" },
   funnel: { title: "广告漏斗分析中心", description: "聚焦广告变现链路：DAU、资格检查、广告机会、请求、加载、展示、AV、收入和流失诊断", action: "新建广告诊断" },
   vpn: { title: "VPN功能漏斗分析", description: "基于 V1.8 弱网专项分析 VPN 点击、权限、节点、连接阶段、协议回退、可用性、IP 与会话质量", action: "新建 VPN 诊断" },
-  vpnReport: { title: "诊断报表", description: "包含 VPN Overall、出口IP质量、广告漏斗Overall、广告DNS诊断和版本对比；支持从IP下钻到关联Session证据", action: "导出诊断报表" },
+  vpnReport: { title: "诊断报表", description: "包含 VPN Overall、出口IP质量、广告漏斗Overall、广告DNS诊断、VPN版本对比和Launcher版本对比；支持从IP下钻到关联Session证据", action: "导出诊断报表" },
   admob: { title: "AdMob 分析", description: "分析请求、匹配、展示、广告浏览用户、eCPM和收入变化", action: "导出 AdMob 报表" },
   firebase: { title: "Firebase 数据", description: "统一查看活跃、事件质量、版本覆盖、数据源连接和同步健康", action: "查看事件字典" },
   reconcile: { title: "数据对账", description: "对比 Firebase、AdMob、中台与 ADB 的用户、展示和收入口径", action: "发起重新对账" },
@@ -1369,7 +1370,7 @@ export default function Home() {
     project: { title: "项目诊断", detail: "Firebase延迟约8分钟 · AdMob T+3", note: "用户与产品指标可看当天；收入和AdMob效率使用已结算日期，不参与当天实时结论。" },
     funnel: { title: "每日问题快照", detail: isFunnelOverview ? "每日08:00 · 09:30补数 · 全项目问题预览" : "默认昨日DWS汇总 · 今天实时补查", note: isFunnelOverview ? "多项目漏斗预览只展示全项目问题榜，不做项目筛选；需要筛选、页面路径、流失原因、版本差异和证据时，点击项目进入单项目分析。" : "漏斗默认读取前一天已完成汇总；只有筛选包含今天时才补查实时数据。不可计算指标显示暂无数据，收入最终以AdMob结算为准。" },
     vpn: { title: "V1.8 弱网专项", detail: "Firebase T+0 · 会话/连接/阶段关联", note: "本页以 vpn_session_id 串联用户会话，以 connection_id 区分每次真实连接尝试；俄罗斯/伊朗须按 ASN、网络、协议、端口和限制信号联合判断。" },
-    vpnReport: { title: "诊断报表", detail: "VPN Overall · 广告漏斗Overall · 版本对比", note: "把广告漏斗分析中心的核心链路整理成 Overall 报表形式，支持日期、项目、版本、国家、平台等维度自由组合与向上聚合。" },
+    vpnReport: { title: "诊断报表", detail: "VPN Overall · VPN版本对比 · Launcher版本对比", note: "VPN版本使用连接、探测和广告打点；Launcher版本仅允许L开头项目，并使用Launcher获取、引导和激活打点。" },
     admob: { title: "AdMob+Firebase", detail: "AdMob T+3结算 · Firebase T+0 AV", note: "本页默认按AdMob结算口径展示收入、请求、匹配和展示；当天广告浏览人数AV可用Firebase jk_ad_impression先看趋势。" },
     firebase: { title: "实时数据", detail: "BigQuery intraday · 延迟约8分钟", note: "本页展示Firebase实时预估、事件质量与同步水位；中台数字仅用于差异诊断。" },
     reconcile: { title: "分源对账", detail: "今日双源 · T+3全量", note: "当天只比较Firebase与中台；含AdMob的最终对账仅在结算日期执行，避免跨时效误报。" },
@@ -1896,7 +1897,7 @@ export default function Home() {
             country={country}
             appVersion={appVersion}
             refreshKey={filtersApplied}
-            projectOptions={onlineProjects.map((item) => ({ projectCode: item.projectCode, appName: item.appName }))}
+            projectOptions={onlineProjects.map((item) => ({ projectCode: item.projectCode, appName: item.appName, appIdentifier: item.appIdentifier }))}
             countryOptions={countryOptions}
             appVersionOptions={appVersionOptions}
             onPageChange={() => undefined}
@@ -1922,7 +1923,7 @@ export default function Home() {
             country={country}
             appVersion={appVersion}
             refreshKey={filtersApplied}
-            projectOptions={onlineProjects.map((item) => ({ projectCode: item.projectCode, appName: item.appName }))}
+            projectOptions={onlineProjects.map((item) => ({ projectCode: item.projectCode, appName: item.appName, appIdentifier: item.appIdentifier }))}
             countryOptions={countryOptions}
             appVersionOptions={appVersionOptions}
             onPageChange={() => undefined}

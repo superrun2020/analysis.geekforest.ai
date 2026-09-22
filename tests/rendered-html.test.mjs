@@ -46,6 +46,32 @@ test("compiled bundle contains current product features", async () => {
   assert.match(js, /广告链路总表/);
 });
 
+test("VPN and Launcher version comparisons stay separate", async () => {
+  const [page, source, api, request, service] = await Promise.all([
+    file("app/page.tsx"),
+    file("app/operational-funnel.tsx"),
+    file("app/funnel-analysis-api.ts"),
+    file("backend/app/Http/Requests/Admin/FunnelAnalyticsQueryRequest.php"),
+    file("backend/app/Services/FunnelAnalyticsService.php"),
+  ]);
+
+  assert.match(page, /vpnVersions/);
+  assert.match(page, /launcherVersions/);
+  assert.match(page, /VPN版本对比/);
+  assert.match(page, /Launcher版本对比/);
+  assert.match(source, /versionProduct/);
+  assert.match(source, /startsWith\("L"\)/);
+  assert.match(source, /setVersionFilter\(appVersion === "全部版本"/);
+  assert.match(source, /paidAttributedNewUsers/);
+  assert.match(source, /vpnSessionCount/);
+  assert.match(api, /versionProduct\?: "vpn" \| "launcher"/);
+  assert.match(request, /versionProduct/);
+  assert.match(request, /Launcher版本对比必须使用VPN诊断域/);
+  assert.match(service, /launcherVersionComparisonFromEvents/);
+  assert.match(service, /versionProduct/);
+  assert.match(service, /versionComparisonFromA003VpnSummary/);
+});
+
 test("deep-dive stage counts ignore ratio metric cards", async () => {
   const source = await file("app/operational-funnel.tsx");
   assert.match(source, /unit === \"ratio\"/);

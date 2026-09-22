@@ -2195,8 +2195,14 @@ class FunnelAnalyticsService
     private function versionComparisonFromDws(array $params): array
     {
         $domain = (string) ($params['domain'] ?? 'ads');
+        $projectCode = strtoupper(trim((string) ($params['projectCode'] ?? '')));
+        $requestedVersionProduct = (string) ($params['versionProduct'] ?? 'vpn');
+        if ($requestedVersionProduct === 'launcher' && $domain !== 'vpn') {
+            return ['available' => false, 'reason' => 'Launcher版本对比必须使用VPN诊断域', 'rows' => [], 'dimensions' => [], 'domain' => $domain, 'versionProduct' => 'launcher'];
+        }
+        $versionProduct = $domain === 'vpn' && $requestedVersionProduct === 'launcher' ? 'launcher' : 'vpn';
         $funnelCode = $domain === 'vpn' ? 'vpn_user_coverage' : 'ad_user_coverage';
-        $allowedDimensions = ($domain === 'vpn' && strtoupper((string) ($params['projectCode'] ?? '')) === 'A003')
+        $allowedDimensions = ($domain === 'vpn' && $versionProduct === 'vpn' && $projectCode === 'A003')
             ? ['stat_date', 'app_version', 'user_country_code', 'country_code', 'platform']
             : ['stat_date', 'app_version', 'country_code', 'platform'];
         $requestedDimensions = array_values(array_filter(
@@ -2210,7 +2216,16 @@ class FunnelAnalyticsService
         $dimensions = array_values(array_unique($dimensions));
         $dimension = count($dimensions) === 1 ? $dimensions[0] : implode('__', $dimensions);
 
-        if ($domain === 'vpn' && strtoupper((string) ($params['projectCode'] ?? '')) === 'A003') {
+        if ($domain === 'vpn' && $versionProduct === 'launcher') {
+            if (!str_starts_with($projectCode, 'L')) {
+                return ['available' => false, 'reason' => 'Launcher版本对比只能选择L开头项目', 'rows' => [], 'dimensions' => $dimensions, 'domain' => 'vpn', 'versionProduct' => 'launcher'];
+            }
+            return $this->launcherVersionComparisonFromEvents($params, $dimensions, $dimension);
+        }
+        if ($domain === 'vpn' && $versionProduct === 'vpn' && str_starts_with($projectCode, 'L')) {
+            return ['available' => false, 'reason' => 'VPN版本对比不能选择L开头项目', 'rows' => [], 'dimensions' => $dimensions, 'domain' => 'vpn', 'versionProduct' => 'vpn'];
+        }
+        if ($domain === 'vpn' && $projectCode === 'A003') {
             return $this->versionComparisonFromA003VpnSummary($params, $dimensions, $dimension);
         }
 
@@ -2314,6 +2329,179 @@ class FunnelAnalyticsService
         } catch (Throwable $exception) {
             Log::warning('jkcl_version_comparison_dws_failed', ['message' => $exception->getMessage()]);
             return ['rows' => [], 'dimension' => $dimension, 'source' => 'dws_app_funnel_stage_daily', 'domain' => $domain];
+        }
+    }
+
+
+    /**
+     * Build the product/Launcher version comparison from standardized events.
+     * This page intentionally replaces the historical VPN session-quality
+     * columns with the acquisition -> onboarding -> activation user funnel.
+     *
+     * @param array<string, mixed> $params
+     * @param array<int, string> $dimensions
+     * @return array<string, mixed>
+     */
+    private function launcherVersionComparisonFromEvents(array $params, array $dimensions, string $dimension): array
+    {
+        $dimensionColumns = [
+            'stat_date' => 'event_date',
+            'app_version' => 'app_version',
+            'country_code' => 'country_code',
+            'platform' => 'platform',
+        ];
+        $dimensionLabelsMap = [
+            'stat_date' => '日期',
+            'app_version' => '应用版本',
+            'country_code' => '国家',
+            'platform' => '平台',
+        ];
+
+        try {
+            $queryParams = $params;
+            if (in_array('app_version', $dimensions, true)) {
+                unset($queryParams['appVersion']);
+            }
+            if (in_array('country_code', $dimensions, true)) {
+                unset($queryParams['country']);
+            }
+            if (in_array('platform', $dimensions, true)) {
+                unset($queryParams['platform']);
+            }
+
+            $eventTable = $this->eventTable();
+            $newUsers = $this->baseQuery($queryParams)
+                ->where('event_name', 'app_first_open')
+                ->whereNotNull('my_user_id')->where('my_user_id', '!=', '')
+                ->selectRaw('project_code AS new_project_code')
+                ->selectRaw('app_identifier AS new_app_identifier')
+                ->selectRaw('my_user_id AS new_user_id')
+                ->groupBy(['project_code', 'app_identifier', 'my_user_id']);
+
+            $query = $this->baseQuery($queryParams)
+                ->leftJoinSub($newUsers, 'version_new_users', function ($join) use ($eventTable): void {
+                    $join->on('version_new_users.new_project_code', '=', $eventTable . '.project_code')
+                        ->on('version_new_users.new_app_identifier', '=', $eventTable . '.app_identifier')
+                        ->on('version_new_users.new_user_id', '=', $eventTable . '.my_user_id');
+                })
+                ->whereIn('event_name', [
+                    'app_foreground',
+                    'attribution_result',
+                    'screen_view',
+                    'element_click',
+                    'business_task_completed',
+                    'core_action',
+                    'launcher_onboarding_view',
+                    'launcher_onboarding_action',
+                    'launcher_default_prompt_show',
+                    'launcher_default_prompt_action',
+                    'launcher_default_setting_result',
+                    'launcher_home_view',
+                ]);
+
+            $groupColumns = [];
+            foreach ($dimensions as $item) {
+                $sourceColumn = $dimensionColumns[$item];
+                $query->whereNotNull($sourceColumn);
+                if ($sourceColumn !== 'event_date') {
+                    $query->where($sourceColumn, '!=', '');
+                }
+                $query->selectRaw("{$sourceColumn} AS {$item}");
+                $groupColumns[] = $sourceColumn;
+            }
+
+            $jsonValue = static fn (string $key): string => "LOWER(COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(event_params_json, '$.{$key}')), ''), ''))";
+            $attributionStatus = $jsonValue('attribution_status');
+            $onboardingStep = $jsonValue('onboarding_step');
+            $onboardingAction = $jsonValue('action_type');
+            $promptAction = $jsonValue('action');
+            $settingResult = $jsonValue('result');
+            $defaultStatusAfter = $jsonValue('default_status_after');
+            $elementName = $jsonValue('element_name');
+            $taskType = $jsonValue('task_type');
+            $actionName = $jsonValue('action_name');
+            $eventResult = "LOWER(COALESCE(NULLIF(result_status, ''), NULLIF(JSON_UNQUOTE(JSON_EXTRACT(event_params_json, '$.result_status')), ''), NULLIF(JSON_UNQUOTE(JSON_EXTRACT(event_params_json, '$.action_result')), ''), ''))";
+            $screenName = "LOWER(COALESCE(NULLIF(screen_name, ''), NULLIF(JSON_UNQUOTE(JSON_EXTRACT(event_params_json, '$.screen_name')), ''), ''))";
+            $languageSteps = "('language', 'language_page', 'language_select', 'language_selection', 'select_language')";
+            $languageScreens = "('language', 'language_page', 'language_select', 'language_selection', 'select_language')";
+            $languageExposure = "((event_name = 'launcher_onboarding_view' AND {$onboardingStep} IN {$languageSteps}) OR (event_name = 'screen_view' AND {$screenName} IN {$languageScreens}))";
+            $languageConfirm = "((event_name = 'launcher_onboarding_action' AND {$onboardingStep} IN {$languageSteps} AND {$onboardingAction} IN ('next', 'complete', 'confirm', 'allow')) OR (event_name = 'element_click' AND {$elementName} IN ('language_confirm', 'confirm_language', 'language_continue', 'continue_button')))";
+            $coreTask = "((event_name = 'business_task_completed' AND {$eventResult} IN ('completed', 'success') AND ({$taskType} LIKE '%scan%' OR {$taskType} LIKE '%qr%generate%' OR {$taskType} LIKE '%generate%code%')) OR (event_name = 'core_action' AND {$eventResult} IN ('completed', 'success') AND ({$actionName} LIKE '%scan%' OR {$actionName} LIKE '%qr%generate%' OR {$actionName} LIKE '%generate%code%')))";
+
+            $rows = $query
+                ->selectRaw("COUNT(DISTINCT CASE WHEN event_name = 'attribution_result' AND {$attributionStatus} = 'attributed' AND version_new_users.new_user_id IS NOT NULL THEN NULLIF(my_user_id, '') END) AS paid_attributed_new_users")
+                ->selectRaw("COUNT(DISTINCT CASE WHEN event_name = 'app_foreground' THEN NULLIF(my_user_id, '') END) AS dau_users")
+                ->selectRaw("COUNT(DISTINCT CASE WHEN {$languageExposure} THEN NULLIF(my_user_id, '') END) AS language_page_exposure_users")
+                ->selectRaw("COUNT(DISTINCT CASE WHEN {$languageConfirm} THEN NULLIF(my_user_id, '') END) AS language_confirm_users")
+                ->selectRaw("COUNT(DISTINCT CASE WHEN event_name = 'launcher_default_prompt_show' THEN NULLIF(my_user_id, '') END) AS launcher_guide_exposure_users")
+                ->selectRaw("COUNT(DISTINCT CASE WHEN event_name = 'launcher_default_prompt_action' AND {$promptAction} = 'set_now' THEN NULLIF(my_user_id, '') END) AS launcher_setup_click_users")
+                ->selectRaw("COUNT(DISTINCT CASE WHEN event_name = 'launcher_default_setting_result' AND ({$settingResult} = 'granted' OR {$defaultStatusAfter} = 'default') THEN NULLIF(my_user_id, '') END) AS launcher_setup_success_users")
+                ->selectRaw("COUNT(DISTINCT CASE WHEN event_name = 'launcher_home_view' THEN NULLIF(my_user_id, '') END) AS launcher_home_users")
+                ->selectRaw("COUNT(DISTINCT CASE WHEN {$coreTask} THEN NULLIF(my_user_id, '') END) AS core_feature_complete_users")
+                ->groupBy($groupColumns)
+                ->get()
+                ->map(function (object $row) use ($dimensions): array {
+                    $dimensionValues = [];
+                    $dimensionLabels = [];
+                    foreach ($dimensions as $item) {
+                        $value = trim((string) ($row->{$item} ?? '')) ?: 'unknown';
+                        $dimensionValues[$item] = $value;
+                        $dimensionLabels[$item] = $value;
+                    }
+                    $paidAttributedNewUsers = (int) ($row->paid_attributed_new_users ?? 0);
+                    $languagePageExposureUsers = (int) ($row->language_page_exposure_users ?? 0);
+                    $languageConfirmUsers = (int) ($row->language_confirm_users ?? 0);
+                    $launcherSetupClickUsers = (int) ($row->launcher_setup_click_users ?? 0);
+                    $launcherSetupSuccessUsers = (int) ($row->launcher_setup_success_users ?? 0);
+                    $coreFeatureCompleteUsers = (int) ($row->core_feature_complete_users ?? 0);
+                    $rate = static fn (int $numerator, int $denominator): ?float => $denominator > 0
+                        ? round($numerator * 100 / $denominator, 2)
+                        : null;
+
+                    return [
+                        'dimensionValues' => $dimensionValues,
+                        'dimensionLabels' => $dimensionLabels,
+                        'dimensionKey' => implode('|', $dimensionValues),
+                        'dimensionLabel' => implode(' × ', $dimensionLabels),
+                        'appVersion' => $dimensionValues['app_version'] ?? null,
+                        'paidAttributedNewUsers' => $paidAttributedNewUsers,
+                        'dauUsers' => (int) ($row->dau_users ?? 0),
+                        'languagePageExposureUsers' => $languagePageExposureUsers,
+                        'languageConfirmUsers' => $languageConfirmUsers,
+                        'languageConfirmRate' => $rate($languageConfirmUsers, $languagePageExposureUsers),
+                        'launcherGuideExposureUsers' => (int) ($row->launcher_guide_exposure_users ?? 0),
+                        'launcherSetupClickUsers' => $launcherSetupClickUsers,
+                        'launcherSetupSuccessUsers' => $launcherSetupSuccessUsers,
+                        'launcherSetupSuccessRate' => $rate($launcherSetupSuccessUsers, $launcherSetupClickUsers),
+                        'launcherHomeUsers' => (int) ($row->launcher_home_users ?? 0),
+                        'coreFeatureCompleteUsers' => $coreFeatureCompleteUsers,
+                        'coreFeatureActivationRate' => $rate($coreFeatureCompleteUsers, $paidAttributedNewUsers),
+                    ];
+                })
+                ->sortByDesc('dauUsers')
+                ->values();
+
+            $dimensionLabel = implode(' × ', array_map(
+                static fn (string $item): string => $dimensionLabelsMap[$item] ?? $item,
+                $dimensions
+            ));
+
+            return [
+                'rows' => $rows->all(),
+                'dimension' => $dimension,
+                'dimensions' => $dimensions,
+                'dimensionLabels' => array_map(static fn (string $item): string => $dimensionLabelsMap[$item] ?? $item, $dimensions),
+                'dimensionLabel' => $dimensionLabel,
+                'suggestedBaseline' => $rows->first()['dimensionLabel'] ?? null,
+                'source' => 'dwd_app_tracking_event',
+                'scope' => 'users',
+                'domain' => 'vpn',
+                'versionOptions' => $this->launcherVersionComparisonVersionOptions($params),
+                'notice' => "同项目、同日期范围、同平台和国家下按 {$dimensionLabel} 对比；付费归因新人取同区间 app_first_open 且 attribution_result.attribution_status=attributed 的用户，语言确认率=语言确认UV/语言页曝光UV，Launcher设置成功率=设置成功UV/点击立即设置UV，核心功能激活率=成功扫码或生成码UV/付费归因新人。分母没有数据时显示暂无，不按0%处理。",
+            ];
+        } catch (Throwable $exception) {
+            Log::warning('jkcl_launcher_version_comparison_failed', ['message' => $exception->getMessage()]);
+            return ['rows' => [], 'dimension' => $dimension, 'dimensions' => $dimensions, 'source' => 'dwd_app_tracking_event', 'domain' => 'vpn'];
         }
     }
 
@@ -2536,6 +2724,26 @@ class FunnelAnalyticsService
                 'appVersion' => (string) $row->app_version,
                 'buildNumber' => $row->build_number === null ? null : (int) $row->build_number,
                 'label' => $row->build_number === null || $row->build_number === '' ? (string) $row->app_version : (string) $row->app_version . ' (' . (string) $row->build_number . ')',
+            ])->values()->all();
+    }
+
+    /**
+     * Launcher versions must come from the same configured event source as the
+     * Launcher metrics instead of the VPN/ad DWS summary.
+     *
+     * @param array<string, mixed> $params
+     * @return array<int, array<string, mixed>>
+     */
+    private function launcherVersionComparisonVersionOptions(array $params): array
+    {
+        return $this->baseQuery($params)
+            ->whereNotNull('app_version')->where('app_version', '!=', '')
+            ->select(['app_version'])->distinct()
+            ->orderByDesc('app_version')->limit(200)->get()
+            ->map(fn ($row) => [
+                'appVersion' => (string) $row->app_version,
+                'buildNumber' => null,
+                'label' => (string) $row->app_version,
             ])->values()->all();
     }
 

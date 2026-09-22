@@ -47,6 +47,7 @@ class FunnelAnalyticsQueryRequest extends FormRequest
             'timezone' => 'nullable|timezone|max:64',
             'compareType' => ['nullable', Rule::in(['none', 'yesterday_same_period', 'previous_period'])],
             'domain' => ['nullable', Rule::in(['vpn', 'ads', 'quality'])],
+            'versionProduct' => ['nullable', Rule::in(['vpn', 'launcher'])],
             'unit' => ['nullable', Rule::in(['users', 'sessions', 'events'])],
             'dimension' => ['nullable', Rule::in(['stat_date', 'project_code', 'app_version', 'country_code', 'platform', 'network_type', 'device_model', 'ad_format', 'placement'])],
             'dimensions' => 'nullable|array|min:1|max:6',
@@ -93,6 +94,22 @@ class FunnelAnalyticsQueryRequest extends FormRequest
 
             if (Carbon::parse($this->input('dateFrom'))->diffInDays(Carbon::parse($this->input('dateTo'))) > 31) {
                 $validator->errors()->add('dateTo', '单次查询时间范围不能超过 32 天');
+            }
+
+            if ($this->input('page') === 'version_comparison') {
+                $versionProduct = (string) $this->input('versionProduct', 'vpn');
+                if ($versionProduct === 'launcher' && $this->input('domain') !== 'vpn') {
+                    $validator->errors()->add('domain', 'Launcher版本对比必须使用VPN诊断域');
+                }
+                if ($this->filled('projectCode')) {
+                    $projectCode = strtoupper(trim((string) $this->input('projectCode')));
+                    if ($versionProduct === 'launcher' && !str_starts_with($projectCode, 'L')) {
+                        $validator->errors()->add('projectCode', 'Launcher版本对比只能选择L开头项目');
+                    }
+                    if ($versionProduct === 'vpn' && str_starts_with($projectCode, 'L')) {
+                        $validator->errors()->add('projectCode', 'VPN版本对比不能选择L开头项目');
+                    }
+                }
             }
 
             if ($this->input('page') !== 'diagnosis') {

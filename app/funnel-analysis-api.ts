@@ -16,6 +16,7 @@ export type FunnelQuery = {
   unit?: "users" | "sessions" | "events";
   dimension?: string;
   dimensions?: string[];
+  versionProduct?: "vpn" | "launcher";
   startStep?: string;
   endStep?: string;
   screenName?: string;

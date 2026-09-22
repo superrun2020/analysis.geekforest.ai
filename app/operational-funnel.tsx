@@ -17,7 +17,7 @@ type Props = {
   country: string;
   appVersion: string;
   refreshKey: number;
-  projectOptions?: Array<{ projectCode: string; appName?: string }>;
+  projectOptions?: Array<{ projectCode: string; appName?: string; appIdentifier?: string }>;
   countryOptions?: string[];
   appVersionOptions?: string[];
   onPageChange: (page: FunnelPageKey) => void;
@@ -29,8 +29,8 @@ type Props = {
   initialDomain?: "ads" | "vpn" | "quality";
   lockDomain?: boolean;
   softFailure?: boolean;
-  reportSection?: "matrix" | "exitIp" | "adOverall" | "adDns" | "versions";
-  onReportSectionChange?: (section: "matrix" | "exitIp" | "adOverall" | "adDns" | "versions") => void;
+  reportSection?: "matrix" | "exitIp" | "adOverall" | "adDns" | "vpnVersions" | "launcherVersions";
+  onReportSectionChange?: (section: "matrix" | "exitIp" | "adOverall" | "adDns" | "vpnVersions" | "launcherVersions") => void;
   hideReportTabs?: boolean;
   onSnapshotChange?: (snapshot: OperationalReportSnapshot | null) => void;
 };
@@ -58,6 +58,7 @@ function queryCacheKey(query: FunnelQuery) {
     unit: query.unit ?? "",
     pageSize: query.pageSize ?? "",
     dimensions: query.dimensions?.join("|") ?? "",
+    versionProduct: query.versionProduct ?? "",
     ipKey: query.ipKey ?? "",
     ipTarget: query.ipTarget ?? "",
     ipGranularity: query.ipGranularity ?? "",
@@ -2147,7 +2148,7 @@ function adDnsDimensionLabel(key: string): string {
   return AD_DNS_DIMENSIONS.find((dimension) => dimension.key === key)?.label ?? key;
 }
 
-function AdDnsReport({ data, dimensions, dates, projectCode, platform, country, appVersion, projectOptions = [], countryOptions = ["全部国家"], appVersionOptions = ["全部版本"], querying, queryError, onQuery, onProjectSelect, onRangeChange, onCountryChange, onAppVersionChange, onPlatformChange }: { data: AnyRow; dimensions: string[]; dates: { dateFrom: string; dateTo: string }; projectCode: string; platform: string; country: string; appVersion: string; projectOptions?: Array<{ projectCode: string; appName?: string }>; countryOptions?: string[]; appVersionOptions?: string[]; querying: boolean; queryError: string; onQuery: (dimensions: string[]) => void; onProjectSelect?: (projectCode: string) => void; onRangeChange?: (range: string) => void; onCountryChange?: (country: string) => void; onAppVersionChange?: (appVersion: string) => void; onPlatformChange?: (platform: string) => void }) {
+function AdDnsReport({ data, dimensions, dates, projectCode, platform, country, appVersion, projectOptions = [], countryOptions = ["全部国家"], appVersionOptions = ["全部版本"], querying, queryError, onQuery, onProjectSelect, onRangeChange, onCountryChange, onAppVersionChange, onPlatformChange }: { data: AnyRow; dimensions: string[]; dates: { dateFrom: string; dateTo: string }; projectCode: string; platform: string; country: string; appVersion: string; projectOptions?: Array<{ projectCode: string; appName?: string; appIdentifier?: string }>; countryOptions?: string[]; appVersionOptions?: string[]; querying: boolean; queryError: string; onQuery: (dimensions: string[]) => void; onProjectSelect?: (projectCode: string) => void; onRangeChange?: (range: string) => void; onCountryChange?: (country: string) => void; onAppVersionChange?: (appVersion: string) => void; onPlatformChange?: (platform: string) => void }) {
   const report = data.adDnsReport ?? {};
   const rows = Array.isArray(report.rows) ? report.rows : [];
   const totals = report.totals ?? {};
@@ -2234,7 +2235,7 @@ function adOverallDimensionLabel(key: string): string {
   return AD_OVERALL_DIMENSIONS.find((dimension) => dimension.key === key)?.label ?? key;
 }
 
-function AdOverallReport({ data, dimensions, dates, projectCode, platform, country, appVersion, projectOptions = [], countryOptions = ["全部国家"], appVersionOptions = ["全部版本"], querying, queryError, onQuery, onProjectSelect, onRangeChange, onCountryChange, onAppVersionChange, onPlatformChange }: { data: AnyRow; dimensions: string[]; dates: { dateFrom: string; dateTo: string }; projectCode: string; platform: string; country: string; appVersion: string; projectOptions?: Array<{ projectCode: string; appName?: string }>; countryOptions?: string[]; appVersionOptions?: string[]; querying: boolean; queryError: string; onQuery: (dimensions: string[]) => void; onProjectSelect?: (projectCode: string) => void; onRangeChange?: (range: string) => void; onCountryChange?: (country: string) => void; onAppVersionChange?: (appVersion: string) => void; onPlatformChange?: (platform: string) => void }) {
+function AdOverallReport({ data, dimensions, dates, projectCode, platform, country, appVersion, projectOptions = [], countryOptions = ["全部国家"], appVersionOptions = ["全部版本"], querying, queryError, onQuery, onProjectSelect, onRangeChange, onCountryChange, onAppVersionChange, onPlatformChange }: { data: AnyRow; dimensions: string[]; dates: { dateFrom: string; dateTo: string }; projectCode: string; platform: string; country: string; appVersion: string; projectOptions?: Array<{ projectCode: string; appName?: string; appIdentifier?: string }>; countryOptions?: string[]; appVersionOptions?: string[]; querying: boolean; queryError: string; onQuery: (dimensions: string[]) => void; onProjectSelect?: (projectCode: string) => void; onRangeChange?: (range: string) => void; onCountryChange?: (country: string) => void; onAppVersionChange?: (appVersion: string) => void; onPlatformChange?: (platform: string) => void }) {
   const report = data.adOverallReport ?? {};
   const rows = Array.isArray(report.rows) ? report.rows : [];
   const totals = report.totals ?? {};
@@ -2305,7 +2306,7 @@ function AdOverallReport({ data, dimensions, dates, projectCode, platform, count
   </div>;
 }
 
-function AdNetworkFailureMatrix({ data, dimensions, dates, projectCode, platform, country, appVersion, projectOptions = [], countryOptions = ["全部国家"], appVersionOptions = ["全部版本"], querying, queryError, onQuery, onProjectSelect, onRangeChange, onCountryChange, onAppVersionChange, onPlatformChange }: { data: AnyRow; dimensions: string[]; dates: { dateFrom: string; dateTo: string }; projectCode: string; platform: string; country: string; appVersion: string; projectOptions?: Array<{ projectCode: string; appName?: string }>; countryOptions?: string[]; appVersionOptions?: string[]; querying: boolean; queryError: string; onQuery: (dimensions: string[]) => void; onProjectSelect?: (projectCode: string) => void; onRangeChange?: (range: string) => void; onCountryChange?: (country: string) => void; onAppVersionChange?: (appVersion: string) => void; onPlatformChange?: (platform: string) => void }) {
+function AdNetworkFailureMatrix({ data, dimensions, dates, projectCode, platform, country, appVersion, projectOptions = [], countryOptions = ["全部国家"], appVersionOptions = ["全部版本"], querying, queryError, onQuery, onProjectSelect, onRangeChange, onCountryChange, onAppVersionChange, onPlatformChange }: { data: AnyRow; dimensions: string[]; dates: { dateFrom: string; dateTo: string }; projectCode: string; platform: string; country: string; appVersion: string; projectOptions?: Array<{ projectCode: string; appName?: string; appIdentifier?: string }>; countryOptions?: string[]; appVersionOptions?: string[]; querying: boolean; queryError: string; onQuery: (dimensions: string[]) => void; onProjectSelect?: (projectCode: string) => void; onRangeChange?: (range: string) => void; onCountryChange?: (country: string) => void; onAppVersionChange?: (appVersion: string) => void; onPlatformChange?: (platform: string) => void }) {
   const matrix = data.adNetworkFailureMatrix ?? {};
   const rows = Array.isArray(matrix.rows) ? matrix.rows : [];
   const totals = matrix.totals ?? {};
@@ -2726,7 +2727,20 @@ function Overview({ data, onPageChange, onProjectSelect, context }: { data: AnyR
 
 type VersionCompareColumn = { key: string; label: string; unit: "count" | "ratio"; num?: string; den?: string; help?: string };
 
-function versionCompareColumns(domain: string): VersionCompareColumn[] {
+function versionCompareColumns(domain: string, versionProduct: "vpn" | "launcher" = "vpn"): VersionCompareColumn[] {
+  if (domain === "vpn" && versionProduct === "launcher") {
+    return [
+      { key: "paidAttributedNewUsers", label: "付费归因新人", unit: "count", help: "同区间首次打开且归因结果为 attributed 的去重新人" },
+      { key: "dauUsers", label: "DAU", unit: "count", help: "发生 app_foreground 的去重用户" },
+      { key: "languagePageExposureUsers", label: "语言页曝光UV", unit: "count", help: "真正看到语言选择页的去重用户" },
+      { key: "languageConfirmRate", label: "语言确认率", unit: "ratio", num: "languageConfirmUsers", den: "languagePageExposureUsers", help: "语言确认UV ÷ 语言页曝光UV" },
+      { key: "launcherGuideExposureUsers", label: "Launcher引导曝光UV", unit: "count", help: "真正看到默认 Launcher 授权引导的去重用户" },
+      { key: "launcherSetupSuccessRate", label: "Launcher设置成功率", unit: "ratio", num: "launcherSetupSuccessUsers", den: "launcherSetupClickUsers", help: "设置成功UV ÷ 点击立即设置UV" },
+      { key: "launcherHomeUsers", label: "Launcher首页UV", unit: "count", help: "真正进入 Launcher 首页的去重用户" },
+      { key: "coreFeatureCompleteUsers", label: "核心功能完成UV", unit: "count", help: "成功扫码或生成码的去重用户" },
+      { key: "coreFeatureActivationRate", label: "核心功能激活率", unit: "ratio", num: "coreFeatureCompleteUsers", den: "paidAttributedNewUsers", help: "核心功能完成UV ÷ 付费归因新人" },
+    ];
+  }
   if (domain === "vpn") {
     return [
       { key: "newUsers", label: "新增用户", unit: "count" },
@@ -2743,7 +2757,6 @@ function versionCompareColumns(domain: string): VersionCompareColumn[] {
       { key: "loadSuccessRate", label: "加载成功率", unit: "ratio", num: "loadSuccessCount", den: "requestCount" },
       { key: "impressionCount", label: "Impression", unit: "count" },
       { key: "revenue", label: "收入", unit: "count" },
-
     ];
   }
   return [
@@ -2764,11 +2777,18 @@ function versionCompareColumns(domain: string): VersionCompareColumn[] {
 const versionCompareDimensions = [
   { key: "stat_date", label: "日期" },
   { key: "app_version", label: "应用版本" },
+  { key: "user_country_code", label: "入口国家" },
   { key: "country_code", label: "国家" },
   { key: "platform", label: "平台" },
 ];
 
-const versionCompareDimensionLabel = (key: string) => versionCompareDimensions.find((item) => item.key === key)?.label ?? key;
+function versionCompareDimensionOptions(versionProduct: "vpn" | "launcher", projectCode: string) {
+  return versionCompareDimensions
+    .filter((item) => versionProduct === "vpn" && projectCode.toUpperCase() === "A003" ? true : item.key !== "user_country_code")
+    .map((item) => item.key === "country_code" && versionProduct === "vpn" && projectCode.toUpperCase() === "A003" ? { ...item, label: "VPN出口国家" } : item);
+}
+
+const versionCompareDimensionLabel = (key: string, options = versionCompareDimensions) => options.find((item) => item.key === key)?.label ?? key;
 
 /** Compare dimension labels naturally: version parts as numbers, rest lexically. */
 function compareDimensionLabels(a: string, b: string): number {
@@ -2789,9 +2809,10 @@ function compareDimensionLabels(a: string, b: string): number {
   return 0;
 }
 
-function VersionComparison({ data, domain, projectCode, appIdentifier, platform, country, appVersion, initialRange, refreshKey, projectOptions = [], onProjectSelect, onRangeChange }: {
+function VersionComparison({ data, domain, versionProduct, projectCode, appIdentifier, platform, country, appVersion, initialRange, refreshKey, projectOptions = [], onProjectSelect, onRangeChange }: {
   data: AnyRow;
   domain: "ads" | "vpn" | "quality";
+  versionProduct: "vpn" | "launcher";
   projectCode: string;
   appIdentifier?: string;
   platform: string;
@@ -2799,15 +2820,26 @@ function VersionComparison({ data, domain, projectCode, appIdentifier, platform,
   appVersion: string;
   initialRange: string;
   refreshKey: number;
-  projectOptions?: Array<{ projectCode: string; appName?: string }>;
+  projectOptions?: Array<{ projectCode: string; appName?: string; appIdentifier?: string }>;
   onProjectSelect?: (projectCode: string) => void;
   onRangeChange?: (range: string) => void;
 }) {
-  const allColumns = useMemo(() => versionCompareColumns(domain), [domain]);
+  const allColumns = useMemo(() => versionCompareColumns(domain, versionProduct), [domain, versionProduct]);
   const [dimensions, setDimensions] = useState<string[]>(["app_version"]);
   const [range, setLocalRange] = useState<string>(initialRange);
   const [versionFilter, setVersionFilter] = useState<string>(appVersion === "全部版本" ? "" : appVersion.split(" ")[0]);
-  const selectableProjects = projectOptions.length ? projectOptions : [{ projectCode }];
+  const selectableProjects = useMemo(() => {
+    const options = projectOptions.length ? projectOptions : [{ projectCode }];
+    if (domain !== "vpn") return options;
+    return options.filter((item) => {
+      const isLauncherProject = item.projectCode.trim().toUpperCase().startsWith("L");
+      return versionProduct === "launcher" ? isLauncherProject : !isLauncherProject;
+    });
+  }, [domain, projectCode, projectOptions, versionProduct]);
+  const effectiveProjectCode = selectableProjects.some((item) => item.projectCode === projectCode)
+    ? projectCode
+    : selectableProjects[0]?.projectCode ?? "";
+  const effectiveAppIdentifier = selectableProjects.find((item) => item.projectCode === effectiveProjectCode)?.appIdentifier ?? appIdentifier;
   const currentDates = dateRange(range);
   const setRange = (nextRange: string) => {
     setLocalRange(nextRange);
@@ -2819,14 +2851,36 @@ function VersionComparison({ data, domain, projectCode, appIdentifier, platform,
     return map;
   });
   const [comparison, setComparison] = useState<AnyRow>(data.versionComparison ?? {});
-  const versionDimensionOptions = versionCompareDimensions;
+  const versionDimensionOptions = useMemo(() => versionCompareDimensionOptions(versionProduct, effectiveProjectCode), [versionProduct, effectiveProjectCode]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (domain === "vpn" && effectiveProjectCode && effectiveProjectCode !== projectCode) onProjectSelect?.(effectiveProjectCode);
+  }, [domain, effectiveProjectCode, onProjectSelect, projectCode]);
+
+  useEffect(() => {
+    const allowed = new Set(versionDimensionOptions.map((item) => item.key));
+    setDimensions((current) => {
+      const next = current.filter((item) => allowed.has(item));
+      return next.length ? next : ["app_version"];
+    });
+  }, [versionDimensionOptions]);
+
+  useEffect(() => {
+    setVersionFilter(appVersion === "全部版本" ? "" : appVersion.split(" ")[0]);
+  }, [appVersion]);
 
   const dimensionKey = dimensions.join("|");
   const hasInitialComparison = Array.isArray(data.versionComparison?.rows) && data.versionComparison.rows.length > 0;
   const isDefault = hasInitialComparison && dimensions.length === 1 && dimensions[0] === "app_version" && range === initialRange && !versionFilter;
   useEffect(() => {
+    if (domain === "vpn" && !effectiveProjectCode) {
+      setComparison({ rows: [] });
+      setLoading(false);
+      setError(versionProduct === "launcher" ? "没有可用的 L 开头 Launcher 项目" : "没有可用的 VPN 项目");
+      return;
+    }
     if (isDefault) {
       setComparison(data.versionComparison ?? {});
       setLoading(false);
@@ -2840,23 +2894,23 @@ function VersionComparison({ data, domain, projectCode, appIdentifier, platform,
     const dates = dateRange(range);
     const baseQuery = {
       ...dates,
-      projectCode,
-      appIdentifier,
+      projectCode: effectiveProjectCode,
+      appIdentifier: effectiveAppIdentifier,
       platform: platform === "全部" ? undefined : platform.toLowerCase() as "android" | "ios",
       country: country === "全部国家" ? undefined : country,
       appVersion: !dimensions.includes("app_version") && versionFilter ? versionFilter : undefined,
     };
-    queryFunnel<AnyRow>({ ...baseQuery, page: "version_comparison", domain, unit: "users", dimension: dimensions[0], dimensions }, controller.signal)
+    queryFunnel<AnyRow>({ ...baseQuery, page: "version_comparison", domain, unit: "users", dimension: dimensions[0], dimensions, versionProduct }, controller.signal)
       .then((result) => { if (active) setComparison(result.versionComparison ?? {}); })
       .catch((reason) => { if (active) setError(reason instanceof Error ? reason.message : "查询失败"); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; controller.abort(); };
-  }, [dimensionKey, range, isDefault, projectCode, appIdentifier, platform, country, versionFilter, refreshKey, data]);
+  }, [dimensionKey, range, isDefault, effectiveProjectCode, effectiveAppIdentifier, platform, country, versionFilter, refreshKey, data, domain, versionProduct]);
 
   const rows: AnyRow[] = comparison.rows ?? [];
   const selectedColumns = allColumns.filter((column) => visible[column.key] !== false);
   const activeDimensions: string[] = Array.isArray(comparison.dimensions) && comparison.dimensions.length ? comparison.dimensions : dimensions;
-  const dimensionLabel = text(comparison.dimensionLabel ?? activeDimensions.map(versionCompareDimensionLabel).join(" × "));
+  const dimensionLabel = text(comparison.dimensionLabel ?? activeDimensions.map((item) => versionCompareDimensionLabel(item, versionDimensionOptions)).join(" × "));
   const versionOptions: AnyRow[] = useMemo(() => {
     const source: AnyRow[] = Array.isArray(comparison.versionOptions) && comparison.versionOptions.length ? comparison.versionOptions : rows;
     const seen = new Set<string>();
@@ -2940,7 +2994,7 @@ function VersionComparison({ data, domain, projectCode, appIdentifier, platform,
 
   return <div className="page-stack version-compare-page">
     <section className="surface version-compare-header">
-      <div className="surface-title"><div><h2>App 版本核心指标对比</h2><p>按「{dimensionLabel}」对比核心漏斗指标；日期和版本都可加入维度。日期未加入维度时聚合日期，版本未加入维度时可筛选单个版本逐日查看。</p></div></div>
+      <div className="surface-title"><div><h2>{versionProduct === "launcher" ? "Launcher" : "VPN"}版本核心指标对比</h2><p>按「{dimensionLabel}」对比{versionProduct === "launcher" ? "Launcher 获取、引导与激活" : "VPN 连接、探测与广告链路"}指标；日期和版本都可加入维度。</p></div></div>
     </section>
     <div className="version-compare-layout">
       <div className="version-compare-main">
@@ -2948,7 +3002,7 @@ function VersionComparison({ data, domain, projectCode, appIdentifier, platform,
         {error && <div className="version-compare-loading warn">{error}</div>}
         {!rows.length && !loading ? <section className="surface"><div className="empty-table-state"><strong>当前筛选范围没有可对比数据</strong><span>请确认所选维度字段已上报，并选择包含多个分组的日期范围。</span></div></section> : <section className="surface"><div className="table-wrap"><table className="version-compare-table">
           <thead><tr>
-            {activeDimensions.map((item) => <th key={item} className="sortable dimension-sortable" onClick={() => toggleSort(`dimension:${item}`)}><span>{versionCompareDimensionLabel(item)}</span>{(item === "stat_date" || item === "app_version") && <Button htmlType="button" className="inline-sort-desc" onClick={(event) => { event.stopPropagation(); setDimensionSortDesc(item); }}>降序</Button>}{sortKey === `dimension:${item}` && <span className="sort-indicator">{sortDirection === "asc" ? "▲" : "▼"}</span>}</th>)}
+            {activeDimensions.map((item) => <th key={item} className="sortable dimension-sortable" onClick={() => toggleSort(`dimension:${item}`)}><span>{versionCompareDimensionLabel(item, versionDimensionOptions)}</span>{(item === "stat_date" || item === "app_version") && <Button htmlType="button" className="inline-sort-desc" onClick={(event) => { event.stopPropagation(); setDimensionSortDesc(item); }}>降序</Button>}{sortKey === `dimension:${item}` && <span className="sort-indicator">{sortDirection === "asc" ? "▲" : "▼"}</span>}</th>)}
             {selectedColumns.map((column) => <th key={column.key} className="sortable" title={column.help} onClick={() => toggleSort(column.key)}><span>{column.label}</span>{column.unit === "ratio" && <small title={column.help ?? "同组分子分母计算的比例"}>%</small>}{sortKey === column.key && <span className="sort-indicator">{sortDirection === "asc" ? "▲" : "▼"}</span>}</th>)}
           </tr></thead>
           <tbody>{sortedRows.map((row) => {
@@ -2971,10 +3025,10 @@ function VersionComparison({ data, domain, projectCode, appIdentifier, platform,
       <aside className="version-compare-config surface">
         {domain === "vpn" && <div className="config-group">
           <div className="config-title">产品</div>
-          <select className="config-select" value={projectCode} onChange={(event) => onProjectSelect?.(event.target.value)}>
+          <select className="config-select" value={effectiveProjectCode} onChange={(event) => onProjectSelect?.(event.target.value)}>
             {selectableProjects.map((item) => <option key={item.projectCode} value={item.projectCode}>{item.projectCode}{item.appName ? ` · ${item.appName}` : ""}</option>)}
           </select>
-          <small className="config-hint">切换产品后会按当前日期和维度重新查询版本对比。</small>
+          <small className="config-hint">{versionProduct === "launcher" ? "仅显示 L 开头的 Launcher 项目，并使用 Launcher 专属打点。" : "仅显示非 L 开头的 VPN 项目，并使用 VPN 连接、探测与广告打点。"}</small>
         </div>}
         <div className="config-group">
           <div className="config-title">日期范围</div>
@@ -3309,7 +3363,7 @@ function ExitIpQualityReport({ data, detailData, dates, projectCode, platform, c
   platform: string;
   country: string;
   appVersion: string;
-  projectOptions?: Array<{ projectCode: string; appName?: string }>;
+  projectOptions?: Array<{ projectCode: string; appName?: string; appIdentifier?: string }>;
   countryOptions?: string[];
   appVersionOptions?: string[];
   queried: boolean;
@@ -3471,9 +3525,9 @@ export function OperationalFunnel(props: Props) {
   const [exitIpQueryKey, setExitIpQueryKey] = useState(0);
   const [exitIpFilters, setExitIpFilters] = useState<ExitIpFilters>(DEFAULT_EXIT_IP_FILTERS);
   const [exitIpHasQueried, setExitIpHasQueried] = useState(false);
-  const [internalVpnReportSection, setInternalVpnReportSection] = useState<"matrix" | "exitIp" | "adOverall" | "adDns" | "versions">("matrix");
+  const [internalVpnReportSection, setInternalVpnReportSection] = useState<"matrix" | "exitIp" | "adOverall" | "adDns" | "vpnVersions" | "launcherVersions">("matrix");
   const vpnReportSection = props.reportSection ?? internalVpnReportSection;
-  const setVpnReportSection = (section: "matrix" | "exitIp" | "adOverall" | "adDns" | "versions") => {
+  const setVpnReportSection = (section: "matrix" | "exitIp" | "adOverall" | "adDns" | "vpnVersions" | "launcherVersions") => {
     props.onReportSectionChange?.(section);
     if (!props.reportSection) setInternalVpnReportSection(section);
   };
@@ -3856,8 +3910,8 @@ export function OperationalFunnel(props: Props) {
       },
     };
     return <div className="page-stack">
-      {!props.hideReportTabs && <nav className="operational-tabs workbench-tabs"><Button className={vpnReportSection === "matrix" ? "active" : ""} onClick={() => setVpnReportSection("matrix")}>VPN Overall</Button><Button className={vpnReportSection === "exitIp" ? "active" : ""} onClick={() => setVpnReportSection("exitIp")}>出口IP质量</Button><Button className={vpnReportSection === "adOverall" ? "active" : ""} onClick={() => setVpnReportSection("adOverall")}>广告漏斗Overall</Button><Button className={vpnReportSection === "adDns" ? "active" : ""} onClick={() => setVpnReportSection("adDns")}>广告DNS诊断</Button><Button className={vpnReportSection === "versions" ? "active" : ""} onClick={() => setVpnReportSection("versions")}>版本对比</Button></nav>}
-      {vpnReportSection === "versions" ? <VersionComparison data={{}} domain="vpn" projectCode={props.projectCode} appIdentifier={props.appIdentifier} platform={props.platform} country={props.country} appVersion={props.appVersion} initialRange={props.range} refreshKey={props.refreshKey + matrixQueryKey} projectOptions={props.projectOptions} onProjectSelect={props.onProjectSelect} onRangeChange={props.onRangeChange} /> : vpnReportSection === "exitIp" ? <ExitIpQualityReport data={loadingExitIpData} detailData={exitIpDetailData} dates={dates} projectCode={props.projectCode} platform={props.platform} country={props.country} appVersion={props.appVersion} projectOptions={props.projectOptions} countryOptions={props.countryOptions} appVersionOptions={props.appVersionOptions} queried={exitIpHasQueried} activeFilters={exitIpFilters} querying={exitIpLoading} detailLoading={exitIpDetailLoading} queryError={exitIpError} detailError={exitIpDetailError} selectedIpRow={selectedIpRow} onSelectIp={setSelectedIpRow} onQuery={(filters) => { setExitIpFilters(filters); setExitIpHasQueried(true); setSelectedIpRow(null); setExitIpQueryKey((value) => value + 1); }} onProjectSelect={(value) => { setExitIpHasQueried(false); props.onProjectSelect?.(value); }} onRangeChange={(value) => { setExitIpHasQueried(false); props.onRangeChange?.(value); }} onCountryChange={(value) => { setExitIpHasQueried(false); props.onCountryChange?.(value); }} onAppVersionChange={(value) => { setExitIpHasQueried(false); props.onAppVersionChange?.(value); }} onPlatformChange={(value) => { setExitIpHasQueried(false); props.onPlatformChange?.(value); }} /> : vpnReportSection === "adDns" ? <AdDnsReport data={loadingAdDnsData} dimensions={adDnsDimensions} dates={dates} projectCode={props.projectCode} platform={props.platform} country={props.country} appVersion={props.appVersion} projectOptions={props.projectOptions} countryOptions={props.countryOptions} appVersionOptions={props.appVersionOptions} querying={adDnsLoading} queryError={adDnsError} onQuery={(nextDimensions) => { setAdDnsDimensions(nextDimensions); setAdDnsQueryKey((value) => value + 1); }} onProjectSelect={props.onProjectSelect} onRangeChange={props.onRangeChange} onCountryChange={props.onCountryChange} onAppVersionChange={props.onAppVersionChange} onPlatformChange={props.onPlatformChange} /> : vpnReportSection === "adOverall" ? <AdOverallReport data={loadingAdOverallData} dimensions={adOverallDimensions} dates={dates} projectCode={props.projectCode} platform={props.platform} country={props.country} appVersion={props.appVersion} projectOptions={props.projectOptions} countryOptions={props.countryOptions} appVersionOptions={props.appVersionOptions} querying={adOverallLoading} queryError={adOverallError} onQuery={(nextDimensions) => { setAdOverallDimensions(nextDimensions); setAdOverallQueryKey((value) => value + 1); }} onProjectSelect={props.onProjectSelect} onRangeChange={props.onRangeChange} onCountryChange={props.onCountryChange} onAppVersionChange={props.onAppVersionChange} onPlatformChange={props.onPlatformChange} /> : <AdNetworkFailureMatrix data={loadingMatrixData} dimensions={matrixDimensions} dates={dates} projectCode={props.projectCode} platform={props.platform} country={props.country} appVersion={props.appVersion} projectOptions={props.projectOptions} countryOptions={props.countryOptions} appVersionOptions={props.appVersionOptions} querying={matrixLoading} queryError={matrixError} onQuery={(nextDimensions) => { setMatrixDimensions(nextDimensions); setMatrixQueryKey((value) => value + 1); }} onProjectSelect={props.onProjectSelect} onRangeChange={props.onRangeChange} onCountryChange={props.onCountryChange} onAppVersionChange={props.onAppVersionChange} onPlatformChange={props.onPlatformChange} />}
+      {!props.hideReportTabs && <nav className="operational-tabs workbench-tabs"><Button className={vpnReportSection === "matrix" ? "active" : ""} onClick={() => setVpnReportSection("matrix")}>VPN Overall</Button><Button className={vpnReportSection === "exitIp" ? "active" : ""} onClick={() => setVpnReportSection("exitIp")}>出口IP质量</Button><Button className={vpnReportSection === "adOverall" ? "active" : ""} onClick={() => setVpnReportSection("adOverall")}>广告漏斗Overall</Button><Button className={vpnReportSection === "adDns" ? "active" : ""} onClick={() => setVpnReportSection("adDns")}>广告DNS诊断</Button><Button className={vpnReportSection === "vpnVersions" ? "active" : ""} onClick={() => setVpnReportSection("vpnVersions")}>VPN版本对比</Button><Button className={vpnReportSection === "launcherVersions" ? "active" : ""} onClick={() => setVpnReportSection("launcherVersions")}>Launcher版本对比</Button></nav>}
+      {vpnReportSection === "vpnVersions" || vpnReportSection === "launcherVersions" ? <VersionComparison key={`${vpnReportSection}-${props.appVersion}`} data={{}} domain="vpn" versionProduct={vpnReportSection === "launcherVersions" ? "launcher" : "vpn"} projectCode={props.projectCode} appIdentifier={props.appIdentifier} platform={props.platform} country={props.country} appVersion={props.appVersion} initialRange={props.range} refreshKey={props.refreshKey + matrixQueryKey} projectOptions={props.projectOptions} onProjectSelect={props.onProjectSelect} onRangeChange={props.onRangeChange} /> : vpnReportSection === "exitIp" ? <ExitIpQualityReport data={loadingExitIpData} detailData={exitIpDetailData} dates={dates} projectCode={props.projectCode} platform={props.platform} country={props.country} appVersion={props.appVersion} projectOptions={props.projectOptions} countryOptions={props.countryOptions} appVersionOptions={props.appVersionOptions} queried={exitIpHasQueried} activeFilters={exitIpFilters} querying={exitIpLoading} detailLoading={exitIpDetailLoading} queryError={exitIpError} detailError={exitIpDetailError} selectedIpRow={selectedIpRow} onSelectIp={setSelectedIpRow} onQuery={(filters) => { setExitIpFilters(filters); setExitIpHasQueried(true); setSelectedIpRow(null); setExitIpQueryKey((value) => value + 1); }} onProjectSelect={(value) => { setExitIpHasQueried(false); props.onProjectSelect?.(value); }} onRangeChange={(value) => { setExitIpHasQueried(false); props.onRangeChange?.(value); }} onCountryChange={(value) => { setExitIpHasQueried(false); props.onCountryChange?.(value); }} onAppVersionChange={(value) => { setExitIpHasQueried(false); props.onAppVersionChange?.(value); }} onPlatformChange={(value) => { setExitIpHasQueried(false); props.onPlatformChange?.(value); }} /> : vpnReportSection === "adDns" ? <AdDnsReport data={loadingAdDnsData} dimensions={adDnsDimensions} dates={dates} projectCode={props.projectCode} platform={props.platform} country={props.country} appVersion={props.appVersion} projectOptions={props.projectOptions} countryOptions={props.countryOptions} appVersionOptions={props.appVersionOptions} querying={adDnsLoading} queryError={adDnsError} onQuery={(nextDimensions) => { setAdDnsDimensions(nextDimensions); setAdDnsQueryKey((value) => value + 1); }} onProjectSelect={props.onProjectSelect} onRangeChange={props.onRangeChange} onCountryChange={props.onCountryChange} onAppVersionChange={props.onAppVersionChange} onPlatformChange={props.onPlatformChange} /> : vpnReportSection === "adOverall" ? <AdOverallReport data={loadingAdOverallData} dimensions={adOverallDimensions} dates={dates} projectCode={props.projectCode} platform={props.platform} country={props.country} appVersion={props.appVersion} projectOptions={props.projectOptions} countryOptions={props.countryOptions} appVersionOptions={props.appVersionOptions} querying={adOverallLoading} queryError={adOverallError} onQuery={(nextDimensions) => { setAdOverallDimensions(nextDimensions); setAdOverallQueryKey((value) => value + 1); }} onProjectSelect={props.onProjectSelect} onRangeChange={props.onRangeChange} onCountryChange={props.onCountryChange} onAppVersionChange={props.onAppVersionChange} onPlatformChange={props.onPlatformChange} /> : <AdNetworkFailureMatrix data={loadingMatrixData} dimensions={matrixDimensions} dates={dates} projectCode={props.projectCode} platform={props.platform} country={props.country} appVersion={props.appVersion} projectOptions={props.projectOptions} countryOptions={props.countryOptions} appVersionOptions={props.appVersionOptions} querying={matrixLoading} queryError={matrixError} onQuery={(nextDimensions) => { setMatrixDimensions(nextDimensions); setMatrixQueryKey((value) => value + 1); }} onProjectSelect={props.onProjectSelect} onRangeChange={props.onRangeChange} onCountryChange={props.onCountryChange} onAppVersionChange={props.onAppVersionChange} onPlatformChange={props.onPlatformChange} />}
     </div>;
   }
 
