@@ -233,6 +233,12 @@ test("exit IP quality uses Overall-style configuration and explicit server filte
   assert.match(source, /出口国家/);
   assert.match(source, /探测目标/);
   assert.match(source, /未上报目标/);
+  const exitReport = source.slice(source.indexOf("function ExitIpQualityReport"), source.indexOf("function readInitialOperationalView"));
+  const resultCardIndex = exitReport.indexOf('<section className="surface overall-result-card">');
+  assert.match(exitReport, /className="vpn-overall-report exit-ip-overall-report"/);
+  assert.ok(resultCardIndex > 0);
+  assert.doesNotMatch(exitReport.slice(0, resultCardIndex), /surface-title|summary-grid/);
+  assert.match(exitReport.slice(resultCardIndex), /summary-grid/);
   assert.match(request, /minSessionCount/);
   assert.match(request, /minFailedSessionCount/);
   assert.match(request, /maxTcpSuccessRate/);

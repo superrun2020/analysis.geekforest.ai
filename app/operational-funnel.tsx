@@ -3356,9 +3356,8 @@ function ExitIpQualityReport({ data, detailData, dates, projectCode, platform, c
   };
   useEffect(() => setShowRawIp(false), [projectCode, data?.context?.dateFrom, data?.context?.dateTo, data?.context?.platform, data?.context?.country, data?.context?.appVersion]);
 
-  return <div className="page-stack" data-testid="exit-ip-quality-report">
+  return <div className="vpn-overall-report exit-ip-overall-report" data-testid="exit-ip-quality-report">
     <section className="surface matrix-overall-config overall-config-card">
-      <div className="surface-title"><div><h2>出口IP质量</h2><p>按项目和日期查询出口IP、IP段与对应 Session、TCP、广告结果。页面先展示配置，点击查询后才读取明细，避免打开报表时直接触发重查询。</p></div><span>{projectCode || "未选择项目"}</span></div>
       <div className="overall-config-row dimension-row"><span className="overall-config-label">IP粒度</span>{[
         ["exact", "单IP（x.x.x.x）"],
         ["small", "小段（172.22.22.XX）"],
@@ -3382,16 +3381,17 @@ function ExitIpQualityReport({ data, detailData, dates, projectCode, platform, c
       </div>
       <div className="overall-action-row"><div className="overall-view-actions"><span>状态只用于排查，不自动拉黑或摘除IP；每次查询直接读取最新明细</span></div><div className="overall-query-actions"><Button htmlType="button" onClick={() => { setDraftFilters(DEFAULT_EXIT_IP_FILTERS); setVisibleColumns(EXIT_IP_COLUMNS.map((column) => column.key)); }}>重置指标条件</Button><Button htmlType="button" className="primary" onClick={() => { setShowRawIp(false); onQuery(draftFilters); }} disabled={querying || !projectCode}>⌕ {querying ? "查询中…" : "查询"}</Button></div></div>
       <div className="overall-active-hint">当前粒度：{draftFilters.ipGranularity === "small" ? "小段 /24" : draftFilters.ipGranularity === "large" ? "大段 /16" : "单IP"} · 展示 {visibleColumns.length} 个统计字段。172.22.* 仅用于说明掩码格式，数据仍只纳入合法公网出口IP；Session数过滤按当前IP或IP段×目标的独立Session口径计算。</div>
-      {queried ? <><div className="summary-grid">
-        <article><span>出口IP / IP段</span><strong>{number(totals.distinctIps)}</strong><small>{number(totals.ipRows)} 个分组×目标组合</small></article>
-        <article><span>Session关联</span><strong>{number(totals.sessionAssociationCount)}</strong><small>稳定 {number(totals.stableSessionAssociationCount)} · 换IP排除 {number(totals.ambiguousSessionAssociationCount)}</small></article>
-        <article><span>明确TCP样本</span><strong>{number(totals.tcpAttemptCount)}</strong><small>unknown / not_executed 不进入分母</small></article>
-        <article><span>疑似受限 / 观察</span><strong>{number(totals.suspectCount)} / {number(totals.watchCount)}</strong><small>需要同目标其他分组对照</small></article>
-      </div><div className="path-metric-note"><strong>关联口径：</strong><span>{text(report.associationPolicy)}</span></div><div className="path-metric-note"><strong>判定口径：</strong><span>{text(report.classificationPolicy)}</span></div></> : <div className="overall-empty-state">配置筛选条件后点击查询；建议先选单日、具体项目，再按 Session 数或成功率缩小范围。</div>}
     </section>
 
     <section className="surface overall-result-card">
       <div className="overall-result-tools"><div><strong>IP质量列表</strong><span>{!queried ? "等待查询" : querying ? "查询中" : `${rows.length} 行`}</span></div><div>{activeFilters.ipGranularity === "exact" && <Button htmlType="button" onClick={() => setShowRawIp((value) => !value)}>{showRawIp ? "隐藏完整IP" : "显示完整IP"}</Button>}<Button htmlType="button" onClick={() => { setShowRawIp(false); onQuery(draftFilters); }} disabled={querying || !projectCode}>刷新</Button></div></div>
+      {!queried && <div className="overall-empty-state">配置筛选条件后点击查询；建议先选单日、具体项目，再按 Session 数或成功率缩小范围。</div>}
+      {queried && report.available !== false && <><div className="summary-grid exit-ip-summary-grid">
+        <article><span>出口IP / IP段</span><strong>{number(totals.distinctIps)}</strong><small>{number(totals.ipRows)} 个分组×目标组合</small></article>
+        <article><span>Session关联</span><strong>{number(totals.sessionAssociationCount)}</strong><small>稳定 {number(totals.stableSessionAssociationCount)} · 换IP排除 {number(totals.ambiguousSessionAssociationCount)}</small></article>
+        <article><span>明确TCP样本</span><strong>{number(totals.tcpAttemptCount)}</strong><small>unknown / not_executed 不进入分母</small></article>
+        <article><span>疑似受限 / 观察</span><strong>{number(totals.suspectCount)} / {number(totals.watchCount)}</strong><small>需要同目标其他分组对照</small></article>
+      </div><div className="path-metric-note"><strong>关联口径：</strong><span>{text(report.associationPolicy)}</span></div><div className="path-metric-note"><strong>判定口径：</strong><span>{text(report.classificationPolicy)}</span></div></>}
       {queryError && <div className="diagnosis-no-reasons compact warn"><strong>查询失败</strong><p>{queryError}</p></div>}
       {queried && !querying && report.available === false && <div className="diagnosis-no-reasons compact warn"><strong>当前过滤条件没有结果</strong><p>{text(report.reason)}</p></div>}
       <div className="table-wrap"><table className="version-compare-table exit-ip-overall-table"><thead><tr><th>状态</th><th>出口IP / IP段</th><th>厂家 / 节点</th><th>探测目标</th>{EXIT_IP_COLUMNS.filter((column) => shows(column.key)).map((column) => <th key={column.key} className="sortable" onClick={() => setSort(column.key)}>{column.label}{sortKey === column.key && <span className="sort-indicator">{sortDirection === "asc" ? "▲" : "▼"}</span>}</th>)}<th>最近TCP成功</th><th>操作</th></tr></thead><tbody>
