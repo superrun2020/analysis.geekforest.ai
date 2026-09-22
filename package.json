@@ -9,7 +9,7 @@
     "dev": "vite --host 127.0.0.1 --port 3020",
     "build": "vite build",
     "start": "node scripts/vite-preview.mjs",
-    "test": "npm run build && node --test tests/rendered-html.test.mjs",
+    "test": "npm run build && node --test tests/rendered-html.test.mjs tests/login-diagnostics.test.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate"
   },

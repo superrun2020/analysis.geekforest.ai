@@ -14,32 +14,21 @@ test("Analysis exposes only native daily anomalies and retains authenticated API
 
 test("daily anomalies visibly explain package reasons, denominators, and coverage", async () => {
   const source = await readFile(new URL("../app/daily-anomalies.jsx", import.meta.url), "utf8");
-  assert.match(source, /筛选依据 \/ 样本/);
-  assert.match(source, /失败原因/);
-  assert.match(source, /另.*类.*展开全部/);
-  assert.match(source, /错误日志分布（事件口径）/);
-  assert.match(source, /failureReasonDistribution/);
-  assert.match(source, /raw event total/);
-  assert.match(source, /all-source incl retries/);
-  assert.match(source, /request\/final scope/);
-  assert.match(source, /checkedAt/);
-  assert.match(source, /来源不可用|无观测/);
-  assert.match(source, /当前分子 \/ 分母/);
-  assert.match(source, /identityCoverage/);
-  assert.match(source, /sessionCoverage/);
-  assert.match(source, /广告浏览者比例/);
-  assert.match(source, /TCP明确握手低于.*或下降/);
-  assert.match(source, /广告加载终态低于.*或下降/);
-  assert.match(source, /VPN连接成功率（终态）=结果日成功终态/);
+  // Overall replaces the old nested top-three/error modal with server-paginated
+  // grouping. Actual counts, escaping, packages and complete CSV are exercised
+  // by daily-overall-browser.py against the real SQLite-backed HTTP handler.
+  for(const text of ['matrix-overall-config','overall-result-card','触发依据 / 样本','错误 category','错误 code','错误 message（已脱敏）','raw总量','含重试','request去重口径','checkedAt','errorCheckedAt','分子','分母','覆盖 / 来源新鲜度','受影响项目 / 包','来源缺失显示不可用'])assert.ok(source.includes(text),text);
+  assert.match(source,/r\.semantics/);assert.match(source,/baselineNumerator/);assert.match(source,/baselineDenominator/);
+  assert.match(source,/api\/anomalies\/details/);assert.match(source,/api\/anomalies\/export/);
 });
 
 test("daily anomalies fence stale requests and distinguish revocation from transient availability", async () => {
   const source = await readFile(new URL("../app/daily-anomalies.jsx", import.meta.url), "utf8");
-  assert.match(source,/generationRef/);
+  assert.match(source,/generation\.current/);
   assert.match(source,/abortAll/);
   assert.match(source,/\[401,403\]\.includes/);
   assert.match(source,/onAuthRevoked/);
-  assert.match(source,/未获取数据 \/ 采集状态暂不可读取/);
+  assert.match(source,/采集状态暂不可读取/);assert.match(source,/保留上次成功条件/);assert.match(source,/setSnapshot\(null\)/);
   assert.match(source,/checkedAt/);
   const workspace = await readFile(new URL("../app/operations-workspace.tsx", import.meta.url), "utf8");
   assert.match(workspace,/method:\s*["']DELETE["']/);
