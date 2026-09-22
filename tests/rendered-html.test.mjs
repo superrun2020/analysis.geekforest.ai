@@ -54,6 +54,22 @@ test("deep-dive stage counts ignore ratio metric cards", async () => {
   assert.doesNotMatch(source, /\[\"value\", \"count\", \"users\", \"displayValue\"/);
 });
 
+test("ad Overall recomputes non-additive UV at the requested grain and period", async () => {
+  const service = await file("backend/app/Services/FunnelAnalyticsService.php");
+  const start = service.indexOf("private function adOverallFromDwd");
+  const end = service.indexOf("private function adOverallDimensionRow", start);
+  assert.ok(start >= 0 && end > start, "ad Overall must use a dedicated DWD distinct-user query");
+  const implementation = service.slice(start, end);
+  assert.match(implementation, /COUNT\(DISTINCT CASE WHEN event_name = 'app_foreground'/);
+  assert.match(implementation, /COUNT\(DISTINCT CASE WHEN event_name = 'ad_impression'/);
+  assert.match(implementation, /\$totalsQuery = clone \$filteredQuery/);
+  assert.match(implementation, /'group' => \["COALESCE\(NULLIF\(TRIM\(country_code\), ''\), ''\)"\]/);
+  assert.match(implementation, /'group' => \["COALESCE\(NULLIF\(TRIM\(app_version\), ''\), ''\)", "COALESCE\(NULLIF\(TRIM\(app_build\), ''\), ''\)"\]/);
+  assert.match(implementation, /->groupByRaw\(implode\(', ', \$groupColumns\)\)/);
+  assert.doesNotMatch(implementation, /requiredColumns/, "selecting a dimension must not filter out blank/unknown events");
+  assert.doesNotMatch(implementation, /SUM\(subject_count\)/, "daily UV counts must not be added across dates or dimensions");
+});
+
 
 test("tracked pages no longer render native button elements", async () => {
   const files = [
