@@ -2352,8 +2352,30 @@ class FunnelAnalyticsService
             }
 
             $eventTable = $this->eventTable();
+            // Firebase BigQuery keeps the client-side `jk_` prefix while the
+            // standardized ADB loader normally removes it. During schema or
+            // sync rollouts both forms can coexist, so version comparison must
+            // recognize either representation instead of silently returning 0.
+            $standardEventNames = [
+                'app_foreground',
+                'attribution_result',
+                'screen_view',
+                'element_click',
+                'business_task_completed',
+                'core_action',
+                'launcher_onboarding_view',
+                'launcher_onboarding_action',
+                'launcher_default_prompt_show',
+                'launcher_default_prompt_action',
+                'launcher_default_setting_result',
+                'launcher_home_view',
+            ];
+            $acceptedEventNames = collect($standardEventNames)
+                ->flatMap(static fn (string $eventName): array => [$eventName, 'jk_' . $eventName])
+                ->all();
+            $eventIs = static fn (string $eventName): string => "LOWER(event_name) IN ('{$eventName}', 'jk_{$eventName}')";
             $newUsers = $this->baseQuery($queryParams)
-                ->where('event_name', 'app_first_open')
+                ->whereIn('event_name', ['app_first_open', 'jk_app_first_open'])
                 ->whereNotNull('my_user_id')->where('my_user_id', '!=', '')
                 ->selectRaw('project_code AS new_project_code')
                 ->selectRaw('app_identifier AS new_app_identifier')
@@ -2366,20 +2388,7 @@ class FunnelAnalyticsService
                         ->on('version_new_users.new_app_identifier', '=', $eventTable . '.app_identifier')
                         ->on('version_new_users.new_user_id', '=', $eventTable . '.my_user_id');
                 })
-                ->whereIn('event_name', [
-                    'app_foreground',
-                    'attribution_result',
-                    'screen_view',
-                    'element_click',
-                    'business_task_completed',
-                    'core_action',
-                    'launcher_onboarding_view',
-                    'launcher_onboarding_action',
-                    'launcher_default_prompt_show',
-                    'launcher_default_prompt_action',
-                    'launcher_default_setting_result',
-                    'launcher_home_view',
-                ]);
+                ->whereIn('event_name', $acceptedEventNames);
 
             $groupColumns = [];
             foreach ($dimensions as $item) {
@@ -2406,19 +2415,31 @@ class FunnelAnalyticsService
             $screenName = "LOWER(COALESCE(NULLIF(screen_name, ''), NULLIF(JSON_UNQUOTE(JSON_EXTRACT(event_params_json, '$.screen_name')), ''), ''))";
             $languageSteps = "('language', 'language_page', 'language_select', 'language_selection', 'select_language')";
             $languageScreens = "('language', 'language_page', 'language_select', 'language_selection', 'select_language')";
-            $languageExposure = "((event_name = 'launcher_onboarding_view' AND {$onboardingStep} IN {$languageSteps}) OR (event_name = 'screen_view' AND {$screenName} IN {$languageScreens}))";
-            $languageConfirm = "((event_name = 'launcher_onboarding_action' AND {$onboardingStep} IN {$languageSteps} AND {$onboardingAction} IN ('next', 'complete', 'confirm', 'allow')) OR (event_name = 'element_click' AND {$elementName} IN ('language_confirm', 'confirm_language', 'language_continue', 'continue_button')))";
-            $coreTask = "((event_name = 'business_task_completed' AND {$eventResult} IN ('completed', 'success') AND ({$taskType} LIKE '%scan%' OR {$taskType} LIKE '%qr%generate%' OR {$taskType} LIKE '%generate%code%')) OR (event_name = 'core_action' AND {$eventResult} IN ('completed', 'success') AND ({$actionName} LIKE '%scan%' OR {$actionName} LIKE '%qr%generate%' OR {$actionName} LIKE '%generate%code%')))";
+            $attributionEvent = $eventIs('attribution_result');
+            $foregroundEvent = $eventIs('app_foreground');
+            $onboardingViewEvent = $eventIs('launcher_onboarding_view');
+            $onboardingActionEvent = $eventIs('launcher_onboarding_action');
+            $screenViewEvent = $eventIs('screen_view');
+            $elementClickEvent = $eventIs('element_click');
+            $promptShowEvent = $eventIs('launcher_default_prompt_show');
+            $promptActionEvent = $eventIs('launcher_default_prompt_action');
+            $settingResultEvent = $eventIs('launcher_default_setting_result');
+            $launcherHomeEvent = $eventIs('launcher_home_view');
+            $businessTaskEvent = $eventIs('business_task_completed');
+            $coreActionEvent = $eventIs('core_action');
+            $languageExposure = "(({$onboardingViewEvent} AND {$onboardingStep} IN {$languageSteps}) OR ({$screenViewEvent} AND {$screenName} IN {$languageScreens}))";
+            $languageConfirm = "(({$onboardingActionEvent} AND {$onboardingStep} IN {$languageSteps} AND {$onboardingAction} IN ('next', 'complete', 'confirm', 'allow')) OR ({$elementClickEvent} AND {$elementName} IN ('language_confirm', 'confirm_language', 'language_continue', 'continue_button')))";
+            $coreTask = "(({$businessTaskEvent} AND {$eventResult} IN ('completed', 'success') AND ({$taskType} LIKE '%scan%' OR {$taskType} LIKE '%qr%generate%' OR {$taskType} LIKE '%generate%code%')) OR ({$coreActionEvent} AND {$eventResult} IN ('completed', 'success') AND ({$actionName} LIKE '%scan%' OR {$actionName} LIKE '%qr%generate%' OR {$actionName} LIKE '%generate%code%')))";
 
             $rows = $query
-                ->selectRaw("COUNT(DISTINCT CASE WHEN event_name = 'attribution_result' AND {$attributionStatus} = 'attributed' AND version_new_users.new_user_id IS NOT NULL THEN NULLIF(my_user_id, '') END) AS paid_attributed_new_users")
-                ->selectRaw("COUNT(DISTINCT CASE WHEN event_name = 'app_foreground' THEN NULLIF(my_user_id, '') END) AS dau_users")
+                ->selectRaw("COUNT(DISTINCT CASE WHEN {$attributionEvent} AND {$attributionStatus} = 'attributed' AND version_new_users.new_user_id IS NOT NULL THEN NULLIF(my_user_id, '') END) AS paid_attributed_new_users")
+                ->selectRaw("COUNT(DISTINCT CASE WHEN {$foregroundEvent} THEN NULLIF(my_user_id, '') END) AS dau_users")
                 ->selectRaw("COUNT(DISTINCT CASE WHEN {$languageExposure} THEN NULLIF(my_user_id, '') END) AS language_page_exposure_users")
                 ->selectRaw("COUNT(DISTINCT CASE WHEN {$languageConfirm} THEN NULLIF(my_user_id, '') END) AS language_confirm_users")
-                ->selectRaw("COUNT(DISTINCT CASE WHEN event_name = 'launcher_default_prompt_show' THEN NULLIF(my_user_id, '') END) AS launcher_guide_exposure_users")
-                ->selectRaw("COUNT(DISTINCT CASE WHEN event_name = 'launcher_default_prompt_action' AND {$promptAction} = 'set_now' THEN NULLIF(my_user_id, '') END) AS launcher_setup_click_users")
-                ->selectRaw("COUNT(DISTINCT CASE WHEN event_name = 'launcher_default_setting_result' AND ({$settingResult} = 'granted' OR {$defaultStatusAfter} = 'default') THEN NULLIF(my_user_id, '') END) AS launcher_setup_success_users")
-                ->selectRaw("COUNT(DISTINCT CASE WHEN event_name = 'launcher_home_view' THEN NULLIF(my_user_id, '') END) AS launcher_home_users")
+                ->selectRaw("COUNT(DISTINCT CASE WHEN {$promptShowEvent} THEN NULLIF(my_user_id, '') END) AS launcher_guide_exposure_users")
+                ->selectRaw("COUNT(DISTINCT CASE WHEN {$promptActionEvent} AND {$promptAction} = 'set_now' THEN NULLIF(my_user_id, '') END) AS launcher_setup_click_users")
+                ->selectRaw("COUNT(DISTINCT CASE WHEN {$settingResultEvent} AND ({$settingResult} = 'granted' OR {$defaultStatusAfter} = 'default') THEN NULLIF(my_user_id, '') END) AS launcher_setup_success_users")
+                ->selectRaw("COUNT(DISTINCT CASE WHEN {$launcherHomeEvent} THEN NULLIF(my_user_id, '') END) AS launcher_home_users")
                 ->selectRaw("COUNT(DISTINCT CASE WHEN {$coreTask} THEN NULLIF(my_user_id, '') END) AS core_feature_complete_users")
                 ->groupBy($groupColumns)
                 ->get()
