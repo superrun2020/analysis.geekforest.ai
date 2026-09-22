@@ -5104,9 +5104,9 @@ class FunnelAnalyticsService
 
 
     /**
-     * Overall ads funnel report for the diagnosis-report style UI. It aggregates
-     * the same DWS stage table by user-selected dimensions, so removing a
-     * dimension rolls the report up without scanning raw events.
+     * Overall ads funnel report for the diagnosis-report style UI. User metrics
+     * are non-additive across dates and dimensions, so this report recomputes
+     * distinct users from DWD at the exact requested grain.
      *
      * @param array<string, mixed> $params
      * @return array<string, mixed>
@@ -5115,7 +5115,7 @@ class FunnelAnalyticsService
     {
         return [
             'context' => $this->context($params),
-            'adOverallReport' => $this->adOverallFromDws($params),
+            'adOverallReport' => $this->adOverallFromDwd($params),
         ];
     }
 
@@ -5123,7 +5123,7 @@ class FunnelAnalyticsService
      * @param array<string, mixed> $params
      * @return array<string, mixed>
      */
-    private function adOverallFromDws(array $params): array
+    private function adOverallFromDwd(array $params): array
     {
         $allowedDimensions = ['stat_date', 'project_code', 'country_code', 'platform', 'app_version'];
         $requested = array_values(array_filter(
@@ -5133,66 +5133,89 @@ class FunnelAnalyticsService
         $dimensions = array_values(array_unique(count($requested) ? $requested : ['stat_date', 'project_code', 'app_version']));
 
         try {
+            $dimensionSpecs = [
+                'stat_date' => [
+                    'select' => ['event_date AS stat_date'],
+                    'group' => ['event_date'],
+                    'labels' => ['stat_date'],
+                ],
+                'project_code' => [
+                    'select' => ["COALESCE(NULLIF(TRIM(project_code), ''), '') AS project_code"],
+                    'group' => ["COALESCE(NULLIF(TRIM(project_code), ''), '')"],
+                    'labels' => ['project_code'],
+                ],
+                'country_code' => [
+                    'select' => ["COALESCE(NULLIF(TRIM(country_code), ''), '') AS country_code"],
+                    'group' => ["COALESCE(NULLIF(TRIM(country_code), ''), '')"],
+                    'labels' => ['country_code'],
+                ],
+                'platform' => [
+                    'select' => ["COALESCE(NULLIF(TRIM(platform), ''), '') AS platform"],
+                    'group' => ["COALESCE(NULLIF(TRIM(platform), ''), '')"],
+                    'labels' => ['platform'],
+                ],
+                'app_version' => [
+                    'select' => ["COALESCE(NULLIF(TRIM(app_version), ''), '') AS app_version", "COALESCE(NULLIF(TRIM(app_build), ''), '') AS build_number"],
+                    'group' => ["COALESCE(NULLIF(TRIM(app_version), ''), '')", "COALESCE(NULLIF(TRIM(app_build), ''), '')"],
+                    'labels' => ['app_version', 'build_number'],
+                ],
+            ];
+            $selectColumns = [];
             $groupColumns = [];
+            $labelColumns = [];
             foreach ($dimensions as $dimension) {
-                if ($dimension === 'app_version') {
-                    $groupColumns[] = 'app_version';
-                    $groupColumns[] = 'build_number';
-                    continue;
-                }
-                $groupColumns[] = $dimension;
+                $spec = $dimensionSpecs[$dimension];
+                $selectColumns = array_merge($selectColumns, $spec['select']);
+                $groupColumns = array_merge($groupColumns, $spec['group']);
+                $labelColumns = array_merge($labelColumns, $spec['labels']);
             }
+            $selectColumns = array_values(array_unique($selectColumns));
             $groupColumns = array_values(array_unique($groupColumns));
+            $labelColumns = array_values(array_unique($labelColumns));
 
-            $query = DB::connection('adb')->table('dws_app_funnel_stage_daily')
-                ->whereBetween('stat_date', [$params['dateFrom'], $params['dateTo']])
-                ->where('funnel_code', 'ad_user_coverage')
-                ->where('scope_type', 'users');
-            $this->applySummaryProjectFilters($query, $params);
+            $eventNames = [
+                'app_foreground',
+                'ad_eligibility_check',
+                'ad_opportunity',
+                'ad_request',
+                'ad_show_attempt',
+                'ad_impression',
+                'ad_paid_event',
+            ];
+            $filteredQuery = $this->baseQuery($params)
+                ->whereIn('event_name', $eventNames)
+                ->whereNotNull('my_user_id')
+                ->where('my_user_id', '!=', '');
+            $userSelect = implode(', ', [
+                "COUNT(DISTINCT CASE WHEN event_name = 'app_foreground' THEN NULLIF(my_user_id, '') END) AS dau_users",
+                "COUNT(DISTINCT CASE WHEN event_name = 'ad_eligibility_check' THEN NULLIF(my_user_id, '') END) AS eligibility_users",
+                "COUNT(DISTINCT CASE WHEN event_name = 'ad_eligibility_check' AND eligible = 1 THEN NULLIF(my_user_id, '') END) AS eligible_users",
+                "COUNT(DISTINCT CASE WHEN event_name = 'ad_opportunity' THEN NULLIF(my_user_id, '') END) AS opportunity_users",
+                "COUNT(DISTINCT CASE WHEN event_name = 'ad_request' THEN NULLIF(my_user_id, '') END) AS request_users",
+                "COUNT(DISTINCT CASE WHEN event_name = 'ad_show_attempt' THEN NULLIF(my_user_id, '') END) AS show_attempt_users",
+                "COUNT(DISTINCT CASE WHEN event_name = 'ad_impression' THEN NULLIF(my_user_id, '') END) AS impression_users",
+                "COUNT(DISTINCT CASE WHEN event_name = 'ad_paid_event' THEN NULLIF(my_user_id, '') END) AS paid_users",
+            ]);
 
-            foreach ($dimensions as $dimension) {
-                $requiredColumn = $dimension === 'app_version' ? 'app_version' : $dimension;
-                $query->whereNotNull($requiredColumn);
-                if ($requiredColumn !== 'stat_date') {
-                    $query->where($requiredColumn, '!=', '');
-                }
-            }
-            if (!in_array('platform', $dimensions, true) && !empty($params['platform'])) {
-                $query->where('platform', strtolower((string) $params['platform']));
-            }
-            if (!in_array('country_code', $dimensions, true) && !empty($params['country'])) {
-                $query->where('country_code', (string) $params['country']);
-            }
-            if (!in_array('app_version', $dimensions, true) && !empty($params['appVersion'])) {
-                $query->where('app_version', (string) $params['appVersion']);
-            }
-
-            $columnsSql = implode(', ', array_map(
-                static fn (string $column): string => $column === 'stat_date' ? 'stat_date AS stat_date' : "COALESCE({$column}, '') AS {$column}",
-                $groupColumns
-            ));
-            $stageRows = $query
-                ->selectRaw($columnsSql . ', step_code, SUM(subject_count) AS users')
-                ->groupBy(array_merge($groupColumns, ['step_code']))
+            $rowsQuery = clone $filteredQuery;
+            $aggregateRows = $rowsQuery
+                ->selectRaw(implode(', ', $selectColumns) . ', ' . $userSelect)
+                ->groupByRaw(implode(', ', $groupColumns))
                 ->get();
-
-            $groups = [];
-            foreach ($stageRows as $stage) {
-                $keyParts = array_map(
-                    fn (string $column): string => trim((string) ($stage->{$column} ?? '')),
-                    $groupColumns
-                );
-                $key = implode('|', $keyParts);
-                if (!isset($groups[$key])) {
-                    $groups[$key] = $this->adOverallDimensionRow($dimensions, $stage, $groupColumns);
-                }
-                $groups[$key]['stages'][(string) $stage->step_code] = (int) ($stage->users ?? 0);
-            }
-
-            $rows = collect(array_values($groups))
-                ->map(fn (array $group): array => $this->formatAdOverallMetrics($group))
+            $rows = $aggregateRows
+                ->map(function (object $aggregate) use ($dimensions, $labelColumns): array {
+                    $group = $this->adOverallDimensionRow($dimensions, $aggregate, $labelColumns);
+                    $group['stages'] = $this->adOverallStagesFromDistinctRow($aggregate);
+                    return $this->formatAdOverallMetrics($group);
+                })
                 ->sortByDesc('dauUsers')
                 ->values();
+
+            $totalsQuery = clone $filteredQuery;
+            $totalsRow = $totalsQuery->selectRaw($userSelect)->first();
+            $totals = $this->formatAdOverallMetrics([
+                'stages' => $this->adOverallStagesFromDistinctRow($totalsRow ?: (object) []),
+            ]);
 
             $labels = [
                 'stat_date' => '日期',
@@ -5207,19 +5230,9 @@ class FunnelAnalyticsService
                 'dimensions' => $dimensions,
                 'dimensionLabel' => implode(' × ', array_map(static fn (string $dimension): string => $labels[$dimension] ?? $dimension, $dimensions)),
                 'rows' => $rows->all(),
-                'totals' => $this->formatAdOverallMetrics(['stages' => $rows->reduce(function (array $carry, array $row): array {
-                    $carry['dau'] = ($carry['dau'] ?? 0) + (int) ($row['dauUsers'] ?? 0);
-                    $carry['eligibility'] = ($carry['eligibility'] ?? 0) + (int) ($row['eligibilityCheckUsers'] ?? 0);
-                    $carry['eligible'] = ($carry['eligible'] ?? 0) + (int) ($row['eligibleUsers'] ?? 0);
-                    $carry['opportunity'] = ($carry['opportunity'] ?? 0) + (int) ($row['opportunityUsers'] ?? 0);
-                    $carry['request'] = ($carry['request'] ?? 0) + (int) ($row['requestUsers'] ?? 0);
-                    $carry['show_attempt'] = ($carry['show_attempt'] ?? 0) + (int) ($row['showAttemptUsers'] ?? 0);
-                    $carry['impression'] = ($carry['impression'] ?? 0) + (int) ($row['impressionUsers'] ?? 0);
-                    $carry['paid'] = ($carry['paid'] ?? 0) + (int) ($row['paidUsers'] ?? 0);
-                    return $carry;
-                }, [])]),
-                'source' => 'dws_app_funnel_stage_daily',
-                'notice' => '广告漏斗 Overall 使用 DWS 用户漏斗日汇总表；维度可选并向上聚合，比例按当前维度组合的分子分母重算。',
+                'totals' => $totals,
+                'source' => $this->eventTable(),
+                'notice' => '广告漏斗 Overall 从事件明细按当前维度重新去重；摘要按整个日期范围再次去重，不累加每日或版本 UV。',
             ];
         } catch (Throwable $exception) {
             Log::warning('jkcl_ad_overall_failed', ['message' => $exception->getMessage()]);
@@ -5228,10 +5241,25 @@ class FunnelAnalyticsService
                 'dimensions' => $dimensions,
                 'rows' => [],
                 'totals' => [],
-                'source' => 'dws_app_funnel_stage_daily',
+                'source' => $this->eventTable(),
                 'reason' => '广告漏斗 Overall 读取失败：' . $exception->getMessage(),
             ];
         }
+    }
+
+    /** @return array<string, int> */
+    private function adOverallStagesFromDistinctRow(object $row): array
+    {
+        return [
+            'dau' => (int) ($row->dau_users ?? 0),
+            'eligibility' => (int) ($row->eligibility_users ?? 0),
+            'eligible' => (int) ($row->eligible_users ?? 0),
+            'opportunity' => (int) ($row->opportunity_users ?? 0),
+            'request' => (int) ($row->request_users ?? 0),
+            'show_attempt' => (int) ($row->show_attempt_users ?? 0),
+            'impression' => (int) ($row->impression_users ?? 0),
+            'paid' => (int) ($row->paid_users ?? 0),
+        ];
     }
 
     /**
