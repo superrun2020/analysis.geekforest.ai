@@ -24,6 +24,14 @@ export type FunnelQuery = {
   keyword?: string;
   ipKey?: string;
   ipTarget?: string;
+  ipGranularity?: "exact" | "small" | "large";
+  ipQualityStatus?: "suspect" | "watch" | "healthy" | "insufficient";
+  minSessionCount?: number;
+  minFailedSessionCount?: number;
+  minTcpAttemptCount?: number;
+  maxTcpSuccessRate?: number;
+  maxAdLoadSuccessRate?: number;
+  forceRefresh?: boolean;
   pageIndex?: number;
   pageSize?: number;
   issueId?: string;

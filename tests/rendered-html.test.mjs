@@ -209,3 +209,48 @@ test("exit IP quality links IP aggregates to bounded session evidence", async ()
   assert.doesNotMatch(source, /title=\{text\(session\.sessionId\)\}/);
   assert.doesNotMatch(source, /title=\{\(session\.connectionIds/);
 });
+
+test("exit IP quality uses Overall-style configuration and explicit server filters", async () => {
+  const [source, request, service] = await Promise.all([
+    file("app/operational-funnel.tsx"),
+    file("backend/app/Http/Requests/Admin/FunnelAnalyticsQueryRequest.php"),
+    file("backend/app/Services/FunnelAnalyticsService.php"),
+  ]);
+  assert.match(source, /EXIT_IP_COLUMNS/);
+  assert.match(source, /统计字段/);
+  assert.match(source, /日期范围/);
+  assert.match(source, /项目代号/);
+  assert.match(source, /Session数量 &gt;/);
+  assert.match(source, /最小失败Session/);
+  assert.match(source, /TCP成功率上限/);
+  assert.match(source, /广告加载成功率上限/);
+  assert.match(source, /IP状态/);
+  assert.match(source, /小段（172\.22\.22\.XX）/);
+  assert.match(source, /大段（172\.22\.XX\.XX）/);
+  assert.match(source, /ipGranularity/);
+  assert.match(source, /exitIpHasQueried/);
+  assert.match(source, /配置筛选条件后点击查询/);
+  assert.match(source, /出口国家/);
+  assert.match(source, /探测目标/);
+  assert.match(source, /未上报目标/);
+  assert.match(request, /minSessionCount/);
+  assert.match(request, /minFailedSessionCount/);
+  assert.match(request, /maxTcpSuccessRate/);
+  assert.match(request, /maxAdLoadSuccessRate/);
+  assert.match(request, /ipQualityStatus/);
+  assert.match(request, /ipGranularity/);
+  assert.match(request, /forceRefresh/);
+  assert.match(service, /filterExitIpQualityRows/);
+  assert.match(service, /exitIpGroupSql/);
+  assert.match(service, /proxy_provider_variant_count/);
+  assert.match(service, /forceRefresh/);
+  assert.doesNotMatch(service, /array_slice\(\$allRows, 0, \$pageSize\)/);
+  assert.match(service, /normalizedExitIpTargetSql/);
+  assert.match(service, /redacted_target/);
+  assert.match(service, /google_ads_host/);
+  assert.match(service, /other_host/);
+  assert.match(service, /session_small_ip_count/);
+  assert.match(service, /session_large_ip_count/);
+  assert.match(service, /session_group_count/);
+  assert.match(service, /COALESCE\(NULLIF\(LOWER\(TRIM\(ip_ctx\.proxy_provider\)\), ''\), 'unknown'\)/);
+});

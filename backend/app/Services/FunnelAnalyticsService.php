@@ -671,7 +671,8 @@ class FunnelAnalyticsService
         $page = (string) ($params['page'] ?? 'overview');
         // The VPN workbench already caches its DWS summary internally; avoid
         // double-caching it under a second key.
-        $skipCache = $page === 'workbench' && ($params['domain'] ?? 'ads') === 'vpn';
+        $skipCache = ($page === 'workbench' && ($params['domain'] ?? 'ads') === 'vpn')
+            || ($page === 'exit_ip_quality' && !empty($params['forceRefresh']));
         if (in_array($page, $this->cacheableQueryPages(), true) && !$skipCache) {
             return $this->cacheAnalysisResult($page, $params, function () use ($page, $params): array {
                 return $this->dispatchQuery($page, $params);
@@ -5852,9 +5853,14 @@ class FunnelAnalyticsService
         }
 
         try {
+            $granularity = (string) ($params['ipGranularity'] ?? 'exact');
+            $granularityLabel = match ($granularity) {
+                'small' => '小段 /24',
+                'large' => '大段 /16',
+                default => '单IP',
+            };
             $allRows = $this->exitIpQualityRows($params);
-            $pageSize = min(100, max(1, (int) ($params['pageSize'] ?? 100)));
-            $rows = array_slice($allRows, 0, $pageSize);
+            $rows = $allRows;
             $sessions = !empty($params['ipKey']) ? $this->exitIpQualitySessions($params) : [];
 
             return [
@@ -5863,11 +5869,11 @@ class FunnelAnalyticsService
                     'available' => count($allRows) > 0,
                     'reason' => count($allRows) > 0 ? null : '当前筛选范围没有可关联到公网出口IP的session。',
                     'source' => $this->eventTable(),
-                    'associationPolicy' => '每个vpn_session_id（缺失时回退session_id）使用该session内最后一次观测到的合法公网IPv4；一个session出现多个公网IPv4时标记ipChanged，不把内部/私网/CGNAT/fake-IP当公网出口。',
-                    'classificationPolicy' => '状态仅表示健康、观察或疑似受限；超时、403、429都不能单独证明IP被拉黑。疑似受限要求独立session、明确TCP样本、失败session占比及同目标其他IP对照同时满足。',
+                    'associationPolicy' => "每个vpn_session_id（缺失时回退session_id）使用最后一次合法公网IPv4归入{$granularityLabel}；仅跨越当前粒度分组的session标记ipChanged并排除指标，同一网段内换IP仍保留。不把内部/私网/CGNAT/fake-IP当公网出口。",
+                    'classificationPolicy' => '状态仅表示健康、观察或疑似受限；超时、403、429都不能单独证明IP被拉黑。疑似受限要求独立session、明确TCP样本、失败session占比及同探测目标分类的其他IP对照同时满足；目标文本先归入有限安全分类，不返回原始客户端控制文本。',
                     'rows' => $rows,
                     'sessions' => $sessions,
-                    'totals' => $this->exitIpQualityTotals($allRows, $pageSize, count($rows)),
+                    'totals' => $this->exitIpQualityTotals($allRows, count($allRows), count($rows)),
                     'selectedIpKey' => $params['ipKey'] ?? null,
                     'selectedIpTarget' => $params['ipTarget'] ?? null,
                     'sessionPage' => (int) ($params['pageIndex'] ?? 1),
@@ -5917,6 +5923,8 @@ class FunnelAnalyticsService
             ->selectRaw($latestJson('exit_ip_country') . ' AS exit_ip_country')
             ->selectRaw("SUBSTRING_INDEX(GROUP_CONCAT(event_name ORDER BY event_time_utc DESC SEPARATOR '||'), '||', 1) AS ip_source_event")
             ->selectRaw('COUNT(DISTINCT TRIM(ip_after_connect)) AS session_ip_count')
+            ->selectRaw("COUNT(DISTINCT CONCAT(SUBSTRING_INDEX(TRIM(ip_after_connect), '.', 3), '.XX')) AS session_small_ip_count")
+            ->selectRaw("COUNT(DISTINCT CONCAT(SUBSTRING_INDEX(TRIM(ip_after_connect), '.', 2), '.XX.XX')) AS session_large_ip_count")
             ->selectRaw('MIN(event_time_utc) AS first_ip_observed_at')
             ->selectRaw('MAX(event_time_utc) AS last_ip_observed_at')
             ->groupBy('project_code', 'app_identifier')
@@ -5958,7 +5966,7 @@ class FunnelAnalyticsService
             . "WHEN LOWER(COALESCE({$alias}.result_status, '')) = 'success' THEN 'success' ELSE 'unknown' END";
     }
 
-    private function exitIpTargetSql(string $alias): string
+    private function rawExitIpTargetSql(string $alias): string
     {
         return "COALESCE(NULLIF({$alias}.target_id, ''), "
             . "NULLIF(JSON_UNQUOTE(JSON_EXTRACT({$alias}.event_params_json, '$.tcp_target_host')), ''), "
@@ -5966,11 +5974,53 @@ class FunnelAnalyticsService
             . "NULLIF(JSON_UNQUOTE(JSON_EXTRACT({$alias}.event_params_json, '$.target_id')), ''), 'default')";
     }
 
+    private function normalizedExitIpTargetSql(string $alias): string
+    {
+        $raw = $this->rawExitIpTargetSql($alias);
+        $target = "LOWER(TRIM({$raw}))";
+        $sensitive = "(token|auth|password|passwd|cookie|session|secret|credential|api[_-]?key|(^|[^a-z0-9])sid([^a-z0-9]|$))";
+
+        return "CASE "
+            . "WHEN {$target} = '' OR {$target} = 'default' THEN 'default' "
+            . "WHEN CHAR_LENGTH({$target}) > 128 THEN 'other_target' "
+            . "WHEN {$target} REGEXP '{$sensitive}' THEN 'redacted_target' "
+            . "WHEN {$target} REGEXP '^([0-9]{1,3}[.]){3}[0-9]{1,3}(:[0-9]{1,5})?$' THEN 'ip_target' "
+            . "WHEN {$target} LIKE '%:%:%' THEN 'ip_target' "
+            . "WHEN {$target} LIKE 'ad\\_%' THEN 'ad_target' "
+            . "WHEN {$target} LIKE 'api\\_%' THEN 'api_target' "
+            . "WHEN {$target} LIKE 'vpn\\_%' THEN 'vpn_target' "
+            . "WHEN {$target} LIKE 'probe\\_%' THEN 'probe_target' "
+            . "WHEN {$target} LIKE '%.doubleclick.net' OR {$target} LIKE '%.googlesyndication.com' OR {$target} LIKE '%.googleadservices.com' THEN 'google_ads_host' "
+            . "WHEN {$target} = 'google.com' OR {$target} LIKE '%.google.com' OR {$target} LIKE '%.googleapis.com' OR {$target} LIKE '%.gstatic.com' THEN 'google_host' "
+            . "WHEN {$target} = 'apple.com' OR {$target} LIKE '%.apple.com' OR {$target} LIKE '%.icloud.com' THEN 'apple_host' "
+            . "WHEN {$target} = 'amazon.com' OR {$target} LIKE '%.amazon.com' OR {$target} LIKE '%.amazonaws.com' THEN 'amazon_host' "
+            . "WHEN {$target} REGEXP '^[a-z0-9][a-z0-9.-]{0,126}[a-z0-9](:[0-9]{1,5})?$' THEN 'other_host' "
+            . "ELSE 'other_target' END";
+    }
+
+    private function exitIpGroupSql(string $column, string $granularity): string
+    {
+        $ip = "TRIM({$column})";
+
+        return match ($granularity) {
+            'small' => "CONCAT(SUBSTRING_INDEX({$ip}, '.', 3), '.XX')",
+            'large' => "CONCAT(SUBSTRING_INDEX({$ip}, '.', 2), '.XX.XX')",
+            default => $ip,
+        };
+    }
+
     private function exitIpQualityRows(array $params): array
     {
+        $granularity = (string) ($params['ipGranularity'] ?? 'exact');
+        $ipGroup = $this->exitIpGroupSql('ip_ctx.exit_ip', $granularity);
         $tcpResult = $this->exitIpTcpResultSql('e');
-        $target = $this->exitIpTargetSql('e');
-        $stable = 'ip_ctx.session_ip_count = 1';
+        $target = $this->normalizedExitIpTargetSql('e');
+        $sessionGroupCount = match ($granularity) {
+            'small' => 'ip_ctx.session_small_ip_count',
+            'large' => 'ip_ctx.session_large_ip_count',
+            default => 'ip_ctx.session_ip_count',
+        };
+        $stable = "{$sessionGroupCount} = 1";
         $eventIdentity = "COALESCE(NULLIF(e.request_id, ''), NULLIF(e.event_id, ''))";
         $errorText = "LOWER(CONCAT_WS(' ', COALESCE(e.error_code, ''), COALESCE(e.error_category, ''), COALESCE(e.error_message, ''), COALESCE(JSON_UNQUOTE(JSON_EXTRACT(e.event_params_json, '$.tcp_error_code')), '')))";
 
@@ -5981,14 +6031,19 @@ class FunnelAnalyticsService
                     ->on('e.app_identifier', '=', 'ip_ctx.ctx_app_identifier')
                     ->on('e.session_key', '=', 'ip_ctx.session_key');
             })
-            ->select(['ip_ctx.exit_ip'])
-            ->selectRaw("MAX(NULLIF(ip_ctx.server_id, 'unknown')) AS server_id")
-            ->selectRaw("MAX(NULLIF(ip_ctx.proxy_provider, 'unknown')) AS proxy_provider")
-            ->selectRaw("MAX(NULLIF(ip_ctx.proxy_id, 'unknown')) AS proxy_id")
-            ->selectRaw("MAX(NULLIF(ip_ctx.exit_ip_asn, 'unknown')) AS exit_ip_asn")
-            ->selectRaw("MAX(NULLIF(ip_ctx.exit_ip_country, 'unknown')) AS exit_ip_country")
+            ->selectRaw("{$ipGroup} AS exit_ip_group")
+            ->selectRaw("MAX(CASE WHEN LOWER(TRIM(ip_ctx.server_id)) IN ('', 'unknown') THEN NULL ELSE TRIM(ip_ctx.server_id) END) AS server_id")
+            ->selectRaw("MAX(CASE WHEN LOWER(TRIM(ip_ctx.proxy_provider)) IN ('', 'unknown') THEN NULL ELSE TRIM(ip_ctx.proxy_provider) END) AS proxy_provider")
+            ->selectRaw("MAX(CASE WHEN LOWER(TRIM(ip_ctx.proxy_id)) IN ('', 'unknown') THEN NULL ELSE TRIM(ip_ctx.proxy_id) END) AS proxy_id")
+            ->selectRaw("MAX(CASE WHEN LOWER(TRIM(ip_ctx.exit_ip_asn)) IN ('', 'unknown') THEN NULL ELSE TRIM(ip_ctx.exit_ip_asn) END) AS exit_ip_asn")
+            ->selectRaw("MAX(CASE WHEN LOWER(TRIM(ip_ctx.exit_ip_country)) IN ('', 'unknown') THEN NULL ELSE TRIM(ip_ctx.exit_ip_country) END) AS exit_ip_country")
             ->selectRaw("MAX(ip_ctx.ip_source_event) AS ip_source_event")
-            ->selectRaw('COUNT(DISTINCT ip_ctx.server_id) AS route_variant_count')
+            ->selectRaw("COUNT(DISTINCT COALESCE(NULLIF(LOWER(TRIM(ip_ctx.server_id)), ''), 'unknown')) AS route_variant_count")
+            ->selectRaw("COUNT(DISTINCT COALESCE(NULLIF(LOWER(TRIM(ip_ctx.proxy_provider)), ''), 'unknown')) AS proxy_provider_variant_count")
+            ->selectRaw("COUNT(DISTINCT COALESCE(NULLIF(LOWER(TRIM(ip_ctx.proxy_id)), ''), 'unknown')) AS proxy_id_variant_count")
+            ->selectRaw("COUNT(DISTINCT COALESCE(NULLIF(LOWER(TRIM(ip_ctx.exit_ip_asn)), ''), 'unknown')) AS exit_ip_asn_variant_count")
+            ->selectRaw("COUNT(DISTINCT COALESCE(NULLIF(LOWER(TRIM(ip_ctx.exit_ip_country)), ''), 'unknown')) AS exit_ip_country_variant_count")
+            ->selectRaw('COUNT(DISTINCT ip_ctx.ip_source_event) AS ip_source_variant_count')
             ->selectRaw("{$target} AS target_id")
             ->selectRaw('COUNT(DISTINCT ip_ctx.session_key) AS session_count')
             ->selectRaw("COUNT(DISTINCT CASE WHEN {$stable} THEN ip_ctx.session_key END) AS stable_session_count")
@@ -6006,16 +6061,18 @@ class FunnelAnalyticsService
             ->selectRaw('MIN(ip_ctx.first_ip_observed_at) AS first_seen_at')
             ->selectRaw('MAX(ip_ctx.last_ip_observed_at) AS last_seen_at')
             ->selectRaw("MAX(CASE WHEN {$stable} AND {$tcpResult} = 'success' THEN e.event_time_utc END) AS last_tcp_success_at")
-            ->groupBy(['ip_ctx.exit_ip'])
+            ->groupByRaw($ipGroup)
             ->groupByRaw($target)
             ->orderByDesc('tcp_failed_session_count')
             ->orderByDesc('session_count')
             ->get();
 
         $rows = $rawRows
-            ->filter(fn ($row): bool => $this->isPublicExitIp((string) ($row->exit_ip ?? '')))
-            ->map(function ($row): array {
-                $ip = (string) $row->exit_ip;
+            ->map(function ($row) use ($granularity): array {
+                $ipGroupValue = (string) $row->exit_ip_group;
+                $variantLabel = fn ($value, int $count): ?string => $count > 1
+                    ? "混合（{$count}）"
+                    : $this->normalizeExitIpLabel($value);
                 $sessions = (int) ($row->session_count ?? 0);
                 $stableSessions = (int) ($row->stable_session_count ?? 0);
                 $success = (int) ($row->tcp_success_count ?? 0);
@@ -6025,16 +6082,19 @@ class FunnelAnalyticsService
                 $loads = (int) ($row->ad_load_success_count ?? 0) + (int) ($row->ad_load_failed_count ?? 0);
 
                 return [
-                    'ipKey' => hash('sha256', $ip),
-                    'rowKey' => hash('sha256', $ip . '|' . (string) ($row->target_id ?? 'default')),
-                    'ipAddress' => $ip,
-                    'ipMasked' => $this->maskExitIp($ip),
-                    'ipSource' => ($row->ip_source_event ?? '') === 'vpn_ip_probe_result' ? 'vpn_ip_probe' : 'ad_request',
-                    'proxyProvider' => $this->normalizeExitIpLabel($row->proxy_provider ?? null),
-                    'proxyId' => $this->normalizeExitIpLabel($row->proxy_id ?? null),
-                    'serverId' => $this->normalizeExitIpLabel($row->server_id ?? null),
-                    'exitIpAsn' => $this->normalizeExitIpLabel($row->exit_ip_asn ?? null),
-                    'exitIpCountry' => $this->normalizeExitIpLabel($row->exit_ip_country ?? null),
+                    'ipKey' => hash('sha256', $ipGroupValue),
+                    'rowKey' => hash('sha256', $granularity . '|' . $ipGroupValue . '|' . (string) ($row->target_id ?? 'default')),
+                    'ipAddress' => $ipGroupValue,
+                    'ipMasked' => $granularity === 'exact' ? $this->maskExitIp($ipGroupValue) : $ipGroupValue,
+                    'ipGranularity' => $granularity,
+                    'ipSource' => (int) ($row->ip_source_variant_count ?? 0) > 1
+                        ? '混合来源'
+                        : (($row->ip_source_event ?? '') === 'vpn_ip_probe_result' ? 'vpn_ip_probe' : 'ad_request'),
+                    'proxyProvider' => $variantLabel($row->proxy_provider ?? null, (int) ($row->proxy_provider_variant_count ?? 0)),
+                    'proxyId' => $variantLabel($row->proxy_id ?? null, (int) ($row->proxy_id_variant_count ?? 0)),
+                    'serverId' => $variantLabel($row->server_id ?? null, (int) ($row->route_variant_count ?? 0)),
+                    'exitIpAsn' => $variantLabel($row->exit_ip_asn ?? null, (int) ($row->exit_ip_asn_variant_count ?? 0)),
+                    'exitIpCountry' => $variantLabel($row->exit_ip_country ?? null, (int) ($row->exit_ip_country_variant_count ?? 0)),
                     'targetId' => (string) ($row->target_id ?? 'default'),
                     'sessionCount' => $sessions,
                     'stableSessionCount' => $stableSessions,
@@ -6070,7 +6130,7 @@ class FunnelAnalyticsService
             'sessions' => $items->sum('tcpSessionCount'),
         ]);
 
-        return collect($rows)->map(function (array $row) use ($targetTotals): array {
+        $classifiedRows = collect($rows)->map(function (array $row) use ($targetTotals): array {
             $totals = $targetTotals->get($row['targetId'], ['success' => 0, 'attempts' => 0, 'sessions' => 0]);
             $peerSuccess = (int) $totals['success'] - $row['tcpSuccessCount'];
             $peerAttempts = (int) $totals['attempts'] - $row['tcpAttemptCount'];
@@ -6085,12 +6145,41 @@ class FunnelAnalyticsService
             -$row['tcpFailedSessionCount'],
             -$row['sessionCount'],
         ])->values()->all();
+
+        return $this->filterExitIpQualityRows($classifiedRows, $params);
+    }
+
+    private function filterExitIpQualityRows(array $rows, array $params): array
+    {
+        $minimumSessions = max(0, (int) ($params['minSessionCount'] ?? 0));
+        $minimumFailedSessions = max(0, (int) ($params['minFailedSessionCount'] ?? 0));
+        $minimumTcpAttempts = max(0, (int) ($params['minTcpAttemptCount'] ?? 0));
+        $maximumTcpSuccessRate = isset($params['maxTcpSuccessRate']) && $params['maxTcpSuccessRate'] !== '' ? (float) $params['maxTcpSuccessRate'] : null;
+        $maximumAdLoadSuccessRate = isset($params['maxAdLoadSuccessRate']) && $params['maxAdLoadSuccessRate'] !== '' ? (float) $params['maxAdLoadSuccessRate'] : null;
+        $status = (string) ($params['ipQualityStatus'] ?? '');
+
+        return collect($rows)->filter(function (array $row) use ($minimumSessions, $minimumFailedSessions, $minimumTcpAttempts, $maximumTcpSuccessRate, $maximumAdLoadSuccessRate, $status): bool {
+            if ($minimumSessions > 0 && (int) $row['sessionCount'] <= $minimumSessions) return false;
+            if ((int) $row['tcpFailedSessionCount'] < $minimumFailedSessions) return false;
+            if ((int) $row['tcpAttemptCount'] < $minimumTcpAttempts) return false;
+            if ($status !== '' && $row['status'] !== $status) return false;
+            if ($maximumTcpSuccessRate !== null && ($row['tcpSuccessRate'] === null || (float) $row['tcpSuccessRate'] > $maximumTcpSuccessRate)) return false;
+            if ($maximumAdLoadSuccessRate !== null && ($row['adLoadSuccessRate'] === null || (float) $row['adLoadSuccessRate'] > $maximumAdLoadSuccessRate)) return false;
+            return true;
+        })->values()->all();
     }
 
     private function exitIpQualitySessions(array $params): array
     {
+        $granularity = (string) ($params['ipGranularity'] ?? 'exact');
+        $ipGroup = $this->exitIpGroupSql('ip_ctx.exit_ip', $granularity);
         $tcpResult = $this->exitIpTcpResultSql('e');
-        $target = $this->exitIpTargetSql('e');
+        $target = $this->normalizedExitIpTargetSql('e');
+        $sessionGroupCount = match ($granularity) {
+            'small' => 'ip_ctx.session_small_ip_count',
+            'large' => 'ip_ctx.session_large_ip_count',
+            default => 'ip_ctx.session_ip_count',
+        };
         $pageSize = min(100, max(1, (int) ($params['pageSize'] ?? 50)));
         $offset = (max(1, (int) ($params['pageIndex'] ?? 1)) - 1) * $pageSize;
         $errorText = "COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(e.event_params_json, '$.tcp_error_code')), ''), NULLIF(e.error_code, ''), NULLIF(e.error_message, ''), 'unknown')";
@@ -6103,13 +6192,14 @@ class FunnelAnalyticsService
                     ->on('e.app_identifier', '=', 'ip_ctx.ctx_app_identifier')
                     ->on('e.session_key', '=', 'ip_ctx.session_key');
             })
-            ->whereRaw('SHA2(ip_ctx.exit_ip, 256) = ?', [(string) $params['ipKey']])
+            ->whereRaw("SHA2({$ipGroup}, 256) = ?", [(string) $params['ipKey']])
             ->whereRaw("{$target} = ?", [$selectedTarget])
             ->select(['ip_ctx.session_key'])
+            ->selectRaw('MAX(TRIM(ip_ctx.exit_ip)) AS exit_ip')
             ->selectRaw("MAX(NULLIF(ip_ctx.server_id, 'unknown')) AS server_id")
             ->selectRaw("MAX(NULLIF(ip_ctx.proxy_provider, 'unknown')) AS proxy_provider")
             ->selectRaw("MAX(NULLIF(ip_ctx.proxy_id, 'unknown')) AS proxy_id")
-            ->selectRaw('MAX(ip_ctx.session_ip_count) AS session_ip_count')
+            ->selectRaw("MAX({$sessionGroupCount}) AS session_group_count")
             ->selectRaw("GROUP_CONCAT(DISTINCT NULLIF(e.connection_id, '') SEPARATOR ',') AS connection_ids")
             ->selectRaw("GROUP_CONCAT(DISTINCT {$target} SEPARATOR ',') AS target_ids")
             ->selectRaw("SUM(CASE WHEN {$tcpResult} = 'success' THEN 1 ELSE 0 END) AS tcp_success_count")
@@ -6131,6 +6221,7 @@ class FunnelAnalyticsService
                 return [
                     'sessionKey' => hash('sha256', (string) $row->session_key),
                     'sessionId' => $this->maskEvidenceIdentifier($row->session_key),
+                    'exitIpMasked' => $this->maskExitIp((string) ($row->exit_ip ?? '')),
                     'connectionIds' => array_values(array_filter(array_map(
                         fn (string $value): ?string => $this->maskEvidenceIdentifier($value),
                         explode(',', (string) ($row->connection_ids ?? ''))
@@ -6139,7 +6230,7 @@ class FunnelAnalyticsService
                     'serverId' => $this->normalizeExitIpLabel($row->server_id ?? null),
                     'proxyProvider' => $this->normalizeExitIpLabel($row->proxy_provider ?? null),
                     'proxyId' => $this->normalizeExitIpLabel($row->proxy_id ?? null),
-                    'ipChanged' => (int) ($row->session_ip_count ?? 0) > 1,
+                    'ipChanged' => (int) ($row->session_group_count ?? 0) > 1,
                     'tcpSuccessCount' => $success,
                     'tcpFailedCount' => $failed,
                     'tcpResult' => $failed > 0 ? 'failed' : ($success > 0 ? 'success' : 'unknown'),

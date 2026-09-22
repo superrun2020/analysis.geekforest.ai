@@ -58,6 +58,16 @@ function queryCacheKey(query: FunnelQuery) {
     unit: query.unit ?? "",
     pageSize: query.pageSize ?? "",
     dimensions: query.dimensions?.join("|") ?? "",
+    ipKey: query.ipKey ?? "",
+    ipTarget: query.ipTarget ?? "",
+    ipGranularity: query.ipGranularity ?? "",
+    ipQualityStatus: query.ipQualityStatus ?? "",
+    minSessionCount: query.minSessionCount ?? "",
+    minFailedSessionCount: query.minFailedSessionCount ?? "",
+    minTcpAttemptCount: query.minTcpAttemptCount ?? "",
+    maxTcpSuccessRate: query.maxTcpSuccessRate ?? "",
+    maxAdLoadSuccessRate: query.maxAdLoadSuccessRate ?? "",
+    forceRefresh: query.forceRefresh ?? false,
   });
 }
 
@@ -3232,19 +3242,90 @@ function shortIdentity(value: unknown) {
   return raw.length > 24 ? `${raw.slice(0, 12)}…${raw.slice(-8)}` : raw;
 }
 
-function ExitIpQualityReport({ data, detailData, projectCode, querying, detailLoading, queryError, detailError, selectedIpRow, onSelectIp, onRefresh }: {
+function exitIpTargetLabel(value: unknown) {
+  const target = value === null || value === undefined || value === "" ? "default" : String(value);
+  return ({
+    default: "未上报目标",
+    redacted_target: "已脱敏目标",
+    ip_target: "IP目标（已隐藏）",
+    ad_target: "广告探测目标",
+    api_target: "API探测目标",
+    vpn_target: "VPN探测目标",
+    probe_target: "通用探测目标",
+    google_ads_host: "Google广告服务",
+    google_host: "Google服务",
+    apple_host: "Apple服务",
+    amazon_host: "Amazon服务",
+    other_host: "其他主机目标",
+    other_target: "其他目标",
+  } as Record<string, string>)[target] ?? "其他目标";
+}
+
+const EXIT_IP_COLUMNS = [
+  { key: "sessionCount", label: "Session数量" },
+  { key: "stableSessionCount", label: "稳定Session" },
+  { key: "ambiguousSessionCount", label: "换IP Session" },
+  { key: "tcpSessionCount", label: "有TCP证据Session" },
+  { key: "tcpAttemptCount", label: "TCP样本" },
+  { key: "tcpSuccessCount", label: "TCP成功" },
+  { key: "tcpFailedCount", label: "TCP失败" },
+  { key: "tcpSuccessRate", label: "TCP成功率", ratio: true },
+  { key: "tcpFailedSessionCount", label: "失败Session" },
+  { key: "tcpFailedSessionRate", label: "失败Session率", ratio: true },
+  { key: "peerTcpSuccessRate", label: "同目标其他IP成功率", ratio: true },
+  { key: "adRequestCount", label: "广告请求" },
+  { key: "adLoadSuccessCount", label: "广告加载成功" },
+  { key: "adLoadFailedCount", label: "广告加载失败" },
+  { key: "adLoadSuccessRate", label: "广告加载成功率", ratio: true },
+  { key: "timeoutCount", label: "超时" },
+  { key: "http403Count", label: "HTTP 403" },
+  { key: "http429Count", label: "HTTP 429" },
+] as const;
+
+type ExitIpColumnKey = typeof EXIT_IP_COLUMNS[number]["key"];
+type ExitIpFilters = {
+  ipGranularity: "exact" | "small" | "large";
+  ipQualityStatus?: "suspect" | "watch" | "healthy" | "insufficient";
+  minSessionCount?: number;
+  minFailedSessionCount?: number;
+  minTcpAttemptCount?: number;
+  maxTcpSuccessRate?: number;
+  maxAdLoadSuccessRate?: number;
+};
+
+const DEFAULT_EXIT_IP_FILTERS: ExitIpFilters = { ipGranularity: "exact" };
+
+function ExitIpQualityReport({ data, detailData, dates, projectCode, platform, country, appVersion, projectOptions = [], countryOptions = ["全部国家"], appVersionOptions = ["全部版本"], queried, activeFilters, querying, detailLoading, queryError, detailError, selectedIpRow, onSelectIp, onQuery, onProjectSelect, onRangeChange, onCountryChange, onAppVersionChange, onPlatformChange }: {
   data: AnyRow;
   detailData: AnyRow | null;
+  dates: { dateFrom: string; dateTo: string };
   projectCode: string;
+  platform: string;
+  country: string;
+  appVersion: string;
+  projectOptions?: Array<{ projectCode: string; appName?: string }>;
+  countryOptions?: string[];
+  appVersionOptions?: string[];
+  queried: boolean;
+  activeFilters: ExitIpFilters;
   querying: boolean;
   detailLoading: boolean;
   queryError: string;
   detailError: string;
   selectedIpRow: AnyRow | null;
   onSelectIp: (row: AnyRow) => void;
-  onRefresh: () => void;
+  onQuery: (filters: ExitIpFilters) => void;
+  onProjectSelect?: (projectCode: string) => void;
+  onRangeChange?: (range: string) => void;
+  onCountryChange?: (country: string) => void;
+  onAppVersionChange?: (appVersion: string) => void;
+  onPlatformChange?: (platform: string) => void;
 }) {
   const [showRawIp, setShowRawIp] = useState(false);
+  const [draftFilters, setDraftFilters] = useState<ExitIpFilters>(activeFilters);
+  const [visibleColumns, setVisibleColumns] = useState<ExitIpColumnKey[]>(EXIT_IP_COLUMNS.map((column) => column.key));
+  const [sortKey, setSortKey] = useState<ExitIpColumnKey>("sessionCount");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const report = data.exitIpQuality ?? {};
   const rows = Array.isArray(report.rows) ? report.rows : [];
   const totals = report.totals ?? {};
@@ -3255,53 +3336,85 @@ function ExitIpQualityReport({ data, detailData, projectCode, querying, detailLo
     && Array.isArray(detailData?.exitIpQuality?.sessions)
     ? detailData.exitIpQuality.sessions
     : [];
+  const selectableProjects = projectOptions.length ? projectOptions : [{ projectCode }];
+  const safeCountryOptions = countryOptions.length ? countryOptions : ["全部国家"];
+  const safeAppVersionOptions = appVersionOptions.length ? appVersionOptions : ["全部版本"];
+  const sortedRows = useMemo(() => [...rows].sort((left: AnyRow, right: AnyRow) => {
+    const direction = sortDirection === "asc" ? 1 : -1;
+    return direction * (Number(left[sortKey] ?? -1) - Number(right[sortKey] ?? -1));
+  }), [rows, sortKey, sortDirection]);
+  const setOptionalNumber = (key: keyof ExitIpFilters, value: string) => setDraftFilters((current) => ({ ...current, [key]: value === "" ? undefined : Number(value) }));
+  const toggleColumn = (key: ExitIpColumnKey) => setVisibleColumns((current) => current.includes(key) ? current.filter((column) => column !== key) : [...current, key]);
+  const shows = (key: ExitIpColumnKey) => visibleColumns.includes(key);
+  const setSort = (key: ExitIpColumnKey) => {
+    if (sortKey === key) setSortDirection((current) => current === "asc" ? "desc" : "asc");
+    else { setSortKey(key); setSortDirection("desc"); }
+  };
+  const formatMetric = (row: AnyRow, key: ExitIpColumnKey) => {
+    if (key === "tcpSuccessRate" || key === "tcpFailedSessionRate" || key === "peerTcpSuccessRate" || key === "adLoadSuccessRate") return percent(row[key]);
+    return number(row[key]);
+  };
   useEffect(() => setShowRawIp(false), [projectCode, data?.context?.dateFrom, data?.context?.dateTo, data?.context?.platform, data?.context?.country, data?.context?.appVersion]);
 
   return <div className="page-stack" data-testid="exit-ip-quality-report">
-    <section className="surface overall-config-card">
-      <div className="surface-title"><div><h2>出口IP质量</h2><p>把实际公网出口IP与对应 VPN session、明确TCP证据和广告加载结果关联。默认隐藏完整IP；私网、CGNAT及 198.18.0.0/15 fake-IP 不进入结果。</p></div><span>{projectCode || "未选择项目"}</span></div>
-      <div className="overall-result-tools"><div><strong>当前筛选结果</strong><span>状态只用于排查，不自动拉黑或摘除IP</span></div><div><Button htmlType="button" onClick={() => setShowRawIp((value) => !value)}>{showRawIp ? "隐藏完整IP" : "显示完整IP"}</Button><Button htmlType="button" onClick={onRefresh} loading={querying}>刷新</Button></div></div>
-      <div className="summary-grid">
-        <article><span>出口IP</span><strong>{number(totals.distinctIps)}</strong><small>{number(totals.ipRows)} 个IP×目标组合</small></article>
-        <article><span>全部IP×目标Session关联</span><strong>{number(totals.sessionAssociationCount)}</strong><small>稳定 {number(totals.stableSessionAssociationCount)} · 换IP排除 {number(totals.ambiguousSessionAssociationCount)}；跨目标可能重复</small></article>
-        <article><span>明确TCP样本</span><strong>{number(totals.tcpAttemptCount)}</strong><small>unknown / not_executed 不进入分母</small></article>
-        <article><span>疑似受限 / 观察</span><strong>{number(totals.suspectCount)} / {number(totals.watchCount)}</strong><small>需要同目标其他IP对照</small></article>
+    <section className="surface matrix-overall-config overall-config-card">
+      <div className="surface-title"><div><h2>出口IP质量</h2><p>按项目和日期查询出口IP、IP段与对应 Session、TCP、广告结果。页面先展示配置，点击查询后才读取明细，避免打开报表时直接触发重查询。</p></div><span>{projectCode || "未选择项目"}</span></div>
+      <div className="overall-config-row dimension-row"><span className="overall-config-label">IP粒度</span>{[
+        ["exact", "单IP（x.x.x.x）"],
+        ["small", "小段（172.22.22.XX）"],
+        ["large", "大段（172.22.XX.XX）"],
+      ].map(([key, label]) => <label key={key} className={`overall-chip ${draftFilters.ipGranularity === key ? "active" : ""}`}><input type="radio" name="exit-ip-granularity" checked={draftFilters.ipGranularity === key} onChange={() => setDraftFilters((current) => ({ ...current, ipGranularity: key as ExitIpFilters["ipGranularity"] }))} /><span>{label}</span></label>)}</div>
+      <div className="overall-config-row metric-row"><span className="overall-config-label">统计字段</span>{EXIT_IP_COLUMNS.map((column) => <label key={column.key} className={`overall-chip ${shows(column.key) ? "active" : ""}`}><input type="checkbox" checked={shows(column.key)} onChange={() => toggleColumn(column.key)} /><span>{column.label}</span></label>)}</div>
+      <div className="overall-filter-row">
+        <label className="overall-filter-item date-range-control"><span>日期范围：</span><input type="date" value={dates.dateFrom} onChange={(event) => { const nextFrom = event.target.value; if (!nextFrom) return; const nextTo = dates.dateTo < nextFrom ? nextFrom : dates.dateTo; onRangeChange?.(`${nextFrom}~${nextTo}`); }} /><b>→</b><input type="date" value={dates.dateTo} min={dates.dateFrom} onChange={(event) => { if (event.target.value) onRangeChange?.(`${dates.dateFrom}~${event.target.value}`); }} /></label>
+        <label className="overall-filter-item"><span>项目代号：</span><select value={projectCode} onChange={(event) => onProjectSelect?.(event.target.value)}>{selectableProjects.map((item) => <option key={item.projectCode} value={item.projectCode}>{item.projectCode}{item.appName ? ` · ${item.appName}` : ""}</option>)}</select></label>
+        <label className="overall-filter-item"><span>出口国家：</span><select value={country} onChange={(event) => onCountryChange?.(event.target.value)}>{safeCountryOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+        <label className="overall-filter-item"><span>平台：</span><select value={platform} onChange={(event) => onPlatformChange?.(event.target.value)}><option>Android</option><option>iOS</option><option>全部</option></select></label>
+        <label className="overall-filter-item"><span>App版本：</span><select value={appVersion} onChange={(event) => onAppVersionChange?.(event.target.value)}>{safeAppVersionOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
       </div>
-      <div className="path-metric-note"><strong>关联口径：</strong><span>{text(report.associationPolicy)}</span></div>
-      <div className="path-metric-note"><strong>判定口径：</strong><span>{text(report.classificationPolicy)}</span></div>
-      {totals.mayBeTruncated && <div className="path-metric-note"><strong>范围提示：</strong><span>卡片已统计全部 {number(totals.ipRows)} 个IP×目标组合；列表只展示前 {number(totals.returnedRows)} 行。Session关联数跨目标可能重复，不等于全局唯一Session。</span></div>}
+      <div className="overall-filter-row exit-ip-filter-row">
+        <label className="overall-filter-item"><span>IP状态：</span><select value={draftFilters.ipQualityStatus ?? ""} onChange={(event) => setDraftFilters((current) => ({ ...current, ipQualityStatus: (event.target.value || undefined) as ExitIpFilters["ipQualityStatus"] }))}><option value="">全部状态</option><option value="suspect">疑似受限</option><option value="watch">观察</option><option value="healthy">健康</option><option value="insufficient">证据不足</option></select></label>
+        <label className="overall-filter-item"><span>Session数量 &gt;：</span><input type="number" min="0" placeholder="如 100" value={draftFilters.minSessionCount ?? ""} onChange={(event) => setOptionalNumber("minSessionCount", event.target.value)} /></label>
+        <label className="overall-filter-item"><span>最小失败Session：</span><input type="number" min="0" placeholder="如 10" value={draftFilters.minFailedSessionCount ?? ""} onChange={(event) => setOptionalNumber("minFailedSessionCount", event.target.value)} /></label>
+        <label className="overall-filter-item"><span>最小TCP样本：</span><input type="number" min="0" placeholder="如 20" value={draftFilters.minTcpAttemptCount ?? ""} onChange={(event) => setOptionalNumber("minTcpAttemptCount", event.target.value)} /></label>
+        <label className="overall-filter-item"><span>TCP成功率上限：</span><input type="number" min="0" max="100" placeholder="如 30" value={draftFilters.maxTcpSuccessRate ?? ""} onChange={(event) => setOptionalNumber("maxTcpSuccessRate", event.target.value)} /></label>
+        <label className="overall-filter-item"><span>广告加载成功率上限：</span><input type="number" min="0" max="100" placeholder="如 60" value={draftFilters.maxAdLoadSuccessRate ?? ""} onChange={(event) => setOptionalNumber("maxAdLoadSuccessRate", event.target.value)} /></label>
+      </div>
+      <div className="overall-action-row"><div className="overall-view-actions"><span>状态只用于排查，不自动拉黑或摘除IP；每次查询直接读取最新明细</span></div><div className="overall-query-actions"><Button htmlType="button" onClick={() => { setDraftFilters(DEFAULT_EXIT_IP_FILTERS); setVisibleColumns(EXIT_IP_COLUMNS.map((column) => column.key)); }}>重置指标条件</Button><Button htmlType="button" className="primary" onClick={() => { setShowRawIp(false); onQuery(draftFilters); }} disabled={querying || !projectCode}>⌕ {querying ? "查询中…" : "查询"}</Button></div></div>
+      <div className="overall-active-hint">当前粒度：{draftFilters.ipGranularity === "small" ? "小段 /24" : draftFilters.ipGranularity === "large" ? "大段 /16" : "单IP"} · 展示 {visibleColumns.length} 个统计字段。172.22.* 仅用于说明掩码格式，数据仍只纳入合法公网出口IP；Session数过滤按当前IP或IP段×目标的独立Session口径计算。</div>
+      {queried ? <><div className="summary-grid">
+        <article><span>出口IP / IP段</span><strong>{number(totals.distinctIps)}</strong><small>{number(totals.ipRows)} 个分组×目标组合</small></article>
+        <article><span>Session关联</span><strong>{number(totals.sessionAssociationCount)}</strong><small>稳定 {number(totals.stableSessionAssociationCount)} · 换IP排除 {number(totals.ambiguousSessionAssociationCount)}</small></article>
+        <article><span>明确TCP样本</span><strong>{number(totals.tcpAttemptCount)}</strong><small>unknown / not_executed 不进入分母</small></article>
+        <article><span>疑似受限 / 观察</span><strong>{number(totals.suspectCount)} / {number(totals.watchCount)}</strong><small>需要同目标其他分组对照</small></article>
+      </div><div className="path-metric-note"><strong>关联口径：</strong><span>{text(report.associationPolicy)}</span></div><div className="path-metric-note"><strong>判定口径：</strong><span>{text(report.classificationPolicy)}</span></div></> : <div className="overall-empty-state">配置筛选条件后点击查询；建议先选单日、具体项目，再按 Session 数或成功率缩小范围。</div>}
     </section>
 
     <section className="surface overall-result-card">
-      <div className="surface-title"><div><h2>IP质量列表</h2><p>按疑似受限、观察、证据不足、健康排序；点击查看该IP关联的session证据。</p></div><span>{querying ? "查询中" : `${rows.length} 行`}</span></div>
+      <div className="overall-result-tools"><div><strong>IP质量列表</strong><span>{!queried ? "等待查询" : querying ? "查询中" : `${rows.length} 行`}</span></div><div>{activeFilters.ipGranularity === "exact" && <Button htmlType="button" onClick={() => setShowRawIp((value) => !value)}>{showRawIp ? "隐藏完整IP" : "显示完整IP"}</Button>}<Button htmlType="button" onClick={() => { setShowRawIp(false); onQuery(draftFilters); }} disabled={querying || !projectCode}>刷新</Button></div></div>
       {queryError && <div className="diagnosis-no-reasons compact warn"><strong>查询失败</strong><p>{queryError}</p></div>}
-      {!querying && report.available === false && <div className="diagnosis-no-reasons compact warn"><strong>暂无可关联的公网出口IP</strong><p>{text(report.reason)}</p></div>}
-      <div className="table-wrap"><table className="version-compare-table"><thead><tr><th>状态</th><th>出口IP / 来源</th><th>厂家 / 节点</th><th>目标</th><th>独立Session</th><th>TCP成功率</th><th>同目标其他IP</th><th>失败Session</th><th>超时 / 403 / 429</th><th>广告加载</th><th>最近TCP成功</th><th>操作</th></tr></thead><tbody>
-        {rows.length ? rows.map((row: AnyRow) => {
+      {queried && !querying && report.available === false && <div className="diagnosis-no-reasons compact warn"><strong>当前过滤条件没有结果</strong><p>{text(report.reason)}</p></div>}
+      <div className="table-wrap"><table className="version-compare-table exit-ip-overall-table"><thead><tr><th>状态</th><th>出口IP / IP段</th><th>厂家 / 节点</th><th>探测目标</th>{EXIT_IP_COLUMNS.filter((column) => shows(column.key)).map((column) => <th key={column.key} className="sortable" onClick={() => setSort(column.key)}>{column.label}{sortKey === column.key && <span className="sort-indicator">{sortDirection === "asc" ? "▲" : "▼"}</span>}</th>)}<th>最近TCP成功</th><th>操作</th></tr></thead><tbody>
+        {sortedRows.length ? sortedRows.map((row: AnyRow) => {
           const status = EXIT_IP_STATUS[row.status] ?? EXIT_IP_STATUS.insufficient;
           return <tr key={row.rowKey} className={row.status === "suspect" ? "row-bad" : row.status === "watch" ? "row-warn" : ""}>
             <td><span className={`status-chip ${status.className}`}>{status.label}</span>{row.ipChanged && <small>{number(row.ambiguousSessionCount)} 个换IP session已排除指标</small>}</td>
-            <td><strong>{showRawIp ? text(row.ipAddress) : text(row.ipMasked)}</strong><small>{text(row.ipSource)} · {text(row.exitIpCountry)} · {text(row.exitIpAsn)}</small></td>
+            <td><strong>{activeFilters.ipGranularity === "exact" && showRawIp ? text(row.ipAddress) : text(row.ipMasked)}</strong><small>{text(row.ipSource)} · {text(row.exitIpCountry)} · {text(row.exitIpAsn)}</small></td>
             <td>{text(row.proxyProvider)}<small>{text(row.proxyId)} · {text(row.serverId)}</small></td>
-            <td>{text(row.targetId)}</td>
-            <td>{number(row.stableSessionCount)}<small>全部关联 {number(row.sessionCount)} · 有TCP证据 {number(row.tcpSessionCount)}</small></td>
-            <td><strong>{percent(row.tcpSuccessRate)}</strong><small>{number(row.tcpSuccessCount)} / {number(row.tcpAttemptCount)}</small></td>
-            <td>{percent(row.peerTcpSuccessRate)}<small>{number(row.peerTcpAttemptCount)} 次 / {number(row.peerTcpSessionCount)} session</small></td>
-            <td>{number(row.tcpFailedSessionCount)}<small>{percent(row.tcpFailedSessionRate)}</small></td>
-            <td>{number(row.timeoutCount)} / {number(row.http403Count)} / {number(row.http429Count)}</td>
-            <td>{percent(row.adLoadSuccessRate)}<small>{number(row.adLoadSuccessCount)} 成功 / {number(row.adLoadFailedCount)} 失败</small></td>
+            <td>{exitIpTargetLabel(row.targetId)}</td>
+            {EXIT_IP_COLUMNS.filter((column) => shows(column.key)).map((column) => <td key={column.key}><strong>{formatMetric(row, column.key)}</strong>{column.key === "peerTcpSuccessRate" && <small>{number(row.peerTcpAttemptCount)} 次 / {number(row.peerTcpSessionCount)} session</small>}</td>)}
             <td>{text(row.lastTcpSuccessAt)}</td>
             <td><Button htmlType="button" size="small" type={selectedRow?.rowKey === row.rowKey ? "primary" : "default"} onClick={() => onSelectIp(row)}>查看Session</Button></td>
           </tr>;
-        }) : <tr><td colSpan={12}>{querying ? "正在关联IP与session…" : "当前筛选范围暂无数据"}</td></tr>}
+        }) : <tr><td colSpan={6 + visibleColumns.length}>{querying ? "正在关联IP与session…" : queried ? "当前筛选范围暂无数据" : "请先在上方配置项目、日期、IP粒度和过滤条件，然后点击查询"}</td></tr>}
       </tbody></table></div>
     </section>
 
     {selectedRow && <section className="surface overall-result-card" data-testid="exit-ip-session-detail">
-      <div className="surface-title"><div><h2>Session证据</h2><p>{selectedRow ? `${showRawIp ? selectedRow.ipAddress : selectedRow.ipMasked} · ${selectedRow.targetId}` : "所选IP"}；这里只显示关联后的连接与业务结果，不包含用户身份字段。</p></div><span>{detailLoading ? "读取中" : `${sessions.length} 个session`}</span></div>
+      <div className="surface-title"><div><h2>Session证据</h2><p>{selectedRow ? `${activeFilters.ipGranularity === "exact" && showRawIp ? selectedRow.ipAddress : selectedRow.ipMasked} · 探测目标 ${exitIpTargetLabel(selectedRow.targetId)}` : "所选IP"}；这里只显示关联后的连接与业务结果，不包含用户身份字段。</p></div><span>{detailLoading ? "读取中" : `${sessions.length} 个session`}</span></div>
       {detailError && <div className="diagnosis-no-reasons compact warn"><strong>Session查询失败</strong><p>{detailError}</p></div>}
-      <div className="table-wrap"><table><thead><tr><th>Session</th><th>Connection</th><th>目标</th><th>节点</th><th>TCP结果</th><th>最新TCP错误</th><th>广告请求</th><th>加载成功 / 失败</th><th>时间</th></tr></thead><tbody>
-        {sessions.length ? sessions.map((session: AnyRow) => <tr key={session.sessionKey} className={session.tcpResult === "failed" ? "row-bad" : ""}><td><strong>{text(session.sessionId)}</strong>{session.ipChanged && <small>换IP session，仅供证据查看，不参与IP指标</small>}</td><td>{(session.connectionIds ?? []).join("、") || "—"}</td><td>{(session.targetIds ?? []).join("、") || "—"}</td><td>{text(session.proxyProvider)}<small>{text(session.proxyId)} · {text(session.serverId)}</small></td><td>{text(session.tcpResult)}<small>{number(session.tcpSuccessCount)} 成功 / {number(session.tcpFailedCount)} 失败</small></td><td>{shortIdentity(session.latestTcpError)}</td><td>{number(session.adRequestCount)}</td><td>{number(session.adLoadSuccessCount)} / {number(session.adLoadFailedCount)}</td><td>{text(session.firstEventAt)}<small>{text(session.lastEventAt)}</small></td></tr>) : <tr><td colSpan={9}>{detailLoading ? "正在读取session…" : detailError ? "Session数据未返回" : "没有找到对应session证据"}</td></tr>}
+      <div className="table-wrap"><table><thead><tr><th>Session</th><th>实际出口IP</th><th>Connection</th><th>探测目标</th><th>节点</th><th>TCP结果</th><th>最新TCP错误</th><th>广告请求</th><th>加载成功 / 失败</th><th>时间</th></tr></thead><tbody>
+        {sessions.length ? sessions.map((session: AnyRow) => <tr key={session.sessionKey} className={session.tcpResult === "failed" ? "row-bad" : ""}><td><strong>{text(session.sessionId)}</strong>{session.ipChanged && <small>换IP session，仅供证据查看，不参与IP指标</small>}</td><td>{text(session.exitIpMasked)}</td><td>{(session.connectionIds ?? []).join("、") || "—"}</td><td>{(session.targetIds ?? []).map((target: string) => exitIpTargetLabel(target)).join("、") || "未上报目标"}</td><td>{text(session.proxyProvider)}<small>{text(session.proxyId)} · {text(session.serverId)}</small></td><td>{text(session.tcpResult)}<small>{number(session.tcpSuccessCount)} 成功 / {number(session.tcpFailedCount)} 失败</small></td><td>{shortIdentity(session.latestTcpError)}</td><td>{number(session.adRequestCount)}</td><td>{number(session.adLoadSuccessCount)} / {number(session.adLoadFailedCount)}</td><td>{text(session.firstEventAt)}<small>{text(session.lastEventAt)}</small></td></tr>) : <tr><td colSpan={10}>{detailLoading ? "正在读取session…" : detailError ? "Session数据未返回" : "没有找到对应session证据"}</td></tr>}
       </tbody></table></div>
     </section>}
   </div>;
@@ -3350,6 +3463,8 @@ export function OperationalFunnel(props: Props) {
   const [exitIpDetailError, setExitIpDetailError] = useState("");
   const [selectedIpRow, setSelectedIpRow] = useState<AnyRow | null>(null);
   const [exitIpQueryKey, setExitIpQueryKey] = useState(0);
+  const [exitIpFilters, setExitIpFilters] = useState<ExitIpFilters>(DEFAULT_EXIT_IP_FILTERS);
+  const [exitIpHasQueried, setExitIpHasQueried] = useState(false);
   const [internalVpnReportSection, setInternalVpnReportSection] = useState<"matrix" | "exitIp" | "adOverall" | "adDns" | "versions">("matrix");
   const vpnReportSection = props.reportSection ?? internalVpnReportSection;
   const setVpnReportSection = (section: "matrix" | "exitIp" | "adOverall" | "adDns" | "versions") => {
@@ -3602,7 +3717,7 @@ export function OperationalFunnel(props: Props) {
   }, [props.page, vpnReportSection, props.enabled, props.projectCode, props.appIdentifier, props.platform, props.country, props.appVersion, props.refreshKey, dates, adDnsDimensions, adDnsQueryKey]);
 
   useEffect(() => {
-    if (props.page !== "network_failure_matrix" || vpnReportSection !== "exitIp" || !props.enabled || !props.projectCode) {
+    if (props.page !== "network_failure_matrix" || vpnReportSection !== "exitIp" || !props.enabled || !props.projectCode || !exitIpHasQueried) {
       setExitIpData(null);
       setExitIpLoading(false);
       setExitIpError("");
@@ -3627,12 +3742,12 @@ export function OperationalFunnel(props: Props) {
       country: props.country === "全部国家" ? undefined : props.country,
       appVersion: props.appVersion === "全部版本" ? undefined : props.appVersion.split(" ")[0],
     };
-    queryFunnel<AnyRow>({ ...baseQuery, page: "exit_ip_quality", domain: "vpn", unit: "sessions", pageSize: 100 }, controller.signal)
+    queryFunnel<AnyRow>({ ...baseQuery, page: "exit_ip_quality", domain: "vpn", unit: "sessions", pageSize: 100, ...exitIpFilters, forceRefresh: true }, controller.signal)
       .then((result) => { if (active) setExitIpData(result); })
       .catch((reason) => { if (active) { setExitIpData(null); setExitIpError(reason instanceof Error ? reason.message : "查询失败"); } })
       .finally(() => { if (active) setExitIpLoading(false); });
     return () => { active = false; controller.abort(); };
-  }, [props.page, vpnReportSection, props.enabled, props.projectCode, props.appIdentifier, props.platform, props.country, props.appVersion, props.refreshKey, dates, exitIpQueryKey]);
+  }, [props.page, vpnReportSection, props.enabled, props.projectCode, props.appIdentifier, props.platform, props.country, props.appVersion, dates, exitIpQueryKey, exitIpHasQueried, exitIpFilters]);
 
   useEffect(() => {
     if (props.page !== "network_failure_matrix" || vpnReportSection !== "exitIp" || !selectedIpRow || !props.projectCode) return;
@@ -3649,12 +3764,12 @@ export function OperationalFunnel(props: Props) {
       country: props.country === "全部国家" ? undefined : props.country,
       appVersion: props.appVersion === "全部版本" ? undefined : props.appVersion.split(" ")[0],
     };
-    queryFunnel<AnyRow>({ ...baseQuery, page: "exit_ip_quality", domain: "vpn", unit: "sessions", ipKey: selectedIpRow.ipKey, ipTarget: selectedIpRow.targetId, pageIndex: 1, pageSize: 50 }, controller.signal)
+    queryFunnel<AnyRow>({ ...baseQuery, page: "exit_ip_quality", domain: "vpn", unit: "sessions", ipKey: selectedIpRow.ipKey, ipTarget: selectedIpRow.targetId, pageIndex: 1, pageSize: 50, ...exitIpFilters, forceRefresh: true }, controller.signal)
       .then((result) => { if (active) { setExitIpDetailData(result); setExitIpDetailError(""); } })
       .catch((reason) => { if (active) setExitIpDetailError(reason instanceof Error ? reason.message : "Session查询失败"); })
       .finally(() => { if (active) setExitIpDetailLoading(false); });
     return () => { active = false; controller.abort(); };
-  }, [props.page, vpnReportSection, selectedIpRow, props.projectCode, props.appIdentifier, props.platform, props.country, props.appVersion, dates]);
+  }, [props.page, vpnReportSection, selectedIpRow, props.projectCode, props.appIdentifier, props.platform, props.country, props.appVersion, dates, exitIpFilters]);
 
   useEffect(() => {
     if (!props.enabled || Object.keys(dataPackage).length === 0) {
@@ -3736,7 +3851,7 @@ export function OperationalFunnel(props: Props) {
     };
     return <div className="page-stack">
       {!props.hideReportTabs && <nav className="operational-tabs workbench-tabs"><Button className={vpnReportSection === "matrix" ? "active" : ""} onClick={() => setVpnReportSection("matrix")}>VPN Overall</Button><Button className={vpnReportSection === "exitIp" ? "active" : ""} onClick={() => setVpnReportSection("exitIp")}>出口IP质量</Button><Button className={vpnReportSection === "adOverall" ? "active" : ""} onClick={() => setVpnReportSection("adOverall")}>广告漏斗Overall</Button><Button className={vpnReportSection === "adDns" ? "active" : ""} onClick={() => setVpnReportSection("adDns")}>广告DNS诊断</Button><Button className={vpnReportSection === "versions" ? "active" : ""} onClick={() => setVpnReportSection("versions")}>版本对比</Button></nav>}
-      {vpnReportSection === "versions" ? <VersionComparison data={{}} domain="vpn" projectCode={props.projectCode} appIdentifier={props.appIdentifier} platform={props.platform} country={props.country} appVersion={props.appVersion} initialRange={props.range} refreshKey={props.refreshKey + matrixQueryKey} projectOptions={props.projectOptions} onProjectSelect={props.onProjectSelect} onRangeChange={props.onRangeChange} /> : vpnReportSection === "exitIp" ? <ExitIpQualityReport data={loadingExitIpData} detailData={exitIpDetailData} projectCode={props.projectCode} querying={exitIpLoading} detailLoading={exitIpDetailLoading} queryError={exitIpError} detailError={exitIpDetailError} selectedIpRow={selectedIpRow} onSelectIp={setSelectedIpRow} onRefresh={() => setExitIpQueryKey((value) => value + 1)} /> : vpnReportSection === "adDns" ? <AdDnsReport data={loadingAdDnsData} dimensions={adDnsDimensions} dates={dates} projectCode={props.projectCode} platform={props.platform} country={props.country} appVersion={props.appVersion} projectOptions={props.projectOptions} countryOptions={props.countryOptions} appVersionOptions={props.appVersionOptions} querying={adDnsLoading} queryError={adDnsError} onQuery={(nextDimensions) => { setAdDnsDimensions(nextDimensions); setAdDnsQueryKey((value) => value + 1); }} onProjectSelect={props.onProjectSelect} onRangeChange={props.onRangeChange} onCountryChange={props.onCountryChange} onAppVersionChange={props.onAppVersionChange} onPlatformChange={props.onPlatformChange} /> : vpnReportSection === "adOverall" ? <AdOverallReport data={loadingAdOverallData} dimensions={adOverallDimensions} dates={dates} projectCode={props.projectCode} platform={props.platform} country={props.country} appVersion={props.appVersion} projectOptions={props.projectOptions} countryOptions={props.countryOptions} appVersionOptions={props.appVersionOptions} querying={adOverallLoading} queryError={adOverallError} onQuery={(nextDimensions) => { setAdOverallDimensions(nextDimensions); setAdOverallQueryKey((value) => value + 1); }} onProjectSelect={props.onProjectSelect} onRangeChange={props.onRangeChange} onCountryChange={props.onCountryChange} onAppVersionChange={props.onAppVersionChange} onPlatformChange={props.onPlatformChange} /> : <AdNetworkFailureMatrix data={loadingMatrixData} dimensions={matrixDimensions} dates={dates} projectCode={props.projectCode} platform={props.platform} country={props.country} appVersion={props.appVersion} projectOptions={props.projectOptions} countryOptions={props.countryOptions} appVersionOptions={props.appVersionOptions} querying={matrixLoading} queryError={matrixError} onQuery={(nextDimensions) => { setMatrixDimensions(nextDimensions); setMatrixQueryKey((value) => value + 1); }} onProjectSelect={props.onProjectSelect} onRangeChange={props.onRangeChange} onCountryChange={props.onCountryChange} onAppVersionChange={props.onAppVersionChange} onPlatformChange={props.onPlatformChange} />}
+      {vpnReportSection === "versions" ? <VersionComparison data={{}} domain="vpn" projectCode={props.projectCode} appIdentifier={props.appIdentifier} platform={props.platform} country={props.country} appVersion={props.appVersion} initialRange={props.range} refreshKey={props.refreshKey + matrixQueryKey} projectOptions={props.projectOptions} onProjectSelect={props.onProjectSelect} onRangeChange={props.onRangeChange} /> : vpnReportSection === "exitIp" ? <ExitIpQualityReport data={loadingExitIpData} detailData={exitIpDetailData} dates={dates} projectCode={props.projectCode} platform={props.platform} country={props.country} appVersion={props.appVersion} projectOptions={props.projectOptions} countryOptions={props.countryOptions} appVersionOptions={props.appVersionOptions} queried={exitIpHasQueried} activeFilters={exitIpFilters} querying={exitIpLoading} detailLoading={exitIpDetailLoading} queryError={exitIpError} detailError={exitIpDetailError} selectedIpRow={selectedIpRow} onSelectIp={setSelectedIpRow} onQuery={(filters) => { setExitIpFilters(filters); setExitIpHasQueried(true); setSelectedIpRow(null); setExitIpQueryKey((value) => value + 1); }} onProjectSelect={(value) => { setExitIpHasQueried(false); props.onProjectSelect?.(value); }} onRangeChange={(value) => { setExitIpHasQueried(false); props.onRangeChange?.(value); }} onCountryChange={(value) => { setExitIpHasQueried(false); props.onCountryChange?.(value); }} onAppVersionChange={(value) => { setExitIpHasQueried(false); props.onAppVersionChange?.(value); }} onPlatformChange={(value) => { setExitIpHasQueried(false); props.onPlatformChange?.(value); }} /> : vpnReportSection === "adDns" ? <AdDnsReport data={loadingAdDnsData} dimensions={adDnsDimensions} dates={dates} projectCode={props.projectCode} platform={props.platform} country={props.country} appVersion={props.appVersion} projectOptions={props.projectOptions} countryOptions={props.countryOptions} appVersionOptions={props.appVersionOptions} querying={adDnsLoading} queryError={adDnsError} onQuery={(nextDimensions) => { setAdDnsDimensions(nextDimensions); setAdDnsQueryKey((value) => value + 1); }} onProjectSelect={props.onProjectSelect} onRangeChange={props.onRangeChange} onCountryChange={props.onCountryChange} onAppVersionChange={props.onAppVersionChange} onPlatformChange={props.onPlatformChange} /> : vpnReportSection === "adOverall" ? <AdOverallReport data={loadingAdOverallData} dimensions={adOverallDimensions} dates={dates} projectCode={props.projectCode} platform={props.platform} country={props.country} appVersion={props.appVersion} projectOptions={props.projectOptions} countryOptions={props.countryOptions} appVersionOptions={props.appVersionOptions} querying={adOverallLoading} queryError={adOverallError} onQuery={(nextDimensions) => { setAdOverallDimensions(nextDimensions); setAdOverallQueryKey((value) => value + 1); }} onProjectSelect={props.onProjectSelect} onRangeChange={props.onRangeChange} onCountryChange={props.onCountryChange} onAppVersionChange={props.onAppVersionChange} onPlatformChange={props.onPlatformChange} /> : <AdNetworkFailureMatrix data={loadingMatrixData} dimensions={matrixDimensions} dates={dates} projectCode={props.projectCode} platform={props.platform} country={props.country} appVersion={props.appVersion} projectOptions={props.projectOptions} countryOptions={props.countryOptions} appVersionOptions={props.appVersionOptions} querying={matrixLoading} queryError={matrixError} onQuery={(nextDimensions) => { setMatrixDimensions(nextDimensions); setMatrixQueryKey((value) => value + 1); }} onProjectSelect={props.onProjectSelect} onRangeChange={props.onRangeChange} onCountryChange={props.onCountryChange} onAppVersionChange={props.onAppVersionChange} onPlatformChange={props.onPlatformChange} />}
     </div>;
   }
 
