@@ -2782,7 +2782,19 @@ const versionCompareDimensions = [
   { key: "platform", label: "平台" },
 ];
 
+const LAUNCHER_OVERALL_DIMENSIONS = [
+  { key: "stat_date", label: "日期" },
+  { key: "app_version", label: "应用版本" },
+  { key: "country_code", label: "国家" },
+  { key: "platform", label: "平台" },
+  { key: "network_type", label: "网络类型" },
+  { key: "asn", label: "ASN" },
+  { key: "server_id", label: "节点" },
+  { key: "protocol", label: "协议" },
+];
+
 function versionCompareDimensionOptions(versionProduct: "vpn" | "launcher", projectCode: string) {
+  if (versionProduct === "launcher") return LAUNCHER_OVERALL_DIMENSIONS;
   return versionCompareDimensions
     .filter((item) => versionProduct === "vpn" && projectCode.toUpperCase() === "A003" ? true : item.key !== "user_country_code")
     .map((item) => item.key === "country_code" && versionProduct === "vpn" && projectCode.toUpperCase() === "A003" ? { ...item, label: "VPN出口国家" } : item);
@@ -2809,7 +2821,7 @@ function compareDimensionLabels(a: string, b: string): number {
   return 0;
 }
 
-function VersionComparison({ data, domain, versionProduct, projectCode, appIdentifier, platform, country, appVersion, initialRange, refreshKey, projectOptions = [], onProjectSelect, onRangeChange }: {
+function VersionComparison({ data, domain, versionProduct, projectCode, appIdentifier, platform, country, appVersion, initialRange, refreshKey, projectOptions = [], countryOptions = ["全部国家"], onProjectSelect, onRangeChange, onCountryChange, onPlatformChange }: {
   data: AnyRow;
   domain: "ads" | "vpn" | "quality";
   versionProduct: "vpn" | "launcher";
@@ -2821,13 +2833,32 @@ function VersionComparison({ data, domain, versionProduct, projectCode, appIdent
   initialRange: string;
   refreshKey: number;
   projectOptions?: Array<{ projectCode: string; appName?: string; appIdentifier?: string }>;
+  countryOptions?: string[];
   onProjectSelect?: (projectCode: string) => void;
   onRangeChange?: (range: string) => void;
+  onCountryChange?: (country: string) => void;
+  onPlatformChange?: (platform: string) => void;
 }) {
   const allColumns = useMemo(() => versionCompareColumns(domain, versionProduct), [domain, versionProduct]);
-  const [dimensions, setDimensions] = useState<string[]>(["app_version"]);
+  const defaultDimensions = versionProduct === "launcher" ? ["stat_date", "app_version"] : ["app_version"];
+  const initialVersionFilter = appVersion === "全部版本" ? "" : appVersion.split(" ")[0];
+  const [dimensions, setDimensions] = useState<string[]>(defaultDimensions);
+  const [draftDimensions, setDraftDimensions] = useState<string[]>(defaultDimensions);
   const [range, setLocalRange] = useState<string>(initialRange);
-  const [versionFilter, setVersionFilter] = useState<string>(appVersion === "全部版本" ? "" : appVersion.split(" ")[0]);
+  const [draftRange, setDraftRange] = useState<string>(initialRange);
+  const [versionFilter, setVersionFilter] = useState<string>(initialVersionFilter);
+  const [draftVersionFilter, setDraftVersionFilter] = useState<string>(initialVersionFilter);
+  const [networkTypeFilter, setNetworkTypeFilter] = useState("");
+  const [draftNetworkTypeFilter, setDraftNetworkTypeFilter] = useState("");
+  const [asnFilter, setAsnFilter] = useState("");
+  const [draftAsnFilter, setDraftAsnFilter] = useState("");
+  const [serverIdFilter, setServerIdFilter] = useState("");
+  const [draftServerIdFilter, setDraftServerIdFilter] = useState("");
+  const [protocolFilter, setProtocolFilter] = useState("");
+  const [draftProtocolFilter, setDraftProtocolFilter] = useState("");
+  const [draftCountry, setDraftCountry] = useState(country);
+  const [draftPlatform, setDraftPlatform] = useState(platform);
+  const [launcherQueryKey, setLauncherQueryKey] = useState(0);
   const selectableProjects = useMemo(() => {
     const options = projectOptions.length ? projectOptions : [{ projectCode }];
     if (domain !== "vpn") return options;
@@ -2840,8 +2871,12 @@ function VersionComparison({ data, domain, versionProduct, projectCode, appIdent
     ? projectCode
     : selectableProjects[0]?.projectCode ?? "";
   const effectiveAppIdentifier = selectableProjects.find((item) => item.projectCode === effectiveProjectCode)?.appIdentifier ?? appIdentifier;
-  const currentDates = dateRange(range);
+  const currentDates = dateRange(versionProduct === "launcher" ? draftRange : range);
   const setRange = (nextRange: string) => {
+    if (versionProduct === "launcher") {
+      setDraftRange(nextRange);
+      return;
+    }
     setLocalRange(nextRange);
     onRangeChange?.(nextRange);
   };
@@ -2860,16 +2895,37 @@ function VersionComparison({ data, domain, versionProduct, projectCode, appIdent
   }, [domain, effectiveProjectCode, onProjectSelect, projectCode]);
 
   useEffect(() => {
+    if (versionProduct !== "launcher") return;
+    setVersionFilter("");
+    setDraftVersionFilter("");
+    setNetworkTypeFilter("");
+    setDraftNetworkTypeFilter("");
+    setAsnFilter("");
+    setDraftAsnFilter("");
+    setServerIdFilter("");
+    setDraftServerIdFilter("");
+    setProtocolFilter("");
+    setDraftProtocolFilter("");
+  }, [effectiveProjectCode, versionProduct]);
+
+  useEffect(() => {
     const allowed = new Set(versionDimensionOptions.map((item) => item.key));
-    setDimensions((current) => {
+    const sanitize = (current: string[]) => {
       const next = current.filter((item) => allowed.has(item));
       return next.length ? next : ["app_version"];
-    });
+    };
+    setDimensions(sanitize);
+    setDraftDimensions(sanitize);
   }, [versionDimensionOptions]);
 
   useEffect(() => {
-    setVersionFilter(appVersion === "全部版本" ? "" : appVersion.split(" ")[0]);
+    const nextVersion = appVersion === "全部版本" ? "" : appVersion.split(" ")[0];
+    setVersionFilter(nextVersion);
+    setDraftVersionFilter(nextVersion);
   }, [appVersion]);
+
+  useEffect(() => { setDraftCountry(country); }, [country]);
+  useEffect(() => { setDraftPlatform(platform); }, [platform]);
 
   const dimensionKey = dimensions.join("|");
   const hasInitialComparison = Array.isArray(data.versionComparison?.rows) && data.versionComparison.rows.length > 0;
@@ -2889,6 +2945,17 @@ function VersionComparison({ data, domain, versionProduct, projectCode, appIdent
     }
     let active = true;
     const controller = new AbortController();
+    setComparison({
+      rows: [],
+      dimensions,
+      dimensionLabel: dimensions.map((item) => versionCompareDimensionLabel(item, versionDimensionOptions)).join(" × "),
+      dimensionOptions: {},
+      dimensionCoverage: {},
+      versionOptions: [],
+      source: "",
+      notice: "",
+      suggestedBaseline: null,
+    });
     setLoading(true);
     setError("");
     const dates = dateRange(range);
@@ -2899,13 +2966,17 @@ function VersionComparison({ data, domain, versionProduct, projectCode, appIdent
       platform: platform === "全部" ? undefined : platform.toLowerCase() as "android" | "ios",
       country: country === "全部国家" ? undefined : country,
       appVersion: !dimensions.includes("app_version") && versionFilter ? versionFilter : undefined,
+      networkType: versionProduct === "launcher" && !dimensions.includes("network_type") && networkTypeFilter ? networkTypeFilter : undefined,
+      asn: versionProduct === "launcher" && !dimensions.includes("asn") && asnFilter ? asnFilter : undefined,
+      serverId: versionProduct === "launcher" && !dimensions.includes("server_id") && serverIdFilter ? serverIdFilter : undefined,
+      protocol: versionProduct === "launcher" && !dimensions.includes("protocol") && protocolFilter ? protocolFilter : undefined,
     };
     queryFunnel<AnyRow>({ ...baseQuery, page: "version_comparison", domain, unit: "users", dimension: dimensions[0], dimensions, versionProduct }, controller.signal)
       .then((result) => { if (active) setComparison(result.versionComparison ?? {}); })
       .catch((reason) => { if (active) setError(reason instanceof Error ? reason.message : "查询失败"); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; controller.abort(); };
-  }, [dimensionKey, range, isDefault, effectiveProjectCode, effectiveAppIdentifier, platform, country, versionFilter, refreshKey, data, domain, versionProduct]);
+  }, [dimensionKey, range, isDefault, effectiveProjectCode, effectiveAppIdentifier, platform, country, versionFilter, networkTypeFilter, asnFilter, serverIdFilter, protocolFilter, launcherQueryKey, refreshKey, data, domain, versionProduct]);
 
   const rows: AnyRow[] = comparison.rows ?? [];
   const selectedColumns = allColumns.filter((column) => visible[column.key] !== false);
@@ -2921,10 +2992,25 @@ function VersionComparison({ data, domain, versionProduct, projectCode, appIdent
       return { appVersion: app, label: text(item.label ?? item.versionLabel ?? item.dimensionLabels?.app_version ?? app) };
     }).filter(Boolean) as AnyRow[];
   }, [comparison.versionOptions, rows]);
+  const launcherDimensionOptions: AnyRow = comparison.dimensionOptions ?? {};
+  const launcherDimensionCoverage: AnyRow = comparison.dimensionCoverage ?? {};
+  const launcherNetworkOptions: string[] = Array.isArray(launcherDimensionOptions.networkTypes) ? launcherDimensionOptions.networkTypes : [];
+  const launcherAsnOptions: string[] = Array.isArray(launcherDimensionOptions.asns) ? launcherDimensionOptions.asns : [];
+  const launcherServerOptions: string[] = Array.isArray(launcherDimensionOptions.serverIds) ? launcherDimensionOptions.serverIds : [];
+  const launcherProtocolOptions: string[] = Array.isArray(launcherDimensionOptions.protocols) ? launcherDimensionOptions.protocols : [];
+  const missingLauncherDimensions = Number(launcherDimensionCoverage.total_events ?? 0) > 0 ? [
+    Number(launcherDimensionCoverage.network_type_events ?? 0) === 0 ? "网络类型" : "",
+    Number(launcherDimensionCoverage.asn_events ?? 0) === 0 ? "ASN" : "",
+    Number(launcherDimensionCoverage.server_id_events ?? 0) === 0 ? "节点" : "",
+    Number(launcherDimensionCoverage.protocol_events ?? 0) === 0 ? "协议" : "",
+  ].filter(Boolean) : [];
   const suggested = text(comparison.suggestedBaseline) || text(rows[0]?.dimensionLabel);
   const [baselineLabel, setBaselineLabel] = useState(suggested);
   useEffect(() => { setBaselineLabel(suggested); }, [suggested]);
-  useEffect(() => { setLocalRange(initialRange); }, [initialRange]);
+  useEffect(() => {
+    setLocalRange(initialRange);
+    setDraftRange(initialRange);
+  }, [initialRange]);
   const baseline = rows.find((row) => text(row.dimensionLabel) === baselineLabel) ?? rows[0];
 
   const [sortKey, setSortKey] = useState<string>("dauUsers");
@@ -2942,7 +3028,8 @@ function VersionComparison({ data, domain, versionProduct, projectCode, appIdent
     setSortDirection(key.startsWith("dimension:") && !key.endsWith("stat_date") && !key.endsWith("app_version") ? "asc" : "desc");
   };
   const toggleDimension = (key: string) => {
-    setDimensions((current) => {
+    const setter = versionProduct === "launcher" ? setDraftDimensions : setDimensions;
+    setter((current) => {
       if (current.includes(key)) {
         return current.length === 1 ? current : current.filter((item) => item !== key);
       }
@@ -2984,20 +3071,47 @@ function VersionComparison({ data, domain, versionProduct, projectCode, appIdent
         const denKey = column.den;
         const num = result[numKey] ?? rows.reduce((sum, row) => sum + Number(row[numKey] ?? 0), 0);
         const den = result[denKey] ?? rows.reduce((sum, row) => sum + Number(row[denKey] ?? 0), 0);
-        const hasObservedRate = rows.some((row) => row[column.key] !== null && row[column.key] !== undefined);
+        const denominatorRows = rows.filter((row) => Number(row[denKey] ?? 0) > 0);
+        const hasObservedRate = denominatorRows.length > 0 && denominatorRows.every((row) => row[column.key] !== null && row[column.key] !== undefined);
         result[column.key] = hasObservedRate && den > 0 ? (num / den) * 100 : null;
       }
     });
     return result;
   }, [rows, selectedColumns]);
 
+  const configuredDimensions = versionProduct === "launcher" ? draftDimensions : dimensions;
+  const applyLauncherQuery = () => {
+    setDimensions(draftDimensions);
+    setLocalRange(draftRange);
+    setVersionFilter(draftVersionFilter);
+    setNetworkTypeFilter(draftNetworkTypeFilter);
+    setAsnFilter(draftAsnFilter);
+    setServerIdFilter(draftServerIdFilter);
+    setProtocolFilter(draftProtocolFilter);
+    if (draftCountry !== country) onCountryChange?.(draftCountry);
+    if (draftPlatform !== platform) onPlatformChange?.(draftPlatform);
+    if (draftRange !== range) onRangeChange?.(draftRange);
+    setLauncherQueryKey((value) => value + 1);
+  };
+  const resetLauncherDraft = () => {
+    setDraftDimensions(["stat_date", "app_version"]);
+    setDraftRange(initialRange);
+    setDraftVersionFilter("");
+    setDraftNetworkTypeFilter("");
+    setDraftAsnFilter("");
+    setDraftServerIdFilter("");
+    setDraftProtocolFilter("");
+    setDraftCountry("全部国家");
+    setDraftPlatform("全部");
+    setVisible(Object.fromEntries(allColumns.map((column) => [column.key, true])));
+  };
   const formatCell = (value: unknown, unit: "count" | "ratio") => (unit === "ratio" ? percent(value) : number(value));
 
-  return <div className="page-stack version-compare-page">
-    <section className="surface version-compare-header">
-      <div className="surface-title"><div><h2>{versionProduct === "launcher" ? "Launcher" : "VPN"}版本核心指标对比</h2><p>按「{dimensionLabel}」对比{versionProduct === "launcher" ? "Launcher 获取、引导与激活" : "VPN 连接、探测与广告链路"}指标；日期和版本都可加入维度。</p></div></div>
-    </section>
-    <div className="version-compare-layout">
+  return <div className={`page-stack version-compare-page ${versionProduct === "launcher" ? "launcher-overall-page" : ""}`}>
+    {versionProduct !== "launcher" && <section className="surface version-compare-header">
+      <div className="surface-title"><div><h2>VPN版本核心指标对比</h2><p>按「{dimensionLabel}」对比VPN连接、探测与广告链路指标；日期和版本都可加入维度。</p></div></div>
+    </section>}
+    <div className={`version-compare-layout ${versionProduct === "launcher" ? "launcher-overall-layout" : ""}`}>
       <div className="version-compare-main">
         {loading && <div className="version-compare-loading">正在读取 {dimensionLabel} 对比数据…</div>}
         {error && <div className="version-compare-loading warn">{error}</div>}
@@ -3026,7 +3140,8 @@ function VersionComparison({ data, domain, versionProduct, projectCode, appIdent
           </tr></tfoot>}
         </table></div><div className="version-compare-footnote">数据源：{text(comparison.source)}；口径：{text(comparison.notice)}</div></section>}
       </div>
-      <aside className="version-compare-config surface">
+      <aside className={`version-compare-config surface ${versionProduct === "launcher" ? "matrix-overall-config launcher-overall-config" : ""}`}>
+        {versionProduct === "launcher" && <div className="launcher-overall-heading"><div><strong>Launcher Overall</strong><span>配置维度、统计字段和筛选条件后查看获取、引导、设置与激活数据</span></div><em>{rows.length} 个组合</em></div>}
         {domain === "vpn" && <div className="config-group">
           <div className="config-title">产品</div>
           <select className="config-select" value={effectiveProjectCode} onChange={(event) => onProjectSelect?.(event.target.value)}>
@@ -3041,21 +3156,23 @@ function VersionComparison({ data, domain, versionProduct, projectCode, appIdent
             <b>→</b>
             <input type="date" value={currentDates.dateTo} min={currentDates.dateFrom} onChange={(event) => { if (!event.target.value) return; setRange(`${currentDates.dateFrom}~${event.target.value}`); }} />
           </div>
-          <div className="config-options">{[initialRange, "昨天", "近7天", "近30天"].filter((item, index, arr) => arr.indexOf(item) === index).map((item) => <Button key={item} className={range === item ? "active" : ""} onClick={() => setRange(item)}>{item}</Button>)}</div>
+          <div className="config-options">{[initialRange, "昨天", "近7天", "近30天"].filter((item, index, arr) => arr.indexOf(item) === index).map((item) => <Button key={item} className={(versionProduct === "launcher" ? draftRange : range) === item ? "active" : ""} onClick={() => setRange(item)}>{item}</Button>)}</div>
           <small className="config-hint">日期既可作为筛选区间，也可在上方维度中勾选“日期”做日期聚合。</small>
         </div>
         <div className="config-group">
           <div className="config-title">维度</div>
-          <div className="config-options">{versionDimensionOptions.map((item) => <Button key={item.key} className={dimensions.includes(item.key) ? "active" : ""} onClick={() => toggleDimension(item.key)}>{item.label}</Button>)}</div>
+          <div className="config-options">{versionDimensionOptions.map((item) => <Button key={item.key} className={configuredDimensions.includes(item.key) ? "active" : ""} onClick={() => toggleDimension(item.key)}>{item.label}</Button>)}</div>
           <small className="config-hint">可多选：日期 + 应用版本=逐日看各版本；只选应用版本=聚合日期看所有版本。</small>
         </div>
         <div className="config-group">
           <div className="config-title">版本筛选</div>
-          <select className="config-select" value={versionFilter} onChange={(event) => {
+          <select className="config-select" value={versionProduct === "launcher" ? draftVersionFilter : versionFilter} onChange={(event) => {
             const nextVersion = event.target.value;
-            setVersionFilter(nextVersion);
-            if (nextVersion && dimensions.includes("app_version")) {
-              setDimensions((current) => {
+            const setNextVersion = versionProduct === "launcher" ? setDraftVersionFilter : setVersionFilter;
+            const setNextDimensions = versionProduct === "launcher" ? setDraftDimensions : setDimensions;
+            setNextVersion(nextVersion);
+            if (nextVersion && configuredDimensions.includes("app_version")) {
+              setNextDimensions((current) => {
                 const withoutVersion = current.filter((item) => item !== "app_version");
                 return withoutVersion.includes("stat_date") ? withoutVersion : ["stat_date", ...withoutVersion];
               });
@@ -3067,10 +3184,26 @@ function VersionComparison({ data, domain, versionProduct, projectCode, appIdent
           <small className="config-hint">可直接选择版本；若当前按“应用版本”聚合，选择后会自动切到“日期”维度看该版本每天数据。</small>
         </div>
 
+        {versionProduct === "launcher" && <>
+          <div className="config-group launcher-filter-group">
+            <div className="config-title">筛选条件</div>
+            <div className="launcher-overall-filter-grid">
+              <label><span>国家</span><select value={draftCountry} onChange={(event) => setDraftCountry(event.target.value)}>{countryOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+              <label><span>平台</span><select value={draftPlatform} onChange={(event) => setDraftPlatform(event.target.value)}><option value="全部">全部</option><option value="Android">Android</option><option value="iOS">iOS</option></select></label>
+              <label><span>网络类型</span><select value={draftNetworkTypeFilter} onChange={(event) => setDraftNetworkTypeFilter(event.target.value)} disabled={!launcherNetworkOptions.length}><option value="">{launcherNetworkOptions.length ? "全部网络" : "暂未上报"}</option>{launcherNetworkOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+              <label><span>ASN</span><select value={draftAsnFilter} onChange={(event) => setDraftAsnFilter(event.target.value)} disabled={!launcherAsnOptions.length}><option value="">{launcherAsnOptions.length ? "全部 ASN" : "暂未上报"}</option>{launcherAsnOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+              <label><span>节点</span><select value={draftServerIdFilter} onChange={(event) => setDraftServerIdFilter(event.target.value)} disabled={!launcherServerOptions.length}><option value="">{launcherServerOptions.length ? "全部节点" : "暂未上报"}</option>{launcherServerOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+              <label><span>协议</span><select value={draftProtocolFilter} onChange={(event) => setDraftProtocolFilter(event.target.value)} disabled={!launcherProtocolOptions.length}><option value="">{launcherProtocolOptions.length ? "全部协议" : "暂未上报"}</option>{launcherProtocolOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+            </div>
+          </div>
+          {missingLauncherDimensions.length > 0 && <div className="diagnosis-no-reasons compact warn launcher-dimension-warning"><strong>Launcher打点缺少：{missingLauncherDimensions.join("、")}</strong><p>缺失维度会显示 <code>unknown</code> 且筛选保持不可用，不会伪造为真实数据；客户端补齐对应字段后选项会自动出现。</p></div>}
+        </>}
+
         <div className="config-group">
-          <div className="config-title">展示列</div>
+          <div className="config-title">{versionProduct === "launcher" ? "统计字段" : "展示列"}</div>
           <div className="config-checkboxes">{allColumns.map((column) => <label key={column.key}><input type="checkbox" checked={visible[column.key] !== false} onChange={(event) => setVisible((current) => ({ ...current, [column.key]: event.target.checked }))} /><span>{column.label}</span></label>)}</div>
         </div>
+        {versionProduct === "launcher" && <div className="overall-action-row launcher-overall-actions"><div className="overall-active-hint">待查询：{configuredDimensions.map((item) => versionCompareDimensionLabel(item, versionDimensionOptions)).join(" × ")} · {selectedColumns.length} 个统计字段</div><div className="overall-query-actions"><Button htmlType="button" onClick={resetLauncherDraft}>重置</Button><Button htmlType="button" className="primary" onClick={applyLauncherQuery} disabled={loading}>⌕ {loading ? "查询中…" : "查询"}</Button></div></div>}
       </aside>
     </div>
   </div>;
@@ -4005,8 +4138,8 @@ export function OperationalFunnel(props: Props) {
       && serverVpnSnapshot.dateTo === dates.dateTo;
     const visibleServerVpnData = serverVpnDataMatches ? serverVpnData : null;
     return <div className="page-stack">
-      {!props.hideReportTabs && <nav className="operational-tabs workbench-tabs"><Button className={vpnReportSection === "matrix" ? "active" : ""} onClick={() => setVpnReportSection("matrix")}>VPN Overall</Button><Button className={vpnReportSection === "serverVpn" ? "active" : ""} onClick={() => setVpnReportSection("serverVpn")}>服务器VPN Overall</Button><Button className={vpnReportSection === "exitIp" ? "active" : ""} onClick={() => setVpnReportSection("exitIp")}>出口IP质量</Button><Button className={vpnReportSection === "adOverall" ? "active" : ""} onClick={() => setVpnReportSection("adOverall")}>广告漏斗Overall</Button><Button className={vpnReportSection === "adDns" ? "active" : ""} onClick={() => setVpnReportSection("adDns")}>广告DNS诊断</Button><Button className={vpnReportSection === "vpnVersions" ? "active" : ""} onClick={() => setVpnReportSection("vpnVersions")}>VPN版本对比</Button><Button className={vpnReportSection === "launcherVersions" ? "active" : ""} onClick={() => setVpnReportSection("launcherVersions")}>Launcher版本对比</Button></nav>}
-      {vpnReportSection === "serverVpn" ? <ServerVpnOverall data={visibleServerVpnData ?? { serverVpnOverall: { available: true, rows: [], totals: {}, source: "查询中", notice: "正在读取内部节点信息" } }} dates={dates} projectCode={serverVpnProject} querying={serverVpnLoading} queryError={serverVpnError} onProjectChange={(value) => { if (SERVER_VPN_PROJECTS.includes(value as (typeof SERVER_VPN_PROJECTS)[number])) { setServerVpnData(null); setServerVpnProject(value as (typeof SERVER_VPN_PROJECTS)[number]); } }} onRangeChange={(value) => { setServerVpnData(null); props.onRangeChange?.(value); }} onRefresh={() => { setServerVpnData(null); setServerVpnQueryKey((value) => value + 1); }} /> : vpnReportSection === "vpnVersions" || vpnReportSection === "launcherVersions" ? <VersionComparison key={`${vpnReportSection}-${props.appVersion}`} data={{}} domain="vpn" versionProduct={vpnReportSection === "launcherVersions" ? "launcher" : "vpn"} projectCode={props.projectCode} appIdentifier={props.appIdentifier} platform={props.platform} country={props.country} appVersion={props.appVersion} initialRange={props.range} refreshKey={props.refreshKey + matrixQueryKey} projectOptions={props.projectOptions} onProjectSelect={props.onProjectSelect} onRangeChange={props.onRangeChange} /> : vpnReportSection === "exitIp" ? <ExitIpQualityReport data={loadingExitIpData} detailData={exitIpDetailData} dates={dates} projectCode={props.projectCode} platform={props.platform} country={props.country} appVersion={props.appVersion} projectOptions={props.projectOptions} countryOptions={props.countryOptions} appVersionOptions={props.appVersionOptions} queried={exitIpHasQueried} activeFilters={exitIpFilters} querying={exitIpLoading} detailLoading={exitIpDetailLoading} queryError={exitIpError} detailError={exitIpDetailError} selectedIpRow={selectedIpRow} onSelectIp={setSelectedIpRow} onQuery={(filters) => { setExitIpFilters(filters); setExitIpHasQueried(true); setSelectedIpRow(null); setExitIpQueryKey((value) => value + 1); }} onProjectSelect={(value) => { setExitIpHasQueried(false); props.onProjectSelect?.(value); }} onRangeChange={(value) => { setExitIpHasQueried(false); props.onRangeChange?.(value); }} onCountryChange={(value) => { setExitIpHasQueried(false); props.onCountryChange?.(value); }} onAppVersionChange={(value) => { setExitIpHasQueried(false); props.onAppVersionChange?.(value); }} onPlatformChange={(value) => { setExitIpHasQueried(false); props.onPlatformChange?.(value); }} /> : vpnReportSection === "adDns" ? <AdDnsReport data={loadingAdDnsData} dimensions={adDnsDimensions} dates={dates} projectCode={props.projectCode} platform={props.platform} country={props.country} appVersion={props.appVersion} projectOptions={props.projectOptions} countryOptions={props.countryOptions} appVersionOptions={props.appVersionOptions} querying={adDnsLoading} queryError={adDnsError} onQuery={(nextDimensions) => { setAdDnsDimensions(nextDimensions); setAdDnsQueryKey((value) => value + 1); }} onProjectSelect={props.onProjectSelect} onRangeChange={props.onRangeChange} onCountryChange={props.onCountryChange} onAppVersionChange={props.onAppVersionChange} onPlatformChange={props.onPlatformChange} /> : vpnReportSection === "adOverall" ? <AdOverallReport data={loadingAdOverallData} dimensions={adOverallDimensions} dates={dates} projectCode={props.projectCode} platform={props.platform} country={props.country} appVersion={props.appVersion} projectOptions={props.projectOptions} countryOptions={props.countryOptions} appVersionOptions={props.appVersionOptions} querying={adOverallLoading} queryError={adOverallError} onQuery={(nextDimensions) => { setAdOverallDimensions(nextDimensions); setAdOverallQueryKey((value) => value + 1); }} onProjectSelect={props.onProjectSelect} onRangeChange={props.onRangeChange} onCountryChange={props.onCountryChange} onAppVersionChange={props.onAppVersionChange} onPlatformChange={props.onPlatformChange} /> : <AdNetworkFailureMatrix data={loadingMatrixData} dimensions={matrixDimensions} dates={dates} projectCode={props.projectCode} platform={props.platform} country={props.country} appVersion={props.appVersion} projectOptions={props.projectOptions} countryOptions={props.countryOptions} appVersionOptions={props.appVersionOptions} querying={matrixLoading} queryError={matrixError} onQuery={(nextDimensions) => { setMatrixDimensions(nextDimensions); setMatrixQueryKey((value) => value + 1); }} onProjectSelect={props.onProjectSelect} onRangeChange={props.onRangeChange} onCountryChange={props.onCountryChange} onAppVersionChange={props.onAppVersionChange} onPlatformChange={props.onPlatformChange} />}
+      {!props.hideReportTabs && <nav className="operational-tabs workbench-tabs"><Button className={vpnReportSection === "matrix" ? "active" : ""} onClick={() => setVpnReportSection("matrix")}>VPN Overall</Button><Button className={vpnReportSection === "serverVpn" ? "active" : ""} onClick={() => setVpnReportSection("serverVpn")}>服务器VPN Overall</Button><Button className={vpnReportSection === "exitIp" ? "active" : ""} onClick={() => setVpnReportSection("exitIp")}>出口IP质量</Button><Button className={vpnReportSection === "adOverall" ? "active" : ""} onClick={() => setVpnReportSection("adOverall")}>广告漏斗Overall</Button><Button className={vpnReportSection === "adDns" ? "active" : ""} onClick={() => setVpnReportSection("adDns")}>广告DNS诊断</Button><Button className={vpnReportSection === "vpnVersions" ? "active" : ""} onClick={() => setVpnReportSection("vpnVersions")}>VPN版本对比</Button><Button className={vpnReportSection === "launcherVersions" ? "active" : ""} onClick={() => setVpnReportSection("launcherVersions")}>Launcher Overall</Button></nav>}
+      {vpnReportSection === "serverVpn" ? <ServerVpnOverall data={visibleServerVpnData ?? { serverVpnOverall: { available: true, rows: [], totals: {}, source: "查询中", notice: "正在读取内部节点信息" } }} dates={dates} projectCode={serverVpnProject} querying={serverVpnLoading} queryError={serverVpnError} onProjectChange={(value) => { if (SERVER_VPN_PROJECTS.includes(value as (typeof SERVER_VPN_PROJECTS)[number])) { setServerVpnData(null); setServerVpnProject(value as (typeof SERVER_VPN_PROJECTS)[number]); } }} onRangeChange={(value) => { setServerVpnData(null); props.onRangeChange?.(value); }} onRefresh={() => { setServerVpnData(null); setServerVpnQueryKey((value) => value + 1); }} /> : vpnReportSection === "vpnVersions" || vpnReportSection === "launcherVersions" ? <VersionComparison key={`${vpnReportSection}-${props.appVersion}`} data={{}} domain="vpn" versionProduct={vpnReportSection === "launcherVersions" ? "launcher" : "vpn"} projectCode={props.projectCode} appIdentifier={props.appIdentifier} platform={props.platform} country={props.country} appVersion={props.appVersion} initialRange={props.range} refreshKey={props.refreshKey + matrixQueryKey} projectOptions={props.projectOptions} countryOptions={props.countryOptions} onProjectSelect={props.onProjectSelect} onRangeChange={props.onRangeChange} onCountryChange={props.onCountryChange} onPlatformChange={props.onPlatformChange} /> : vpnReportSection === "exitIp" ? <ExitIpQualityReport data={loadingExitIpData} detailData={exitIpDetailData} dates={dates} projectCode={props.projectCode} platform={props.platform} country={props.country} appVersion={props.appVersion} projectOptions={props.projectOptions} countryOptions={props.countryOptions} appVersionOptions={props.appVersionOptions} queried={exitIpHasQueried} activeFilters={exitIpFilters} querying={exitIpLoading} detailLoading={exitIpDetailLoading} queryError={exitIpError} detailError={exitIpDetailError} selectedIpRow={selectedIpRow} onSelectIp={setSelectedIpRow} onQuery={(filters) => { setExitIpFilters(filters); setExitIpHasQueried(true); setSelectedIpRow(null); setExitIpQueryKey((value) => value + 1); }} onProjectSelect={(value) => { setExitIpHasQueried(false); props.onProjectSelect?.(value); }} onRangeChange={(value) => { setExitIpHasQueried(false); props.onRangeChange?.(value); }} onCountryChange={(value) => { setExitIpHasQueried(false); props.onCountryChange?.(value); }} onAppVersionChange={(value) => { setExitIpHasQueried(false); props.onAppVersionChange?.(value); }} onPlatformChange={(value) => { setExitIpHasQueried(false); props.onPlatformChange?.(value); }} /> : vpnReportSection === "adDns" ? <AdDnsReport data={loadingAdDnsData} dimensions={adDnsDimensions} dates={dates} projectCode={props.projectCode} platform={props.platform} country={props.country} appVersion={props.appVersion} projectOptions={props.projectOptions} countryOptions={props.countryOptions} appVersionOptions={props.appVersionOptions} querying={adDnsLoading} queryError={adDnsError} onQuery={(nextDimensions) => { setAdDnsDimensions(nextDimensions); setAdDnsQueryKey((value) => value + 1); }} onProjectSelect={props.onProjectSelect} onRangeChange={props.onRangeChange} onCountryChange={props.onCountryChange} onAppVersionChange={props.onAppVersionChange} onPlatformChange={props.onPlatformChange} /> : vpnReportSection === "adOverall" ? <AdOverallReport data={loadingAdOverallData} dimensions={adOverallDimensions} dates={dates} projectCode={props.projectCode} platform={props.platform} country={props.country} appVersion={props.appVersion} projectOptions={props.projectOptions} countryOptions={props.countryOptions} appVersionOptions={props.appVersionOptions} querying={adOverallLoading} queryError={adOverallError} onQuery={(nextDimensions) => { setAdOverallDimensions(nextDimensions); setAdOverallQueryKey((value) => value + 1); }} onProjectSelect={props.onProjectSelect} onRangeChange={props.onRangeChange} onCountryChange={props.onCountryChange} onAppVersionChange={props.onAppVersionChange} onPlatformChange={props.onPlatformChange} /> : <AdNetworkFailureMatrix data={loadingMatrixData} dimensions={matrixDimensions} dates={dates} projectCode={props.projectCode} platform={props.platform} country={props.country} appVersion={props.appVersion} projectOptions={props.projectOptions} countryOptions={props.countryOptions} appVersionOptions={props.appVersionOptions} querying={matrixLoading} queryError={matrixError} onQuery={(nextDimensions) => { setMatrixDimensions(nextDimensions); setMatrixQueryKey((value) => value + 1); }} onProjectSelect={props.onProjectSelect} onRangeChange={props.onRangeChange} onCountryChange={props.onCountryChange} onAppVersionChange={props.onAppVersionChange} onPlatformChange={props.onPlatformChange} />}
     </div>;
   }
 
@@ -4029,6 +4162,6 @@ export function OperationalFunnel(props: Props) {
   const diagnosisProgress = progressItems.find((item) => item.key === diagnosisKey);
   if (!hasRows) return <div className="page-stack">{status}{progress}<StatePanel kind="empty" message="数据包已加载，但当前筛选范围没有可计算的标准事件。" /></div>;
   if (props.page === "overview") return <div className="page-stack">{status}{progress}<Overview data={data} onPageChange={props.onPageChange} onProjectSelect={props.onProjectSelect} context={{ projectCode: "全部项目", range: props.range, dates, loadedAt }} /></div>;
-  if (props.page === "workbench") return <div className="page-stack">{status}{progress}<nav className="operational-tabs workbench-tabs"><Button className={workbenchSection === "workbench" ? "active" : ""} onClick={() => setWorkbenchSection("workbench")}>核心漏斗</Button><Button className={workbenchSection === "diagnosis" ? "active" : ""} onClick={() => setWorkbenchSection("diagnosis")}>流失诊断</Button><Button className={workbenchSection === "path" ? "active" : ""} onClick={() => setWorkbenchSection("path")}>页面路径</Button><Button className={workbenchSection === "versions" ? "active" : ""} onClick={() => setWorkbenchSection("versions")}>版本对比</Button></nav>{workbenchSection === "workbench" ? <Workbench data={data} domain={domain} setDomain={setDomain} unit={unit} setUnit={setUnit} pageData={pageData} diagnosisData={diagnosisData} pageProgress={pageProgress} diagnosisProgress={diagnosisProgress} lockDomain={props.lockDomain} /> : workbenchSection === "versions" ? <VersionComparison data={workbenchData ?? data} domain={domain} projectCode={props.projectCode} appIdentifier={props.appIdentifier} platform={props.platform} country={props.country} appVersion={props.appVersion} initialRange={props.range} refreshKey={props.refreshKey} projectOptions={props.projectOptions} onProjectSelect={props.onProjectSelect} onRangeChange={props.onRangeChange} /> : <GenericPage page={workbenchSection} data={data} workbenchData={workbenchData} onOpenWorkbench={() => setWorkbenchSection("workbench")} />}</div>;
+  if (props.page === "workbench") return <div className="page-stack">{status}{progress}<nav className="operational-tabs workbench-tabs"><Button className={workbenchSection === "workbench" ? "active" : ""} onClick={() => setWorkbenchSection("workbench")}>核心漏斗</Button><Button className={workbenchSection === "diagnosis" ? "active" : ""} onClick={() => setWorkbenchSection("diagnosis")}>流失诊断</Button><Button className={workbenchSection === "path" ? "active" : ""} onClick={() => setWorkbenchSection("path")}>页面路径</Button><Button className={workbenchSection === "versions" ? "active" : ""} onClick={() => setWorkbenchSection("versions")}>版本对比</Button></nav>{workbenchSection === "workbench" ? <Workbench data={data} domain={domain} setDomain={setDomain} unit={unit} setUnit={setUnit} pageData={pageData} diagnosisData={diagnosisData} pageProgress={pageProgress} diagnosisProgress={diagnosisProgress} lockDomain={props.lockDomain} /> : workbenchSection === "versions" ? <VersionComparison data={workbenchData ?? data} domain={domain} versionProduct="vpn" projectCode={props.projectCode} appIdentifier={props.appIdentifier} platform={props.platform} country={props.country} appVersion={props.appVersion} initialRange={props.range} refreshKey={props.refreshKey} projectOptions={props.projectOptions} onProjectSelect={props.onProjectSelect} onRangeChange={props.onRangeChange} /> : <GenericPage page={workbenchSection} data={data} workbenchData={workbenchData} onOpenWorkbench={() => setWorkbenchSection("workbench")} />}</div>;
   return <div className="page-stack">{status}{progress}<GenericPage page={props.page} data={data} workbenchData={workbenchData} /></div>;
 }

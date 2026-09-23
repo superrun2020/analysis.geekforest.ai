@@ -12,6 +12,10 @@ export type FunnelQuery = {
   platform?: "android" | "ios";
   country?: string;
   appVersion?: string;
+  networkType?: string;
+  asn?: string;
+  serverId?: string;
+  protocol?: string;
   domain?: "ads" | "vpn" | "quality";
   unit?: "users" | "sessions" | "events";
   dimension?: string;

@@ -2200,13 +2200,15 @@ class FunnelAnalyticsService
         $projectCode = strtoupper(trim((string) ($params['projectCode'] ?? '')));
         $requestedVersionProduct = (string) ($params['versionProduct'] ?? 'vpn');
         if ($requestedVersionProduct === 'launcher' && $domain !== 'vpn') {
-            return ['available' => false, 'reason' => 'Launcher版本对比必须使用VPN诊断域', 'rows' => [], 'dimensions' => [], 'domain' => $domain, 'versionProduct' => 'launcher'];
+            return ['available' => false, 'reason' => 'Launcher Overall必须使用VPN诊断域', 'rows' => [], 'dimensions' => [], 'domain' => $domain, 'versionProduct' => 'launcher'];
         }
         $versionProduct = $domain === 'vpn' && $requestedVersionProduct === 'launcher' ? 'launcher' : 'vpn';
         $funnelCode = $domain === 'vpn' ? 'vpn_user_coverage' : 'ad_user_coverage';
         $allowedDimensions = ($domain === 'vpn' && $versionProduct === 'vpn' && $projectCode === 'A003')
             ? ['stat_date', 'app_version', 'user_country_code', 'country_code', 'platform']
-            : ['stat_date', 'app_version', 'country_code', 'platform'];
+            : ($versionProduct === 'launcher'
+                ? ['stat_date', 'app_version', 'country_code', 'platform', 'network_type', 'asn', 'server_id', 'protocol']
+                : ['stat_date', 'app_version', 'country_code', 'platform']);
         $requestedDimensions = array_values(array_filter(
             (array) ($params['dimensions'] ?? []),
             static fn ($dimension): bool => in_array($dimension, $allowedDimensions, true)
@@ -2220,7 +2222,7 @@ class FunnelAnalyticsService
 
         if ($domain === 'vpn' && $versionProduct === 'launcher') {
             if (!str_starts_with($projectCode, 'L')) {
-                return ['available' => false, 'reason' => 'Launcher版本对比只能选择L开头项目', 'rows' => [], 'dimensions' => $dimensions, 'domain' => 'vpn', 'versionProduct' => 'launcher'];
+                return ['available' => false, 'reason' => 'Launcher Overall只能选择L开头项目', 'rows' => [], 'dimensions' => $dimensions, 'domain' => 'vpn', 'versionProduct' => 'launcher'];
             }
             return $this->launcherVersionComparisonFromEvents($params, $dimensions, $dimension);
         }
@@ -2351,25 +2353,24 @@ class FunnelAnalyticsService
             'app_version' => 'app_version',
             'country_code' => 'country_code',
             'platform' => 'platform',
+            'network_type' => 'network_type',
+            'asn' => 'asn',
+            'server_id' => 'server_id',
+            'protocol' => 'protocol',
         ];
         $dimensionLabelsMap = [
             'stat_date' => '日期',
             'app_version' => '应用版本',
             'country_code' => '国家',
             'platform' => '平台',
+            'network_type' => '网络类型',
+            'asn' => 'ASN',
+            'server_id' => '节点',
+            'protocol' => '协议',
         ];
 
         try {
             $queryParams = $params;
-            if (in_array('app_version', $dimensions, true)) {
-                unset($queryParams['appVersion']);
-            }
-            if (in_array('country_code', $dimensions, true)) {
-                unset($queryParams['country']);
-            }
-            if (in_array('platform', $dimensions, true)) {
-                unset($queryParams['platform']);
-            }
 
             $eventTable = $this->eventTable();
             $newUsers = $this->baseQuery($queryParams)
@@ -2404,12 +2405,11 @@ class FunnelAnalyticsService
             $groupColumns = [];
             foreach ($dimensions as $item) {
                 $sourceColumn = $dimensionColumns[$item];
-                $query->whereNotNull($sourceColumn);
-                if ($sourceColumn !== 'event_date') {
-                    $query->where($sourceColumn, '!=', '');
-                }
-                $query->selectRaw("{$sourceColumn} AS {$item}");
-                $groupColumns[] = $sourceColumn;
+                $expression = $sourceColumn === 'event_date'
+                    ? 'event_date'
+                    : "COALESCE(NULLIF(TRIM({$sourceColumn}), ''), 'unknown')";
+                $query->selectRaw("{$expression} AS {$item}");
+                $groupColumns[] = DB::raw($expression);
             }
 
             $jsonValue = static fn (string $key): string => "LOWER(COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(event_params_json, '$.{$key}')), ''), ''))";
@@ -2523,6 +2523,39 @@ class FunnelAnalyticsService
                 $dimensions
             ));
 
+            $launcherEvents = [
+                'app_foreground', 'attribution_result', 'screen_view', 'element_click',
+                'business_task_completed', 'core_action', 'launcher_onboarding_view',
+                'launcher_onboarding_action', 'launcher_default_prompt_show',
+                'launcher_default_prompt_action', 'launcher_default_setting_result', 'launcher_home_view',
+            ];
+            $coverageBase = $this->baseQuery($queryParams)->whereIn('event_name', $launcherEvents);
+            $dimensionCoverage = (array) (clone $coverageBase)->selectRaw("COUNT(*) AS total_events,
+                COUNT(CASE WHEN NULLIF(TRIM(network_type), '') IS NOT NULL THEN 1 END) AS network_type_events,
+                COUNT(CASE WHEN NULLIF(TRIM(asn), '') IS NOT NULL THEN 1 END) AS asn_events,
+                COUNT(CASE WHEN NULLIF(TRIM(server_id), '') IS NOT NULL THEN 1 END) AS server_id_events,
+                COUNT(CASE WHEN NULLIF(TRIM(protocol), '') IS NOT NULL THEN 1 END) AS protocol_events")->first();
+            $dimensionOptions = [];
+            foreach ([
+                'networkTypes' => ['network_type', 'networkType'],
+                'asns' => ['asn', 'asn'],
+                'serverIds' => ['server_id', 'serverId'],
+                'protocols' => ['protocol', 'protocol'],
+            ] as $optionKey => [$column, $filterKey]) {
+                $optionParams = $queryParams;
+                unset($optionParams[$filterKey]);
+                $dimensionOptions[$optionKey] = $this->baseQuery($optionParams)
+                    ->whereIn('event_name', $launcherEvents)
+                    ->whereRaw("NULLIF(TRIM({$column}), '') IS NOT NULL")
+                    ->selectRaw("TRIM({$column}) AS normalized_value")
+                    ->distinct()
+                    ->orderBy('normalized_value')
+                    ->limit(100)
+                    ->pluck('normalized_value')
+                    ->values()
+                    ->all();
+            }
+
             return [
                 'rows' => $rows->all(),
                 'dimension' => $dimension,
@@ -2534,7 +2567,9 @@ class FunnelAnalyticsService
                 'scope' => 'users',
                 'domain' => 'vpn',
                 'versionOptions' => $this->launcherVersionComparisonVersionOptions($params),
-                'notice' => "同项目、同日期范围、同平台和国家下按 {$dimensionLabel} 对比；付费归因新人取同区间 app_first_open 且 attribution_result.attribution_status=attributed 的用户，语言确认率=语言确认UV/语言页曝光UV，Launcher设置成功率=设置成功UV/点击立即设置UV，核心功能激活率=成功扫码或生成码UV/付费归因新人。专用事件缺失但存在可确认的通用 screen_view/element_click 时兼容统计并在打点状态中提示；设置结果没有明确事件时保持暂无。摘要为各分组相加，跨版本用户可能重复。",
+                'dimensionCoverage' => $dimensionCoverage,
+                'dimensionOptions' => $dimensionOptions,
+                'notice' => "同项目、同日期范围及筛选条件下按 {$dimensionLabel} 聚合；付费归因新人取同区间 app_first_open 且 attribution_result.attribution_status=attributed 的用户，语言确认率=语言确认UV/语言页曝光UV，Launcher设置成功率=设置成功UV/点击立即设置UV，核心功能激活率=成功扫码或生成码UV/付费归因新人。空的网络维度保留为 unknown，不伪装成真实 ASN、节点或协议；专用事件缺失但存在可确认的通用 screen_view/element_click 时兼容统计并在打点状态中提示；设置结果没有明确事件时保持暂无。摘要为各分组相加，跨维度用户可能重复。",
             ];
         } catch (Throwable $exception) {
             Log::warning('jkcl_launcher_version_comparison_failed', ['message' => $exception->getMessage()]);
@@ -5242,9 +5277,13 @@ class FunnelAnalyticsService
     {
         $query = DB::connection('adb')->table($this->eventTable())
             ->whereBetween('event_date', [$params['dateFrom'], $params['dateTo']]);
-        foreach (['projectCode' => 'project_code', 'appIdentifier' => 'app_identifier', 'platform' => 'platform', 'country' => 'country_code', 'appVersion' => 'app_version', 'buildNumber' => 'app_build', 'networkType' => 'network_type', 'placement' => 'placement', 'adFormat' => 'ad_format', 'adSource' => 'ad_source', 'qualityStatus' => 'quality_status', 'eventModule' => 'event_module'] as $key => $column) {
+        foreach (['projectCode' => 'project_code', 'appIdentifier' => 'app_identifier', 'platform' => 'platform', 'country' => 'country_code', 'appVersion' => 'app_version', 'buildNumber' => 'app_build', 'networkType' => 'network_type', 'asn' => 'asn', 'serverId' => 'server_id', 'protocol' => 'protocol', 'placement' => 'placement', 'adFormat' => 'ad_format', 'adSource' => 'ad_source', 'qualityStatus' => 'quality_status', 'eventModule' => 'event_module'] as $key => $column) {
             if (!empty($params[$key])) {
-                $query->where($column, $params[$key]);
+                if (in_array($key, ['networkType', 'asn', 'serverId', 'protocol'], true)) {
+                    $query->whereRaw("TRIM({$column}) = ?", [trim((string) $params[$key])]);
+                } else {
+                    $query->where($column, $params[$key]);
+                }
             }
         }
         if (empty($params['projectCode']) && !empty($params['projectCodes'])) {

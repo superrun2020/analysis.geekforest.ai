@@ -75,7 +75,7 @@ test("server VPN Overall is restricted to internal node projects", async () => {
   assert.match(service, /服务器VPN Overall仅支持 A003、A005、A007/);
 });
 
-test("VPN and Launcher version comparisons stay separate", async () => {
+test("VPN comparison and Launcher Overall stay separate", async () => {
   const [page, source, api, request, service] = await Promise.all([
     file("app/page.tsx"),
     file("app/operational-funnel.tsx"),
@@ -87,18 +87,38 @@ test("VPN and Launcher version comparisons stay separate", async () => {
   assert.match(page, /vpnVersions/);
   assert.match(page, /launcherVersions/);
   assert.match(page, /VPN版本对比/);
-  assert.match(page, /Launcher版本对比/);
+  assert.match(page, /Launcher Overall/);
   assert.match(source, /versionProduct/);
   assert.match(source, /startsWith\("L"\)/);
-  assert.match(source, /setVersionFilter\(appVersion === "全部版本"/);
+  assert.match(source, /setVersionFilter\(nextVersion\)/);
   assert.match(source, /paidAttributedNewUsers/);
   assert.match(source, /vpnSessionCount/);
+  assert.match(source, /LAUNCHER_OVERALL_DIMENSIONS/);
+  assert.match(source, /Launcher打点缺少：/);
   assert.match(api, /versionProduct\?: "vpn" \| "launcher"/);
+  assert.match(api, /asn\?: string/);
+  assert.match(api, /serverId\?: string/);
+  assert.match(api, /protocol\?: string/);
   assert.match(request, /versionProduct/);
-  assert.match(request, /Launcher版本对比必须使用VPN诊断域/);
+  assert.match(request, /Launcher Overall必须使用VPN诊断域/);
+  assert.match(request, /dimensions.*max:8/);
+  assert.match(request, /dimension.*network_type/);
+  assert.match(request, /dimension.*asn/);
+  assert.match(request, /dimension.*server_id/);
+  assert.match(request, /dimension.*protocol/);
   assert.match(service, /launcherVersionComparisonFromEvents/);
   assert.match(service, /versionProduct/);
   assert.match(service, /versionComparisonFromA003VpnSummary/);
+  assert.match(service, /'network_type' => 'network_type'/);
+  assert.match(service, /'asn' => 'asn'/);
+  assert.match(service, /'server_id' => 'server_id'/);
+  assert.match(service, /'protocol' => 'protocol'/);
+  assert.match(service, /dimensionCoverage/);
+  assert.match(service, /unset\(\$optionParams\[\$filterKey\]\)/);
+  assert.match(service, /NULLIF\(TRIM\(network_type\), ''\)/);
+  assert.match(service, /TRIM\(\{\$column\}\) AS normalized_value/);
+  assert.match(service, /whereRaw\("TRIM\(\{\$column\}\) = \?", \[trim\(\(string\) \$params\[\$key\]\)\]\)/);
+  assert.doesNotMatch(service, /unset\(\$queryParams\[/);
   assert.match(service, /launcher_guide_page/);
   assert.match(service, /launcher_page/);
   assert.match(service, /trackingIssues/);
@@ -107,6 +127,14 @@ test("VPN and Launcher version comparisons stay separate", async () => {
   assert.match(source, /row\.trackingIssues/);
   assert.match(service, /launcherSettingResultCoverageComplete/);
   assert.match(source, /hasObservedRate/);
+  assert.match(source, /denominatorRows\.every/);
+  assert.match(source, /draftDimensions/);
+  assert.match(source, /setDimensions\(draftDimensions\)/);
+  assert.match(source, /dimensionOptions: \{\}/);
+  assert.match(source, /dimensionCoverage: \{\}/);
+  assert.match(source, /setNetworkTypeFilter\(""\)/);
+  assert.match(source, /setVersionFilter\(""\)/);
+  assert.match(source, /missingLauncherDimensions/);
 });
 
 test("deep-dive stage counts ignore ratio metric cards", async () => {

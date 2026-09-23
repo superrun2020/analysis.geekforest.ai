@@ -2844,6 +2844,35 @@ body {
 .config-checkboxes label { display: flex; align-items: center; gap: 8px; padding: 5px 4px; border-radius: 6px; color: #3e4c59; font-size: 13px; cursor: pointer; }
 .config-checkboxes label:hover { background: #f4f8ff; }
 .config-checkboxes input { accent-color: #1f5f8b; }
+.launcher-overall-layout { display: flex; flex-direction: column; gap: 16px; }
+.launcher-overall-layout .launcher-overall-config { order: -1; position: static; width: 100%; padding: 0; }
+.launcher-overall-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 18px 22px; border-bottom: 1px solid #edf1f6; }
+.launcher-overall-heading div { display: grid; gap: 4px; }
+.launcher-overall-heading strong { color: #1f2937; font-size: 16px; }
+.launcher-overall-heading span, .launcher-overall-heading em { color: #7b8794; font-size: 12px; font-style: normal; }
+.launcher-overall-config .config-group { display: grid; grid-template-columns: 92px minmax(0, 1fr); align-items: start; gap: 12px; margin: 0; padding: 16px 22px; border-top: 0; border-bottom: 1px dashed #e5ebf3; }
+.launcher-overall-config .config-title { margin: 7px 0 0; color: #8a94a6; }
+.launcher-overall-config .config-select { max-width: 360px; }
+.launcher-overall-config .config-hint { grid-column: 2; margin-top: -4px; }
+.launcher-overall-config .config-options button { border-radius: 7px; font-weight: 650; }
+.launcher-overall-config .config-options button.active { border-color: #2f6df6; background: #2f6df6; box-shadow: 0 4px 10px rgba(47,109,246,.16); }
+.launcher-overall-config .config-checkboxes { flex-direction: row; flex-wrap: wrap; gap: 8px; max-height: none; overflow: visible; }
+.launcher-overall-config .config-checkboxes label { padding: 7px 10px; border: 1px solid #dfe6ef; border-radius: 7px; background: #fff; }
+.launcher-overall-filter-grid { display: grid; grid-template-columns: repeat(3, minmax(180px, 1fr)); gap: 12px; }
+.launcher-overall-filter-grid label { display: grid; gap: 5px; color: #8a94a6; font-size: 12px; }
+.launcher-overall-filter-grid select { width: 100%; height: 38px; border: 1px solid #dfe6ef; border-radius: 8px; padding: 0 10px; background: #fff; color: #1f2937; }
+.launcher-overall-filter-grid select:disabled { background: #f6f8fb; color: #9aa5b5; }
+.launcher-dimension-warning { margin: 14px 22px; }
+.launcher-overall-actions { border-top: 0; }
+.launcher-overall-actions .overall-active-hint { padding: 0; }
+.launcher-overall-page .version-compare-main > .surface { padding: 0; overflow: hidden; }
+.launcher-overall-page .version-compare-footnote { margin: 12px 18px 16px; }
+@media (max-width: 900px) {
+  .launcher-overall-config .config-group { grid-template-columns: 1fr; }
+  .launcher-overall-config .config-hint { grid-column: 1; }
+  .launcher-overall-filter-grid { grid-template-columns: 1fr; }
+  .launcher-overall-actions { align-items: flex-start; flex-direction: column; }
+}
 @media (max-width: 1180px) {
   .version-compare-layout { grid-template-columns: 1fr; }
   .version-compare-config { position: static; }

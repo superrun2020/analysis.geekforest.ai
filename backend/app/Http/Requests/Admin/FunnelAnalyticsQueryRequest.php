@@ -49,13 +49,16 @@ class FunnelAnalyticsQueryRequest extends FormRequest
             'domain' => ['nullable', Rule::in(['vpn', 'ads', 'quality'])],
             'versionProduct' => ['nullable', Rule::in(['vpn', 'launcher'])],
             'unit' => ['nullable', Rule::in(['users', 'sessions', 'events'])],
-            'dimension' => ['nullable', Rule::in(['stat_date', 'project_code', 'app_version', 'country_code', 'platform', 'network_type', 'device_model', 'ad_format', 'placement'])],
-            'dimensions' => 'nullable|array|min:1|max:6',
-            'dimensions.*' => ['string', Rule::in(['event_date', 'stat_date', 'project_code', 'app_version', 'user_country_code', 'country_code', 'platform', 'asn', 'server_id', 'protocol', 'event_name', 'raw_event_name', 'dns_provider', 'dns_server', 'target_id', 'test_type', 'matched_route'])],
+            'dimension' => ['nullable', Rule::in(['event_date', 'stat_date', 'project_code', 'app_version', 'user_country_code', 'country_code', 'platform', 'network_type', 'asn', 'server_id', 'protocol', 'device_model', 'ad_format', 'placement'])],
+            'dimensions' => 'nullable|array|min:1|max:8',
+            'dimensions.*' => ['string', Rule::in(['event_date', 'stat_date', 'project_code', 'app_version', 'user_country_code', 'country_code', 'platform', 'network_type', 'asn', 'server_id', 'protocol', 'event_name', 'raw_event_name', 'dns_provider', 'dns_server', 'target_id', 'test_type', 'matched_route'])],
             'startStep' => 'nullable|string|max:100',
             'endStep' => 'nullable|string|max:100',
             'screenName' => 'nullable|string|max:100',
             'networkType' => 'nullable|string|max:32',
+            'asn' => 'nullable|string|max:64',
+            'serverId' => 'nullable|string|max:191',
+            'protocol' => 'nullable|string|max:64',
             'placement' => 'nullable|string|max:100',
             'adFormat' => 'nullable|string|max:32',
             'adSource' => 'nullable|string|max:191',
@@ -99,12 +102,12 @@ class FunnelAnalyticsQueryRequest extends FormRequest
             if ($this->input('page') === 'version_comparison') {
                 $versionProduct = (string) $this->input('versionProduct', 'vpn');
                 if ($versionProduct === 'launcher' && $this->input('domain') !== 'vpn') {
-                    $validator->errors()->add('domain', 'Launcher版本对比必须使用VPN诊断域');
+                    $validator->errors()->add('domain', 'Launcher Overall必须使用VPN诊断域');
                 }
                 if ($this->filled('projectCode')) {
                     $projectCode = strtoupper(trim((string) $this->input('projectCode')));
                     if ($versionProduct === 'launcher' && !str_starts_with($projectCode, 'L')) {
-                        $validator->errors()->add('projectCode', 'Launcher版本对比只能选择L开头项目');
+                        $validator->errors()->add('projectCode', 'Launcher Overall只能选择L开头项目');
                     }
                     if ($versionProduct === 'vpn' && str_starts_with($projectCode, 'L')) {
                         $validator->errors()->add('projectCode', 'VPN版本对比不能选择L开头项目');
