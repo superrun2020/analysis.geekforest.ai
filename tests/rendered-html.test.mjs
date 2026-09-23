@@ -46,6 +46,35 @@ test("compiled bundle contains current product features", async () => {
   assert.match(js, /广告链路总表/);
 });
 
+test("server VPN Overall is restricted to internal node projects", async () => {
+  const [page, source, api, request, service] = await Promise.all([
+    file("app/page.tsx"),
+    file("app/operational-funnel.tsx"),
+    file("app/funnel-analysis-api.ts"),
+    file("backend/app/Http/Requests/Admin/FunnelAnalyticsQueryRequest.php"),
+    file("backend/app/Services/FunnelAnalyticsService.php"),
+  ]);
+
+  assert.match(page, /serverVpn/);
+  assert.match(page, /服务器VPN Overall/);
+  assert.match(source, /SERVER_VPN_PROJECTS/);
+  assert.match(source, /A003/);
+  assert.match(source, /A005/);
+  assert.match(source, /A007/);
+  assert.match(source, /ServerVpnOverall/);
+  assert.match(source, /serverVpnDataMatches/);
+  assert.match(source, /forceRefresh: serverVpnQueryKey > 0/);
+  assert.match(api, /server_vpn_overall/);
+  assert.match(request, /server_vpn_overall/);
+  assert.match(request, /服务器VPN Overall必须选择项目/);
+  assert.match(service, /serverVpnOverallPage/);
+  assert.match(service, /v2_ip_pool/);
+  assert.match(service, /node_project_groups/);
+  assert.match(service, /inventoryAvailable/);
+  assert.match(service, /connection\('ad_revenue'\)/);
+  assert.match(service, /服务器VPN Overall仅支持 A003、A005、A007/);
+});
+
 test("VPN and Launcher version comparisons stay separate", async () => {
   const [page, source, api, request, service] = await Promise.all([
     file("app/page.tsx"),

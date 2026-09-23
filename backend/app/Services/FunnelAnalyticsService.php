@@ -672,7 +672,8 @@ class FunnelAnalyticsService
         // The VPN workbench already caches its DWS summary internally; avoid
         // double-caching it under a second key.
         $skipCache = ($page === 'workbench' && ($params['domain'] ?? 'ads') === 'vpn')
-            || ($page === 'exit_ip_quality' && !empty($params['forceRefresh']));
+            || ($page === 'exit_ip_quality' && !empty($params['forceRefresh']))
+            || ($page === 'server_vpn_overall' && !empty($params['forceRefresh']));
         if (in_array($page, $this->cacheableQueryPages(), true) && !$skipCache) {
             return $this->cacheAnalysisResult($page, $params, function () use ($page, $params): array {
                 return $this->dispatchQuery($page, $params);
@@ -691,7 +692,7 @@ class FunnelAnalyticsService
      */
     private function cacheableQueryPages(): array
     {
-        return ['overview', 'workbench', 'diagnosis', 'path', 'evidence', 'version_comparison', 'ad_overall', 'ad_dns_report', 'exit_ip_quality', 'domain_report'];
+        return ['overview', 'workbench', 'diagnosis', 'path', 'evidence', 'server_vpn_overall', 'version_comparison', 'ad_overall', 'ad_dns_report', 'exit_ip_quality', 'domain_report'];
     }
 
     /**
@@ -710,6 +711,7 @@ class FunnelAnalyticsService
             'issues' => $this->issues($params),
             'snapshot' => $this->snapshot(),
             'network_failure_matrix' => $this->networkFailureMatrix($params),
+            'server_vpn_overall' => $this->serverVpnOverallPage($params),
             'version_comparison' => $this->versionComparisonPage($params),
             'ad_overall' => $this->adOverallPage($params),
             'ad_dns_report' => $this->adDnsReportPage($params),
@@ -6428,6 +6430,234 @@ class FunnelAnalyticsService
     private function emptyExitIpQualityTotals(): array
     {
         return ['scope' => 'all_eligible_rows', 'rowLimit' => 0, 'returnedRows' => 0, 'mayBeTruncated' => false, 'ipRows' => 0, 'distinctIps' => 0, 'sessionAssociationCount' => 0, 'stableSessionAssociationCount' => 0, 'ambiguousSessionAssociationCount' => 0, 'tcpAttemptCount' => 0, 'tcpFailedCount' => 0, 'suspectCount' => 0, 'watchCount' => 0];
+    }
+
+    /**
+     * Internal server-node quality for the explicitly approved VPN projects.
+     * Connection metrics come from ADB; node inventory is enriched from nxpanel.
+     */
+    private function serverVpnOverallPage(array $params): array
+    {
+        $allowedProjects = ['A003', 'A005', 'A007'];
+        $projectCode = strtoupper(trim((string) ($params['projectCode'] ?? '')));
+        if (!in_array($projectCode, $allowedProjects, true)) {
+            throw new InvalidArgumentException('服务器VPN Overall仅支持 A003、A005、A007');
+        }
+
+        $vpnQualityTable = trim((string) config('adb.funnel_aggregates.tables.vpn_quality_daily', 'dws_vpn_connection_quality_daily'));
+        if ($vpnQualityTable === '') {
+            $vpnQualityTable = 'dws_vpn_connection_quality_daily';
+        }
+        $query = DB::connection('adb')->table($vpnQualityTable)
+            ->where('project_code', $projectCode)
+            ->whereBetween('stat_date', [$params['dateFrom'], $params['dateTo']])
+            ->whereNotNull('server_id')
+            ->where('server_id', '<>', '');
+        $this->whereBlank($query, 'phase_name');
+
+        if (!empty($params['appIdentifier'])) {
+            $query->where('app_identifier', (string) $params['appIdentifier']);
+        }
+        if (!empty($params['platform']) && !$this->isAllSummaryFilterValue((string) $params['platform'])) {
+            $query->where('platform', strtolower((string) $params['platform']));
+        }
+        if (!empty($params['country']) && !$this->isAllSummaryFilterValue((string) $params['country'])) {
+            $query->where('country_code', strtoupper((string) $params['country']));
+        }
+        if (!empty($params['appVersion']) && !$this->isAllSummaryFilterValue((string) $params['appVersion'])) {
+            $query->where('app_version', (string) $params['appVersion']);
+        }
+
+        $metricRows = $query
+            ->selectRaw('server_id, MAX(app_identifier) AS app_identifier, MAX(node_country) AS node_country')
+            ->selectRaw('SUM(vpn_session_count) AS vpn_session_count')
+            ->selectRaw('SUM(connection_attempt_count) AS connection_attempt_count')
+            ->selectRaw('SUM(connection_result_count) AS connection_result_count')
+            ->selectRaw('SUM(connection_success_count) AS connection_success_count')
+            ->selectRaw('SUM(connection_failed_count) AS connection_failed_count')
+            ->selectRaw('SUM(connectivity_check_count) AS connectivity_check_count')
+            ->selectRaw('SUM(connectivity_success_count) AS connectivity_success_count')
+            ->selectRaw('SUM(duration_sample_count) AS duration_sample_count')
+            ->selectRaw('SUM(duration_avg_ms * duration_sample_count) AS duration_weighted_sum')
+            ->groupBy('server_id')
+            ->orderByDesc('vpn_session_count')
+            ->get();
+
+        $serverIds = $metricRows->pluck('server_id')->filter()->unique()->values()->all();
+        $resourceNodes = collect();
+        $poolNodes = collect();
+        $inventoryAvailable = true;
+        $enrichmentWarnings = [];
+        try {
+            if (!empty($serverIds)) {
+                foreach (['resource_nodes', 'node_project_groups', 'v2_ip_pool'] as $table) {
+                    if (!Schema::connection('ad_revenue')->hasTable($table)) {
+                        throw new InvalidArgumentException("missing inventory table: {$table}");
+                    }
+                }
+                $decodeIds = static function ($value): array {
+                    if (is_array($value)) {
+                        return array_values(array_map('intval', $value));
+                    }
+                    if (!is_string($value) || trim($value) === '') {
+                        return [];
+                    }
+                    $decoded = json_decode($value, true);
+                    return is_array($decoded) ? array_values(array_map('intval', $decoded)) : [];
+                };
+                $projectGroupIds = DB::connection('ad_revenue')->table('node_project_groups')
+                    ->where('enabled', 1)
+                    ->select(['id', 'project_codes'])
+                    ->get()
+                    ->filter(function ($group) use ($projectCode): bool {
+                        $codes = is_array($group->project_codes)
+                            ? $group->project_codes
+                            : json_decode((string) $group->project_codes, true);
+                        return is_array($codes) && in_array($projectCode, array_map('strtoupper', $codes), true);
+                    })
+                    ->pluck('id')
+                    ->map(static fn ($id): int => (int) $id)
+                    ->values()
+                    ->all();
+                $resourceNodes = DB::connection('ad_revenue')->table('resource_nodes')
+                    ->whereNull('deleted_at')
+                    ->whereIn('host', $serverIds)
+                    ->select(['id', 'legacy_server_id', 'name', 'type', 'host', 'port', 'server_port', 'online', 'is_online', 'available_status', 'show_enabled', 'status', 'project_group_ids'])
+                    ->orderBy('id')
+                    ->get()
+                    ->groupBy('host')
+                    ->map(function ($candidates) use ($decodeIds, $projectGroupIds) {
+                        return $candidates
+                            ->filter(function ($candidate) use ($decodeIds, $projectGroupIds): bool {
+                                $ids = $decodeIds($candidate->project_group_ids ?? null);
+                                return $ids === [] || array_intersect($ids, $projectGroupIds) !== [];
+                            })
+                            ->sortBy(function ($candidate) use ($decodeIds, $projectGroupIds): int {
+                                $ids = $decodeIds($candidate->project_group_ids ?? null);
+                                $specific = $ids !== [] && array_intersect($ids, $projectGroupIds) !== [];
+                                return ($specific ? 0 : 1000000) + (int) $candidate->id;
+                            })
+                            ->first();
+                    })
+                    ->filter();
+                $poolNodes = DB::connection('ad_revenue')->table('v2_ip_pool')
+                    ->whereIn('ip', $serverIds)
+                    ->select(['id', 'ip', 'hostname', 'country', 'city', 'org', 'provider_id', 'provider_ip_id', 'ip_type', 'score', 'load', 'max_load', 'success_rate', 'status', 'risk_level', 'total_requests', 'successful_requests', 'last_used_at'])
+                    ->orderBy('id')
+                    ->get()
+                    ->keyBy('ip');
+            }
+        } catch (Throwable $exception) {
+            $inventoryAvailable = false;
+            $resourceNodes = collect();
+            $poolNodes = collect();
+            $enrichmentWarnings[] = 'node_inventory_unavailable';
+            Log::warning('jkcl_server_vpn_inventory_enrichment_failed', [
+                'projectCode' => $projectCode,
+                'message' => $exception->getMessage(),
+            ]);
+        }
+
+        $rows = $metricRows->map(function ($metric) use ($resourceNodes, $poolNodes): array {
+            $serverId = (string) $metric->server_id;
+            $resource = $resourceNodes->get($serverId);
+            $pool = $poolNodes->get($serverId);
+            $attempts = (int) ($metric->connection_attempt_count ?? 0);
+            $successes = (int) ($metric->connection_success_count ?? 0);
+            $failures = (int) ($metric->connection_failed_count ?? 0);
+            $results = (int) ($metric->connection_result_count ?? 0);
+            $checks = (int) ($metric->connectivity_check_count ?? 0);
+            $checkSuccesses = (int) ($metric->connectivity_success_count ?? 0);
+            $durationSamples = (int) ($metric->duration_sample_count ?? 0);
+            $connectionSuccessRate = $results > 0 ? round($successes / $results * 100, 2) : null;
+            $resultCoverageRate = $attempts > 0 ? round($results / $attempts * 100, 2) : null;
+            $connectivitySuccessRate = $checks > 0 ? round($checkSuccesses / $checks * 100, 2) : null;
+            $avgDurationMs = $durationSamples > 0 ? round((float) $metric->duration_weighted_sum / $durationSamples, 1) : null;
+            $status = match (true) {
+                $results === 0 => 'unavailable',
+                $connectionSuccessRate < 30 => 'bad',
+                $connectionSuccessRate < 60 => 'warn',
+                default => 'good',
+            };
+
+            return [
+                'serverId' => $serverId,
+                'nodeId' => $resource?->id,
+                'legacyServerId' => $resource?->legacy_server_id,
+                'nodeName' => $resource?->name ?: ($pool?->hostname ?: ($metric->node_country ?: $serverId)),
+                'nodeType' => $resource?->type,
+                'nodeHost' => $resource?->host ?: $serverId,
+                'nodePort' => $resource?->server_port ?: $resource?->port,
+                'nodeCountry' => $pool?->country,
+                'nodeCity' => $pool?->city,
+                'organization' => $pool?->org,
+                'inventoryMatched' => $resource !== null || $pool !== null,
+                'poolMatched' => $pool !== null,
+                'poolId' => $pool?->id,
+                'poolStatus' => $pool?->status,
+                'poolScore' => $pool?->score !== null ? (float) $pool->score : null,
+                'poolLoad' => $pool?->load !== null ? (int) $pool->load : null,
+                'poolMaxLoad' => $pool?->max_load !== null ? (int) $pool->max_load : null,
+                'poolSuccessRate' => $pool?->success_rate !== null ? (float) $pool->success_rate : null,
+                'riskLevel' => $pool?->risk_level !== null ? (int) $pool->risk_level : null,
+                'resourceStatus' => $resource?->status,
+                'resourceOnline' => $resource ? (bool) ($resource->is_online ?? $resource->online ?? false) : null,
+                'showEnabled' => $resource ? (bool) $resource->show_enabled : null,
+                'vpnSessionCount' => (int) ($metric->vpn_session_count ?? 0),
+                'connectionAttemptCount' => $attempts,
+                'connectionResultCount' => $results,
+                'connectionSuccessCount' => $successes,
+                'connectionFailedCount' => $failures,
+                'connectionSuccessRate' => $connectionSuccessRate,
+                'resultCoverageRate' => $resultCoverageRate,
+                'connectivityCheckCount' => $checks,
+                'connectivitySuccessCount' => $checkSuccesses,
+                'connectivitySuccessRate' => $connectivitySuccessRate,
+                'avgDurationMs' => $avgDurationMs,
+                'status' => $status,
+            ];
+        })->values()->all();
+
+        $totals = [
+            'nodeCount' => count($rows),
+            'inventoryMatchedCount' => count(array_filter($rows, static fn (array $row): bool => $row['inventoryMatched'])),
+            'poolMatchedCount' => count(array_filter($rows, static fn (array $row): bool => $row['poolMatched'])),
+            'vpnSessionCount' => array_sum(array_column($rows, 'vpnSessionCount')),
+            'connectionAttemptCount' => array_sum(array_column($rows, 'connectionAttemptCount')),
+            'connectionResultCount' => array_sum(array_column($rows, 'connectionResultCount')),
+            'connectionSuccessCount' => array_sum(array_column($rows, 'connectionSuccessCount')),
+            'connectionFailedCount' => array_sum(array_column($rows, 'connectionFailedCount')),
+            'connectivityCheckCount' => array_sum(array_column($rows, 'connectivityCheckCount')),
+            'connectivitySuccessCount' => array_sum(array_column($rows, 'connectivitySuccessCount')),
+        ];
+        $totals['connectionSuccessRate'] = $totals['connectionResultCount'] > 0
+            ? round($totals['connectionSuccessCount'] / $totals['connectionResultCount'] * 100, 2)
+            : null;
+        $totals['resultCoverageRate'] = $totals['connectionAttemptCount'] > 0
+            ? round($totals['connectionResultCount'] / $totals['connectionAttemptCount'] * 100, 2)
+            : null;
+        $totals['connectivitySuccessRate'] = $totals['connectivityCheckCount'] > 0
+            ? round($totals['connectivitySuccessCount'] / $totals['connectivityCheckCount'] * 100, 2)
+            : null;
+
+        return [
+            'context' => $this->context(array_replace($params, ['projectCode' => $projectCode])),
+            'serverVpnOverall' => [
+                'available' => count($rows) > 0,
+                'reason' => count($rows) > 0 ? null : '该项目在所选日期没有可用的服务器节点连接汇总',
+                'allowedProjects' => $allowedProjects,
+                'projectCode' => $projectCode,
+                'dateFrom' => $params['dateFrom'],
+                'dateTo' => $params['dateTo'],
+                'rows' => $rows,
+                'totals' => $totals,
+                'inventoryAvailable' => $inventoryAvailable,
+                'enrichmentWarnings' => $enrichmentWarnings,
+                'queriedAt' => Carbon::now(config('app.timezone', 'Asia/Shanghai'))->toDateTimeString(),
+                'source' => $vpnQualityTable . ' + ad_revenue.v2_ip_pool + resource_nodes',
+                'notice' => '连接尝试、连接结果、成功与失败均按服务器节点汇总事件计数；连接成功率以 connection_result_count 为分母，未上报结果不计为失败。节点资料只匹配当前项目组或共享 resource_nodes，并优先补充 v2_ip_pool 信息。',
+            ],
+        ];
     }
 
     private function networkFailureMatrix(array $params): array

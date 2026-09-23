@@ -34,7 +34,7 @@ class FunnelAnalyticsQueryRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'page' => ['required', Rule::in(['overview', 'workbench', 'diagnosis', 'cohort', 'path', 'evidence', 'issues', 'snapshot', 'network_failure_matrix', 'version_comparison', 'ad_overall', 'ad_dns_report', 'exit_ip_quality', 'domain_report'])],
+            'page' => ['required', Rule::in(['overview', 'workbench', 'diagnosis', 'cohort', 'path', 'evidence', 'issues', 'snapshot', 'network_failure_matrix', 'server_vpn_overall', 'version_comparison', 'ad_overall', 'ad_dns_report', 'exit_ip_quality', 'domain_report'])],
             'dateFrom' => 'required|date_format:Y-m-d',
             'dateTo' => 'required|date_format:Y-m-d|after_or_equal:dateFrom',
             'projectCode' => 'nullable|string|max:64',
@@ -109,6 +109,15 @@ class FunnelAnalyticsQueryRequest extends FormRequest
                     if ($versionProduct === 'vpn' && str_starts_with($projectCode, 'L')) {
                         $validator->errors()->add('projectCode', 'VPN版本对比不能选择L开头项目');
                     }
+                }
+            }
+
+            if ($this->input('page') === 'server_vpn_overall') {
+                $projectCode = strtoupper(trim((string) $this->input('projectCode', '')));
+                if ($projectCode === '') {
+                    $validator->errors()->add('projectCode', '服务器VPN Overall必须选择项目');
+                } elseif (!in_array($projectCode, ['A003', 'A005', 'A007'], true)) {
+                    $validator->errors()->add('projectCode', '服务器VPN Overall仅支持 A003、A005、A007');
                 }
             }
 

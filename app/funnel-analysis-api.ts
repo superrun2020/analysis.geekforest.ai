@@ -1,7 +1,7 @@
 import { getCompanyAuthToken } from "./company-auth";
 import { trackingApiBaseUrl } from "./api-base-url";
 
-export type FunnelPageKey = "overview" | "workbench" | "diagnosis" | "cohort" | "path" | "evidence" | "issues" | "snapshot" | "network_failure_matrix" | "version_comparison" | "ad_overall" | "ad_dns_report" | "exit_ip_quality" | "domain_report";
+export type FunnelPageKey = "overview" | "workbench" | "diagnosis" | "cohort" | "path" | "evidence" | "issues" | "snapshot" | "network_failure_matrix" | "server_vpn_overall" | "version_comparison" | "ad_overall" | "ad_dns_report" | "exit_ip_quality" | "domain_report";
 
 export type FunnelQuery = {
   page: FunnelPageKey;
