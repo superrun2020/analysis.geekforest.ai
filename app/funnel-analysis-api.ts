@@ -11,6 +11,7 @@ export type FunnelQuery = {
   appIdentifier?: string;
   platform?: "android" | "ios";
   country?: string;
+  nodeCountry?: string;
   appVersion?: string;
   networkType?: string;
   asn?: string;

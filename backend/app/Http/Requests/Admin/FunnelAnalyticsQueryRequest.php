@@ -42,6 +42,7 @@ class FunnelAnalyticsQueryRequest extends FormRequest
             'issueId' => 'nullable|string|max:64',
             'platform' => ['nullable', Rule::in(['android', 'ios'])],
             'country' => 'nullable|string|max:16',
+            'nodeCountry' => 'nullable|string|max:64',
             'appVersion' => 'nullable|string|max:64',
             'buildNumber' => 'nullable|integer|min:0',
             'timezone' => 'nullable|timezone|max:64',
@@ -49,9 +50,9 @@ class FunnelAnalyticsQueryRequest extends FormRequest
             'domain' => ['nullable', Rule::in(['vpn', 'ads', 'quality'])],
             'versionProduct' => ['nullable', Rule::in(['vpn', 'launcher'])],
             'unit' => ['nullable', Rule::in(['users', 'sessions', 'events'])],
-            'dimension' => ['nullable', Rule::in(['event_date', 'stat_date', 'project_code', 'app_version', 'user_country_code', 'country_code', 'platform', 'network_type', 'asn', 'server_id', 'protocol', 'device_model', 'ad_format', 'placement'])],
+            'dimension' => ['nullable', Rule::in(['event_date', 'stat_date', 'project_code', 'app_version', 'user_country_code', 'country_code', 'node_country', 'platform', 'network_type', 'asn', 'server_id', 'protocol', 'device_model', 'ad_format', 'placement'])],
             'dimensions' => 'nullable|array|min:1|max:8',
-            'dimensions.*' => ['string', Rule::in(['event_date', 'stat_date', 'project_code', 'app_version', 'user_country_code', 'country_code', 'platform', 'network_type', 'asn', 'server_id', 'protocol', 'event_name', 'raw_event_name', 'dns_provider', 'dns_server', 'target_id', 'test_type', 'matched_route'])],
+            'dimensions.*' => ['string', Rule::in(['event_date', 'stat_date', 'project_code', 'app_version', 'user_country_code', 'country_code', 'node_country', 'platform', 'network_type', 'asn', 'server_id', 'protocol', 'event_name', 'raw_event_name', 'dns_provider', 'dns_server', 'target_id', 'test_type', 'matched_route'])],
             'startStep' => 'nullable|string|max:100',
             'endStep' => 'nullable|string|max:100',
             'screenName' => 'nullable|string|max:100',
@@ -121,6 +122,20 @@ class FunnelAnalyticsQueryRequest extends FormRequest
                     $validator->errors()->add('projectCode', '服务器VPN Overall必须选择项目');
                 } elseif (!in_array($projectCode, ['A003', 'A005', 'A007'], true)) {
                     $validator->errors()->add('projectCode', '服务器VPN Overall仅支持 A003、A005、A007');
+                }
+                $allowedDimensions = ['stat_date', 'country_code', 'node_country', 'app_version', 'platform', 'network_type', 'server_id', 'protocol'];
+                if ($this->filled('dimension') && $this->filled('dimensions')) {
+                    $validator->errors()->add('dimensions', '服务器VPN Overall不能同时提交 dimension 和 dimensions');
+                }
+                $requestedDimensions = is_array($this->input('dimensions'))
+                    ? $this->input('dimensions')
+                    : ($this->filled('dimension') ? [(string) $this->input('dimension')] : []);
+                foreach ($requestedDimensions as $dimension) {
+                    if ($dimension === 'asn') {
+                        $validator->errors()->add('dimensions', '服务器VPN Overall的ASN维度暂不可用');
+                    } elseif (!in_array($dimension, $allowedDimensions, true)) {
+                        $validator->errors()->add('dimensions', "服务器VPN Overall不支持维度：{$dimension}");
+                    }
                 }
             }
 

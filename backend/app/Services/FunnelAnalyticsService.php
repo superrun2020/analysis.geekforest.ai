@@ -5087,7 +5087,7 @@ class FunnelAnalyticsService
     private function whereBlank(Builder $query, string $column): void
     {
         $query->where(function (Builder $inner) use ($column): void {
-            $inner->whereNull($column)->orWhere($column, '=', '');
+            $inner->whereNull($column)->orWhereRaw("TRIM(CAST({$column} AS CHAR)) = ''");
         });
     }
 
@@ -6471,6 +6471,100 @@ class FunnelAnalyticsService
         return ['scope' => 'all_eligible_rows', 'rowLimit' => 0, 'returnedRows' => 0, 'mayBeTruncated' => false, 'ipRows' => 0, 'distinctIps' => 0, 'sessionAssociationCount' => 0, 'stableSessionAssociationCount' => 0, 'ambiguousSessionAssociationCount' => 0, 'tcpAttemptCount' => 0, 'tcpFailedCount' => 0, 'suspectCount' => 0, 'watchCount' => 0];
     }
 
+    /** @return array<int, string> */
+    private function serverVpnDimensions(array $params): array
+    {
+        $allowed = ['stat_date', 'country_code', 'node_country', 'app_version', 'platform', 'network_type', 'server_id', 'protocol'];
+        $hasDimensionArray = array_key_exists('dimensions', $params) && $params['dimensions'] !== null;
+        $hasScalarDimension = array_key_exists('dimension', $params) && trim((string) $params['dimension']) !== '';
+        if ($hasDimensionArray && $hasScalarDimension) {
+            throw new InvalidArgumentException('服务器VPN Overall不能同时提交 dimension 和 dimensions');
+        }
+        if (!$hasDimensionArray && !$hasScalarDimension) {
+            return ['country_code', 'node_country', 'server_id', 'protocol'];
+        }
+        $requested = $hasDimensionArray ? $params['dimensions'] : [(string) $params['dimension']];
+        if (!is_array($requested) || $requested === []) {
+            throw new InvalidArgumentException('服务器VPN Overall至少需要一个有效维度');
+        }
+
+        $invalid = array_values(array_filter(
+            $requested,
+            static fn ($dimension): bool => !is_string($dimension) || !in_array($dimension, $allowed, true)
+        ));
+        if ($invalid !== []) {
+            throw new InvalidArgumentException('服务器VPN Overall包含不支持或暂不可用的维度');
+        }
+        $dimensions = array_values(array_unique($requested));
+
+        return $dimensions;
+    }
+
+    private function serverVpnDimensionExpression(string $dimension): string
+    {
+        return match ($dimension) {
+            'stat_date' => 'stat_date',
+            'country_code' => "COALESCE(UPPER(NULLIF(TRIM(CAST(country_code AS CHAR)), '')), '(unknown)')",
+            'node_country' => "COALESCE(UPPER(NULLIF(TRIM(CAST(node_country AS CHAR)), '')), '(unknown)')",
+            'app_version' => "COALESCE(NULLIF(TRIM(CAST(app_version AS CHAR)), ''), '(unknown)')",
+            'platform' => "COALESCE(LOWER(NULLIF(TRIM(CAST(platform AS CHAR)), '')), '(unknown)')",
+            'network_type' => "COALESCE(NULLIF(TRIM(CAST(network_type AS CHAR)), ''), '(unknown)')",
+            'server_id' => "COALESCE(NULLIF(TRIM(CAST(server_id AS CHAR)), ''), '(unknown)')",
+            'protocol' => "COALESCE(NULLIF(TRIM(CAST(protocol AS CHAR)), ''), '(unknown)')",
+            default => "'(unknown)'",
+        };
+    }
+
+    private function serverVpnBaseQuery(string $table, array $params, ?string $excludedFilter = null): Builder
+    {
+        $projectCode = strtoupper(trim((string) ($params['projectCode'] ?? '')));
+        $query = DB::connection('adb')->table($table)
+            ->where('project_code', $projectCode)
+            ->whereBetween('stat_date', [$params['dateFrom'], $params['dateTo']])
+            ->whereNotNull('server_id')
+            ->whereRaw("NULLIF(TRIM(CAST(server_id AS CHAR)), '') IS NOT NULL");
+        $this->whereBlank($query, 'phase_name');
+
+        if (!empty($params['appIdentifier'])) {
+            $query->where('app_identifier', (string) $params['appIdentifier']);
+        }
+        foreach ([
+            'country' => 'country_code',
+            'nodeCountry' => 'node_country',
+            'platform' => 'platform',
+            'appVersion' => 'app_version',
+            'networkType' => 'network_type',
+            'serverId' => 'server_id',
+            'protocol' => 'protocol',
+        ] as $key => $column) {
+            if ($key === $excludedFilter || empty($params[$key]) || $this->isAllSummaryFilterValue((string) $params[$key])) {
+                continue;
+            }
+            $value = trim((string) $params[$key]);
+            if ($value === '(unknown)') {
+                $query->where(function (Builder $blankQuery) use ($column): void {
+                    $blankQuery->whereNull($column)
+                        ->orWhereRaw("TRIM(CAST({$column} AS CHAR)) = ''");
+                });
+                continue;
+            }
+            if ($key === 'country') {
+                $value = strtoupper($value);
+                $query->whereRaw("UPPER(TRIM(CAST({$column} AS CHAR))) = ?", [$value]);
+            } elseif ($key === 'nodeCountry') {
+                $value = strtoupper($value);
+                $query->whereRaw("UPPER(TRIM(CAST({$column} AS CHAR))) = ?", [$value]);
+            } elseif ($key === 'platform') {
+                $value = strtolower($value);
+                $query->whereRaw("LOWER(TRIM(CAST({$column} AS CHAR))) = ?", [$value]);
+            } else {
+                $query->whereRaw("TRIM(CAST({$column} AS CHAR)) = ?", [$value]);
+            }
+        }
+
+        return $query;
+    }
+
     /**
      * Internal server-node quality for the explicitly approved VPN projects.
      * Connection metrics come from ADB; node inventory is enriched from nxpanel.
@@ -6487,28 +6581,13 @@ class FunnelAnalyticsService
         if ($vpnQualityTable === '') {
             $vpnQualityTable = 'dws_vpn_connection_quality_daily';
         }
-        $query = DB::connection('adb')->table($vpnQualityTable)
-            ->where('project_code', $projectCode)
-            ->whereBetween('stat_date', [$params['dateFrom'], $params['dateTo']])
-            ->whereNotNull('server_id')
-            ->where('server_id', '<>', '');
-        $this->whereBlank($query, 'phase_name');
-
-        if (!empty($params['appIdentifier'])) {
-            $query->where('app_identifier', (string) $params['appIdentifier']);
+        $dimensions = $this->serverVpnDimensions($params);
+        $query = $this->serverVpnBaseQuery($vpnQualityTable, array_replace($params, ['projectCode' => $projectCode]));
+        foreach ($dimensions as $dimension) {
+            $query->selectRaw($this->serverVpnDimensionExpression($dimension) . " AS dim_{$dimension}");
         }
-        if (!empty($params['platform']) && !$this->isAllSummaryFilterValue((string) $params['platform'])) {
-            $query->where('platform', strtolower((string) $params['platform']));
-        }
-        if (!empty($params['country']) && !$this->isAllSummaryFilterValue((string) $params['country'])) {
-            $query->where('country_code', strtoupper((string) $params['country']));
-        }
-        if (!empty($params['appVersion']) && !$this->isAllSummaryFilterValue((string) $params['appVersion'])) {
-            $query->where('app_version', (string) $params['appVersion']);
-        }
-
-        $metricRows = $query
-            ->selectRaw('server_id, MAX(app_identifier) AS app_identifier, MAX(node_country) AS node_country')
+        $query
+            ->selectRaw('MAX(app_identifier) AS app_identifier')
             ->selectRaw('SUM(vpn_session_count) AS vpn_session_count')
             ->selectRaw('SUM(connection_attempt_count) AS connection_attempt_count')
             ->selectRaw('SUM(connection_result_count) AS connection_result_count')
@@ -6516,13 +6595,96 @@ class FunnelAnalyticsService
             ->selectRaw('SUM(connection_failed_count) AS connection_failed_count')
             ->selectRaw('SUM(connectivity_check_count) AS connectivity_check_count')
             ->selectRaw('SUM(connectivity_success_count) AS connectivity_success_count')
+            ->selectRaw('SUM(protocol_fallback_count) AS protocol_fallback_count')
+            ->selectRaw('SUM(protocol_fallback_recovered_count) AS protocol_fallback_recovered_count')
+            ->selectRaw('SUM(auto_reconnect_count) AS auto_reconnect_count')
+            ->selectRaw('SUM(auto_reconnect_success_count) AS auto_reconnect_success_count')
+            ->selectRaw('SUM(ip_comparable_count) AS ip_comparable_count')
+            ->selectRaw('SUM(ip_changed_count) AS ip_changed_count')
+            ->selectRaw('SUM(country_changed_count) AS country_changed_count')
+            ->selectRaw('SUM(asn_changed_count) AS asn_changed_count')
             ->selectRaw('SUM(duration_sample_count) AS duration_sample_count')
-            ->selectRaw('SUM(duration_avg_ms * duration_sample_count) AS duration_weighted_sum')
-            ->groupBy('server_id')
-            ->orderByDesc('vpn_session_count')
-            ->get();
+            ->selectRaw('SUM(duration_avg_ms * duration_sample_count) AS duration_weighted_sum');
+        foreach ($dimensions as $dimension) {
+            if ($dimension !== 'asn') {
+                $query->groupByRaw($this->serverVpnDimensionExpression($dimension));
+            }
+        }
+        $totalGroupedRows = (int) DB::connection('adb')
+            ->query()
+            ->fromSub(clone $query, 'server_vpn_groups')
+            ->count();
+        $metricRows = $query->orderByDesc('connection_attempt_count')->limit(500)->get();
 
-        $serverIds = $metricRows->pluck('server_id')->filter()->unique()->values()->all();
+        $dimensionOptions = [];
+        $dimensionOptionMeta = [];
+        $optionLimit = 250;
+        foreach ([
+            'countries' => ['country', 'country_code'],
+            'nodeCountries' => ['nodeCountry', 'node_country'],
+            'platforms' => ['platform', 'platform'],
+            'appVersions' => ['appVersion', 'app_version'],
+            'networkTypes' => ['networkType', 'network_type'],
+            'serverIds' => ['serverId', 'server_id'],
+            'protocols' => ['protocol', 'protocol'],
+        ] as $optionKey => [$filterKey, $dimension]) {
+            $optionValues = $this->serverVpnBaseQuery(
+                $vpnQualityTable,
+                array_replace($params, ['projectCode' => $projectCode]),
+                $filterKey
+            )
+                ->selectRaw($this->serverVpnDimensionExpression($dimension) . ' AS normalized_value')
+                ->distinct()
+                ->orderBy('normalized_value')
+                ->limit($optionLimit + 1)
+                ->pluck('normalized_value')
+                ->values()
+                ->all();
+            $dimensionOptionMeta[$optionKey] = [
+                'limit' => $optionLimit,
+                'hasMore' => count($optionValues) > $optionLimit,
+                'returnedCount' => min(count($optionValues), $optionLimit),
+            ];
+            $dimensionOptions[$optionKey] = array_slice($optionValues, 0, $optionLimit);
+        }
+        $dimensionOptions['asns'] = [];
+        $dimensionOptionMeta['asns'] = ['limit' => 0, 'hasMore' => false, 'returnedCount' => 0];
+        $serverIds = $this->serverVpnBaseQuery(
+            $vpnQualityTable,
+            array_replace($params, ['projectCode' => $projectCode])
+        )
+            ->selectRaw($this->serverVpnDimensionExpression('server_id') . ' AS normalized_server_id')
+            ->distinct()
+            ->orderBy('normalized_server_id')
+            ->pluck('normalized_server_id')
+            ->filter(static fn ($value): bool => is_string($value) && $value !== '(unknown)')
+            ->values()
+            ->all();
+        $coverageRow = (array) $this->serverVpnBaseQuery(
+            $vpnQualityTable,
+            array_replace($params, ['projectCode' => $projectCode])
+        )->selectRaw("COUNT(*) AS total_rows,
+            COUNT(CASE WHEN stat_date IS NOT NULL THEN 1 END) AS stat_date_rows,
+            COUNT(CASE WHEN NULLIF(TRIM(CAST(country_code AS CHAR)), '') IS NOT NULL THEN 1 END) AS country_code_rows,
+            COUNT(CASE WHEN NULLIF(TRIM(CAST(node_country AS CHAR)), '') IS NOT NULL THEN 1 END) AS node_country_rows,
+            COUNT(CASE WHEN NULLIF(TRIM(CAST(app_version AS CHAR)), '') IS NOT NULL THEN 1 END) AS app_version_rows,
+            COUNT(CASE WHEN NULLIF(TRIM(CAST(platform AS CHAR)), '') IS NOT NULL THEN 1 END) AS platform_rows,
+            COUNT(CASE WHEN NULLIF(TRIM(CAST(network_type AS CHAR)), '') IS NOT NULL THEN 1 END) AS network_type_rows,
+            COUNT(CASE WHEN NULLIF(TRIM(CAST(server_id AS CHAR)), '') IS NOT NULL THEN 1 END) AS server_id_rows,
+            COUNT(CASE WHEN NULLIF(TRIM(CAST(protocol AS CHAR)), '') IS NOT NULL THEN 1 END) AS protocol_rows,
+            0 AS asn_rows")->first();
+        $coverage = [];
+        $totalCoverageRows = (int) ($coverageRow['total_rows'] ?? 0);
+        foreach (['stat_date', 'country_code', 'node_country', 'app_version', 'platform', 'network_type', 'server_id', 'protocol', 'asn'] as $dimension) {
+            $coveredRows = (int) ($coverageRow[$dimension . '_rows'] ?? 0);
+            $coverage[$dimension] = [
+                'available' => $dimension !== 'asn' && $coveredRows > 0,
+                'coveredRows' => $coveredRows,
+                'totalRows' => $totalCoverageRows,
+                'coverageRate' => $totalCoverageRows > 0 ? round($coveredRows / $totalCoverageRows * 100, 2) : null,
+            ];
+        }
+        $distinctNodeCount = count($serverIds);
         $resourceNodes = collect();
         $poolNodes = collect();
         $inventoryAvailable = true;
@@ -6558,12 +6720,26 @@ class FunnelAnalyticsService
                     ->map(static fn ($id): int => (int) $id)
                     ->values()
                     ->all();
-                $resourceNodes = DB::connection('ad_revenue')->table('resource_nodes')
-                    ->whereNull('deleted_at')
-                    ->whereIn('host', $serverIds)
-                    ->select(['id', 'legacy_server_id', 'name', 'type', 'host', 'port', 'server_port', 'online', 'is_online', 'available_status', 'show_enabled', 'status', 'project_group_ids'])
-                    ->orderBy('id')
-                    ->get()
+                $resourceCandidates = collect();
+                $poolCandidates = collect();
+                foreach (array_chunk($serverIds, 250) as $serverIdChunk) {
+                    $resourceCandidates = $resourceCandidates->concat(
+                        DB::connection('ad_revenue')->table('resource_nodes')
+                            ->whereNull('deleted_at')
+                            ->whereIn('host', $serverIdChunk)
+                            ->select(['id', 'legacy_server_id', 'name', 'type', 'host', 'port', 'server_port', 'online', 'is_online', 'available_status', 'show_enabled', 'status', 'project_group_ids'])
+                            ->orderBy('id')
+                            ->get()
+                    );
+                    $poolCandidates = $poolCandidates->concat(
+                        DB::connection('ad_revenue')->table('v2_ip_pool')
+                            ->whereIn('ip', $serverIdChunk)
+                            ->select(['id', 'ip', 'hostname', 'country', 'city', 'org', 'provider_id', 'provider_ip_id', 'ip_type', 'score', 'load', 'max_load', 'success_rate', 'status', 'risk_level', 'total_requests', 'successful_requests', 'last_used_at'])
+                            ->orderBy('id')
+                            ->get()
+                    );
+                }
+                $resourceNodes = $resourceCandidates
                     ->groupBy('host')
                     ->map(function ($candidates) use ($decodeIds, $projectGroupIds) {
                         return $candidates
@@ -6579,12 +6755,7 @@ class FunnelAnalyticsService
                             ->first();
                     })
                     ->filter();
-                $poolNodes = DB::connection('ad_revenue')->table('v2_ip_pool')
-                    ->whereIn('ip', $serverIds)
-                    ->select(['id', 'ip', 'hostname', 'country', 'city', 'org', 'provider_id', 'provider_ip_id', 'ip_type', 'score', 'load', 'max_load', 'success_rate', 'status', 'risk_level', 'total_requests', 'successful_requests', 'last_used_at'])
-                    ->orderBy('id')
-                    ->get()
-                    ->keyBy('ip');
+                $poolNodes = $poolCandidates->keyBy('ip');
             }
         } catch (Throwable $exception) {
             $inventoryAvailable = false;
@@ -6597,21 +6768,36 @@ class FunnelAnalyticsService
             ]);
         }
 
-        $rows = $metricRows->map(function ($metric) use ($resourceNodes, $poolNodes): array {
-            $serverId = (string) $metric->server_id;
-            $resource = $resourceNodes->get($serverId);
-            $pool = $poolNodes->get($serverId);
+        $rows = $metricRows->map(function ($metric) use ($resourceNodes, $poolNodes, $dimensions): array {
+            $dimensionValues = [];
+            foreach ($dimensions as $dimension) {
+                $property = "dim_{$dimension}";
+                $dimensionValues[$dimension] = (string) ($metric->{$property} ?? '(unknown)');
+            }
+            $serverId = $dimensionValues['server_id'] ?? '';
+            $resource = $serverId !== '' && $serverId !== '(unknown)' ? $resourceNodes->get($serverId) : null;
+            $pool = $serverId !== '' && $serverId !== '(unknown)' ? $poolNodes->get($serverId) : null;
             $attempts = (int) ($metric->connection_attempt_count ?? 0);
             $successes = (int) ($metric->connection_success_count ?? 0);
             $failures = (int) ($metric->connection_failed_count ?? 0);
             $results = (int) ($metric->connection_result_count ?? 0);
             $checks = (int) ($metric->connectivity_check_count ?? 0);
             $checkSuccesses = (int) ($metric->connectivity_success_count ?? 0);
+            $fallbacks = (int) ($metric->protocol_fallback_count ?? 0);
+            $fallbackRecovered = (int) ($metric->protocol_fallback_recovered_count ?? 0);
+            $autoReconnects = (int) ($metric->auto_reconnect_count ?? 0);
+            $autoReconnectSuccesses = (int) ($metric->auto_reconnect_success_count ?? 0);
+            $ipComparable = (int) ($metric->ip_comparable_count ?? 0);
+            $ipChanged = (int) ($metric->ip_changed_count ?? 0);
             $durationSamples = (int) ($metric->duration_sample_count ?? 0);
+            $durationWeightedSum = (float) ($metric->duration_weighted_sum ?? 0);
             $connectionSuccessRate = $results > 0 ? round($successes / $results * 100, 2) : null;
             $resultCoverageRate = $attempts > 0 ? round($results / $attempts * 100, 2) : null;
             $connectivitySuccessRate = $checks > 0 ? round($checkSuccesses / $checks * 100, 2) : null;
-            $avgDurationMs = $durationSamples > 0 ? round((float) $metric->duration_weighted_sum / $durationSamples, 1) : null;
+            $fallbackRecoveryRate = $fallbacks > 0 ? round($fallbackRecovered / $fallbacks * 100, 2) : null;
+            $autoReconnectSuccessRate = $autoReconnects > 0 ? round($autoReconnectSuccesses / $autoReconnects * 100, 2) : null;
+            $ipChangedRate = $ipComparable > 0 ? round($ipChanged / $ipComparable * 100, 2) : null;
+            $avgDurationMs = $durationSamples > 0 ? round($durationWeightedSum / $durationSamples, 1) : null;
             $status = match (true) {
                 $results === 0 => 'unavailable',
                 $connectionSuccessRate < 30 => 'bad',
@@ -6620,14 +6806,18 @@ class FunnelAnalyticsService
             };
 
             return [
-                'serverId' => $serverId,
+                'rowKey' => hash('sha256', json_encode($dimensionValues, JSON_UNESCAPED_UNICODE)),
+                'dimensions' => $dimensions,
+                'dimensionValues' => $dimensionValues,
+                'dimensionLabel' => implode(' × ', array_values($dimensionValues)),
+                'serverId' => $serverId !== '' ? $serverId : null,
                 'nodeId' => $resource?->id,
                 'legacyServerId' => $resource?->legacy_server_id,
-                'nodeName' => $resource?->name ?: ($pool?->hostname ?: ($metric->node_country ?: $serverId)),
+                'nodeName' => $resource?->name ?: ($pool?->hostname ?: ($serverId ?: null)),
                 'nodeType' => $resource?->type,
-                'nodeHost' => $resource?->host ?: $serverId,
+                'nodeHost' => $resource?->host ?: ($serverId ?: null),
                 'nodePort' => $resource?->server_port ?: $resource?->port,
-                'nodeCountry' => $pool?->country,
+                'nodeCountry' => $pool?->country ?: ($dimensionValues['node_country'] ?? null),
                 'nodeCity' => $pool?->city,
                 'organization' => $pool?->org,
                 'inventoryMatched' => $resource !== null || $pool !== null,
@@ -6652,22 +6842,67 @@ class FunnelAnalyticsService
                 'connectivityCheckCount' => $checks,
                 'connectivitySuccessCount' => $checkSuccesses,
                 'connectivitySuccessRate' => $connectivitySuccessRate,
+                'protocolFallbackCount' => $fallbacks,
+                'protocolFallbackRecoveredCount' => $fallbackRecovered,
+                'fallbackRecoveryRate' => $fallbackRecoveryRate,
+                'autoReconnectCount' => $autoReconnects,
+                'autoReconnectSuccessCount' => $autoReconnectSuccesses,
+                'autoReconnectSuccessRate' => $autoReconnectSuccessRate,
+                'ipComparableCount' => $ipComparable,
+                'ipChangedCount' => $ipChanged,
+                'countryChangedCount' => (int) ($metric->country_changed_count ?? 0),
+                'asnChangedCount' => (int) ($metric->asn_changed_count ?? 0),
+                'ipChangedRate' => $ipChangedRate,
+                'durationSampleCount' => $durationSamples,
+                'durationWeightedSum' => $durationWeightedSum,
                 'avgDurationMs' => $avgDurationMs,
                 'status' => $status,
             ];
         })->values()->all();
 
+        $totalMetric = $this->serverVpnBaseQuery(
+            $vpnQualityTable,
+            array_replace($params, ['projectCode' => $projectCode])
+        )
+            ->selectRaw('COALESCE(SUM(vpn_session_count), 0) AS vpn_session_count')
+            ->selectRaw('COALESCE(SUM(connection_attempt_count), 0) AS connection_attempt_count')
+            ->selectRaw('COALESCE(SUM(connection_result_count), 0) AS connection_result_count')
+            ->selectRaw('COALESCE(SUM(connection_success_count), 0) AS connection_success_count')
+            ->selectRaw('COALESCE(SUM(connection_failed_count), 0) AS connection_failed_count')
+            ->selectRaw('COALESCE(SUM(connectivity_check_count), 0) AS connectivity_check_count')
+            ->selectRaw('COALESCE(SUM(connectivity_success_count), 0) AS connectivity_success_count')
+            ->selectRaw('COALESCE(SUM(protocol_fallback_count), 0) AS protocol_fallback_count')
+            ->selectRaw('COALESCE(SUM(protocol_fallback_recovered_count), 0) AS protocol_fallback_recovered_count')
+            ->selectRaw('COALESCE(SUM(auto_reconnect_count), 0) AS auto_reconnect_count')
+            ->selectRaw('COALESCE(SUM(auto_reconnect_success_count), 0) AS auto_reconnect_success_count')
+            ->selectRaw('COALESCE(SUM(ip_comparable_count), 0) AS ip_comparable_count')
+            ->selectRaw('COALESCE(SUM(ip_changed_count), 0) AS ip_changed_count')
+            ->selectRaw('COALESCE(SUM(country_changed_count), 0) AS country_changed_count')
+            ->selectRaw('COALESCE(SUM(asn_changed_count), 0) AS asn_changed_count')
+            ->selectRaw('COALESCE(SUM(duration_sample_count), 0) AS duration_sample_count')
+            ->selectRaw('COALESCE(SUM(duration_avg_ms * duration_sample_count), 0) AS duration_weighted_sum')
+            ->first();
         $totals = [
-            'nodeCount' => count($rows),
-            'inventoryMatchedCount' => count(array_filter($rows, static fn (array $row): bool => $row['inventoryMatched'])),
-            'poolMatchedCount' => count(array_filter($rows, static fn (array $row): bool => $row['poolMatched'])),
-            'vpnSessionCount' => array_sum(array_column($rows, 'vpnSessionCount')),
-            'connectionAttemptCount' => array_sum(array_column($rows, 'connectionAttemptCount')),
-            'connectionResultCount' => array_sum(array_column($rows, 'connectionResultCount')),
-            'connectionSuccessCount' => array_sum(array_column($rows, 'connectionSuccessCount')),
-            'connectionFailedCount' => array_sum(array_column($rows, 'connectionFailedCount')),
-            'connectivityCheckCount' => array_sum(array_column($rows, 'connectivityCheckCount')),
-            'connectivitySuccessCount' => array_sum(array_column($rows, 'connectivitySuccessCount')),
+            'nodeCount' => $distinctNodeCount,
+            'inventoryMatchedCount' => $resourceNodes->keys()->merge($poolNodes->keys())->unique()->count(),
+            'poolMatchedCount' => $poolNodes->count(),
+            'vpnSessionCount' => (int) ($totalMetric->vpn_session_count ?? 0),
+            'connectionAttemptCount' => (int) ($totalMetric->connection_attempt_count ?? 0),
+            'connectionResultCount' => (int) ($totalMetric->connection_result_count ?? 0),
+            'connectionSuccessCount' => (int) ($totalMetric->connection_success_count ?? 0),
+            'connectionFailedCount' => (int) ($totalMetric->connection_failed_count ?? 0),
+            'connectivityCheckCount' => (int) ($totalMetric->connectivity_check_count ?? 0),
+            'connectivitySuccessCount' => (int) ($totalMetric->connectivity_success_count ?? 0),
+            'protocolFallbackCount' => (int) ($totalMetric->protocol_fallback_count ?? 0),
+            'protocolFallbackRecoveredCount' => (int) ($totalMetric->protocol_fallback_recovered_count ?? 0),
+            'autoReconnectCount' => (int) ($totalMetric->auto_reconnect_count ?? 0),
+            'autoReconnectSuccessCount' => (int) ($totalMetric->auto_reconnect_success_count ?? 0),
+            'ipComparableCount' => (int) ($totalMetric->ip_comparable_count ?? 0),
+            'ipChangedCount' => (int) ($totalMetric->ip_changed_count ?? 0),
+            'countryChangedCount' => (int) ($totalMetric->country_changed_count ?? 0),
+            'asnChangedCount' => (int) ($totalMetric->asn_changed_count ?? 0),
+            'durationSampleCount' => (int) ($totalMetric->duration_sample_count ?? 0),
+            'durationWeightedSum' => (float) ($totalMetric->duration_weighted_sum ?? 0),
         ];
         $totals['connectionSuccessRate'] = $totals['connectionResultCount'] > 0
             ? round($totals['connectionSuccessCount'] / $totals['connectionResultCount'] * 100, 2)
@@ -6678,23 +6913,52 @@ class FunnelAnalyticsService
         $totals['connectivitySuccessRate'] = $totals['connectivityCheckCount'] > 0
             ? round($totals['connectivitySuccessCount'] / $totals['connectivityCheckCount'] * 100, 2)
             : null;
+        $totals['fallbackRecoveryRate'] = $totals['protocolFallbackCount'] > 0
+            ? round($totals['protocolFallbackRecoveredCount'] / $totals['protocolFallbackCount'] * 100, 2)
+            : null;
+        $totals['autoReconnectSuccessRate'] = $totals['autoReconnectCount'] > 0
+            ? round($totals['autoReconnectSuccessCount'] / $totals['autoReconnectCount'] * 100, 2)
+            : null;
+        $totals['ipChangedRate'] = $totals['ipComparableCount'] > 0
+            ? round($totals['ipChangedCount'] / $totals['ipComparableCount'] * 100, 2)
+            : null;
+        $totals['avgDurationMs'] = $totals['durationSampleCount'] > 0
+            ? round($totals['durationWeightedSum'] / $totals['durationSampleCount'], 1)
+            : null;
 
         return [
             'context' => $this->context(array_replace($params, ['projectCode' => $projectCode])),
             'serverVpnOverall' => [
                 'available' => count($rows) > 0,
-                'reason' => count($rows) > 0 ? null : '该项目在所选日期没有可用的服务器节点连接汇总',
+                'reason' => count($rows) > 0 ? null : '该项目在所选日期和筛选条件下没有可用的服务器节点连接汇总',
                 'allowedProjects' => $allowedProjects,
                 'projectCode' => $projectCode,
                 'dateFrom' => $params['dateFrom'],
                 'dateTo' => $params['dateTo'],
+                'dimensions' => $dimensions,
+                'filters' => [
+                    'country' => $params['country'] ?? null,
+                    'nodeCountry' => $params['nodeCountry'] ?? null,
+                    'platform' => $params['platform'] ?? null,
+                    'appVersion' => $params['appVersion'] ?? null,
+                    'networkType' => $params['networkType'] ?? null,
+                    'serverId' => $params['serverId'] ?? null,
+                    'protocol' => $params['protocol'] ?? null,
+                ],
+                'dimensionOptions' => $dimensionOptions,
+                'dimensionOptionMeta' => $dimensionOptionMeta,
+                'dimensionCoverage' => $coverage,
                 'rows' => $rows,
+                'rowLimit' => 500,
+                'totalGroupedRows' => $totalGroupedRows,
+                'omittedRows' => max(0, $totalGroupedRows - count($rows)),
+                'mayBeTruncated' => $totalGroupedRows > count($rows),
                 'totals' => $totals,
                 'inventoryAvailable' => $inventoryAvailable,
                 'enrichmentWarnings' => $enrichmentWarnings,
                 'queriedAt' => Carbon::now(config('app.timezone', 'Asia/Shanghai'))->toDateTimeString(),
                 'source' => $vpnQualityTable . ' + ad_revenue.v2_ip_pool + resource_nodes',
-                'notice' => '连接尝试、连接结果、成功与失败均按服务器节点汇总事件计数；连接成功率以 connection_result_count 为分母，未上报结果不计为失败。节点资料只匹配当前项目组或共享 resource_nodes，并优先补充 v2_ip_pool 信息。',
+                'notice' => '连接指标按当前维度组合重新聚合；VPN session数量为分组关联数，不代表跨维度唯一Session。连接成功率以 connection_result_count 为分母，未上报结果不计为失败。ASN维度未进入VPN质量汇总表，当前明确显示为 unknown/暂不可用，不会伪造数据。',
             ],
         ];
     }
