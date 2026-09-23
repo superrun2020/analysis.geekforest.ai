@@ -2103,6 +2103,7 @@ const MATRIX_METRIC_COLUMNS = [
 ] as const;
 
 type MatrixMetricColumnKey = typeof MATRIX_METRIC_COLUMNS[number]["key"];
+const ASN_COMPANY_COLUMN_KEY = "__asn_company";
 
 function matrixDimensionLabel(key: string): string {
   return MATRIX_DIMENSIONS.find((dimension) => dimension.key === key)?.label ?? key;
@@ -2318,6 +2319,8 @@ function AdNetworkFailureMatrix({ data, dimensions, dates, projectCode, platform
   const safeAppVersionOptions = appVersionOptions.length ? appVersionOptions : ["全部版本"];
   const topBad = rows.find((row: AnyRow) => row.status === "bad") ?? rows[0];
   const statusLabel: Record<string, string> = { bad: "严重", warn: "关注", good: "正常", unavailable: "暂无数据" };
+  const showAsnCompany = activeDimensions.includes("asn");
+  const dimensionColumnCount = activeDimensions.length + (showAsnCompany ? 1 : 0);
 
   const toggleDimension = (key: string) => {
     if (draftDimensions.includes(key)) {
@@ -2338,6 +2341,11 @@ function AdNetworkFailureMatrix({ data, dimensions, dates, projectCode, platform
     if (dimension === "server_id") return <code>{text(value)}</code>;
     if (dimension === "event_date") return <strong>{text(value)}</strong>;
     return <strong>{text(value)}</strong>;
+  };
+
+  const renderAsnCompanyCell = (row: AnyRow) => {
+    const company = text(row.asnName || row.asn_name || row.dimensions?.asn_name || "").trim();
+    return company && company !== "—" ? <strong>{company}</strong> : <small>未解析</small>;
   };
 
   return <div className="vpn-overall-report">
@@ -2371,13 +2379,15 @@ function AdNetworkFailureMatrix({ data, dimensions, dates, projectCode, platform
         <table className="ad-network-failure-table">
           <thead><tr>
             {activeDimensions.map((dimension) => <th key={dimension}>{matrixDimensionLabel(dimension)}</th>)}
+            {showAsnCompany && <th key={ASN_COMPANY_COLUMN_KEY}>ASN所属公司</th>}
             {shows("newUsers") && <th>新增用户</th>}{shows("dauUsers") && <th>日活用户</th>}{shows("vpnSessionCount") && <th>VPN session数量</th>}{shows("vpnConnectSuccessRate") && <th>连接成功率</th>}{shows("vpnConnectFailedCount") && <th>连接失败</th>}{shows("vpnProbeSuccessRate") && <th>节点探测</th>}{shows("vpnIpProbeSuccessRate") && <th>出口IP探测</th>}{shows("vpnFallbackCount") && <th>协议回退</th>}{shows("vpnAvgLatencyMs") && <th>平均延迟</th>}{shows("vpnQualityPoorRate") && <th>劣质样本率</th>}{shows("requestCount") && <th>请求数</th>}{shows("loadSuccessRate") && <th>加载成功率</th>}{shows("loadFailedCount") && <th>加载失败</th>}{shows("showFailedBlocked") && <th>展示失败/拦截</th>}{shows("impressionCount") && <th>Impression</th>}{shows("failureRate") && <th>失败率</th>}{shows("revenue") && <th>收入</th>}{shows("users") && <th>用户数</th>}{shows("topReasons") && <th>Top原因</th>}{shows("suggestion") && <th>建议</th>}
           </tr></thead>
-          <tbody>{rows.length === 0 && <tr><td colSpan={activeDimensions.length + visibleColumns.length}><div className="overall-empty-state">{querying ? "正在查询数据，配置区可先调整维度和统计字段…" : "暂无数据"}</div></td></tr>}{rows.slice(0, 50).map((row: AnyRow, index: number) => {
+          <tbody>{rows.length === 0 && <tr><td colSpan={dimensionColumnCount + visibleColumns.length}><div className="overall-empty-state">{querying ? "正在查询数据，配置区可先调整维度和统计字段…" : "暂无数据"}</div></td></tr>}{rows.slice(0, 50).map((row: AnyRow, index: number) => {
             const reasons = Array.isArray(row.topReasons) ? row.topReasons : [];
             const dimValues: AnyRow = row.dimensions ?? {};
             return <tr key={`${activeDimensions.map((dimension) => text(dimValues[dimension] ?? "unknown")).join("-")}-${index}`} className={row.status === "bad" ? "row-bad" : row.status === "warn" ? "row-warn" : ""}>
               {activeDimensions.map((dimension) => <td key={dimension}>{renderDimensionCell(dimension, dimValues[dimension] ?? "unknown")}</td>)}
+              {showAsnCompany && <td className="asn-company-cell">{renderAsnCompanyCell(row)}</td>}
               {shows("newUsers") && <td>{number(row.newUsers)}</td>}
               {shows("dauUsers") && <td>{number(row.dauUsers ?? row.users)}</td>}
               {shows("vpnSessionCount") && <td>{number(row.vpnSessionCount)}</td>}

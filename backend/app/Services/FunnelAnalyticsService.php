@@ -844,7 +844,7 @@ class FunnelAnalyticsService
         }
 
         if ($force) {
-            $cacheKey = 'jkcl_funnel:ad_network_failure_matrix:v2:' . md5(json_encode(
+            $cacheKey = 'jkcl_funnel:ad_network_failure_matrix:v5:' . md5(json_encode(
                 $this->sortForCacheKey($query),
                 JSON_UNESCAPED_UNICODE
             ));
@@ -6705,7 +6705,7 @@ class FunnelAnalyticsService
             return $this->buildAdNetworkFailureMatrix($params);
         }
 
-        $cacheKey = 'jkcl_funnel:ad_network_failure_matrix:v4:' . md5(json_encode(
+        $cacheKey = 'jkcl_funnel:ad_network_failure_matrix:v5:' . md5(json_encode(
             $this->sortForCacheKey($params),
             JSON_UNESCAPED_UNICODE
         ));
@@ -6811,6 +6811,7 @@ class FunnelAnalyticsService
 
         return $query
             ->selectRaw("COUNT(*) AS event_count")
+            ->selectRaw("MAX(COALESCE(NULLIF(ad.isp, ''), NULLIF(vpn_ctx.ctx_isp, ''))) AS asn_name")
             ->selectRaw("COUNT(DISTINCT NULLIF(ad.my_user_id, '')) AS users")
             ->selectRaw("COUNT(DISTINCT CASE WHEN ad.event_name = 'app_first_open' THEN NULLIF(ad.my_user_id, '') END) AS new_users")
             ->selectRaw("COUNT(DISTINCT NULLIF(ad.my_user_id, '')) AS dau_users")
@@ -6877,6 +6878,7 @@ class FunnelAnalyticsService
 
         return $query
             ->selectRaw('SUM(event_count) AS event_count')
+            ->selectRaw('MAX(asn_name) AS asn_name')
             ->selectRaw('SUM(users) AS users')
             ->selectRaw('SUM(new_users) AS new_users')
             ->selectRaw('SUM(dau_users) AS dau_users')
@@ -6981,6 +6983,7 @@ class FunnelAnalyticsService
             ->selectRaw('session_id AS ctx_session_id')
             ->selectRaw("MAX(NULLIF(country_code, '')) AS ctx_country_code")
             ->selectRaw('MAX(asn) AS ctx_asn')
+            ->selectRaw("MAX(NULLIF(isp, '')) AS ctx_isp")
             ->selectRaw("MAX(NULLIF(server_id, '')) AS ctx_server_id")
             ->selectRaw("MAX(NULLIF(protocol, '')) AS ctx_protocol")
             ->groupBy('project_code', 'app_identifier', 'platform', 'my_user_id', 'session_id');
@@ -7096,6 +7099,7 @@ class FunnelAnalyticsService
             'userCountryCode' => $dimensionValues['user_country_code'] ?? 'unknown',
             'countryCode' => $dimensionValues['country_code'] ?? 'unknown',
             'asn' => $dimensionValues['asn'] ?? 'unknown',
+            'asnName' => (string) ($row->asn_name ?? ''),
             'serverId' => $dimensionValues['server_id'] ?? 'unknown',
             'protocol' => $dimensionValues['protocol'] ?? 'unknown',
             'users' => (int) ($row->users ?? 0),
