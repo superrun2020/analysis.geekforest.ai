@@ -2426,6 +2426,10 @@ class FunnelAnalyticsService
             $languageScreens = "('language', 'language_page', 'language_select', 'language_selection', 'select_language')";
             $languageExposure = "((event_name = 'launcher_onboarding_view' AND {$onboardingStep} IN {$languageSteps}) OR (event_name = 'screen_view' AND {$screenName} IN {$languageScreens}))";
             $languageConfirm = "((event_name = 'launcher_onboarding_action' AND {$onboardingStep} IN {$languageSteps} AND {$onboardingAction} IN ('next', 'complete', 'confirm', 'allow')) OR (event_name = 'element_click' AND {$elementName} IN ('language_confirm', 'confirm_language', 'language_continue', 'continue_button')))";
+            $launcherGuideFallback = "(event_name = 'screen_view' AND {$screenName} IN ('launcher_guide_page', 'launcher_home_guide_overlay_page'))";
+            $launcherSetupClickFallback = "(event_name = 'element_click' AND {$elementName} = 'launcher_guide_continue')";
+            $launcherHomeFallback = "(event_name = 'screen_view' AND {$screenName} = 'launcher_page')";
+            $recognizedSettingResult = "(event_name = 'launcher_default_setting_result' AND ({$settingResult} IN ('granted', 'denied', 'failed', 'cancelled', 'success', 'default', 'not_default', 'rejected') OR {$defaultStatusAfter} IN ('default', 'not_default', 'true', 'false')))";
             $coreTask = "((event_name = 'business_task_completed' AND {$eventResult} IN ('completed', 'success') AND ({$taskType} LIKE '%scan%' OR {$taskType} LIKE '%qr%generate%' OR {$taskType} LIKE '%generate%code%')) OR (event_name = 'core_action' AND {$eventResult} IN ('completed', 'success') AND ({$actionName} LIKE '%scan%' OR {$actionName} LIKE '%qr%generate%' OR {$actionName} LIKE '%generate%code%')))";
 
             $rows = $query
@@ -2433,10 +2437,17 @@ class FunnelAnalyticsService
                 ->selectRaw("COUNT(DISTINCT CASE WHEN event_name = 'app_foreground' THEN NULLIF(my_user_id, '') END) AS dau_users")
                 ->selectRaw("COUNT(DISTINCT CASE WHEN {$languageExposure} THEN NULLIF(my_user_id, '') END) AS language_page_exposure_users")
                 ->selectRaw("COUNT(DISTINCT CASE WHEN {$languageConfirm} THEN NULLIF(my_user_id, '') END) AS language_confirm_users")
-                ->selectRaw("COUNT(DISTINCT CASE WHEN event_name = 'launcher_default_prompt_show' THEN NULLIF(my_user_id, '') END) AS launcher_guide_exposure_users")
-                ->selectRaw("COUNT(DISTINCT CASE WHEN event_name = 'launcher_default_prompt_action' AND {$promptAction} = 'set_now' THEN NULLIF(my_user_id, '') END) AS launcher_setup_click_users")
+                ->selectRaw("COUNT(DISTINCT CASE WHEN event_name = 'launcher_default_prompt_show' OR {$launcherGuideFallback} THEN NULLIF(my_user_id, '') END) AS launcher_guide_exposure_users")
+                ->selectRaw("COUNT(DISTINCT CASE WHEN event_name = 'launcher_default_prompt_show' THEN NULLIF(my_user_id, '') END) AS launcher_guide_dedicated_users")
+                ->selectRaw("COUNT(DISTINCT CASE WHEN {$launcherGuideFallback} THEN NULLIF(my_user_id, '') END) AS launcher_guide_fallback_users")
+                ->selectRaw("COUNT(DISTINCT CASE WHEN (event_name = 'launcher_default_prompt_action' AND {$promptAction} = 'set_now') OR {$launcherSetupClickFallback} THEN NULLIF(my_user_id, '') END) AS launcher_setup_click_users")
+                ->selectRaw("COUNT(DISTINCT CASE WHEN event_name = 'launcher_default_prompt_action' AND {$promptAction} = 'set_now' THEN NULLIF(my_user_id, '') END) AS launcher_setup_click_dedicated_users")
+                ->selectRaw("COUNT(DISTINCT CASE WHEN {$launcherSetupClickFallback} THEN NULLIF(my_user_id, '') END) AS launcher_setup_click_fallback_users")
                 ->selectRaw("COUNT(DISTINCT CASE WHEN event_name = 'launcher_default_setting_result' AND ({$settingResult} = 'granted' OR {$defaultStatusAfter} = 'default') THEN NULLIF(my_user_id, '') END) AS launcher_setup_success_users")
-                ->selectRaw("COUNT(DISTINCT CASE WHEN event_name = 'launcher_home_view' THEN NULLIF(my_user_id, '') END) AS launcher_home_users")
+                ->selectRaw("COUNT(DISTINCT CASE WHEN {$recognizedSettingResult} THEN NULLIF(my_user_id, '') END) AS launcher_setting_result_event_users")
+                ->selectRaw("COUNT(DISTINCT CASE WHEN event_name = 'launcher_home_view' OR {$launcherHomeFallback} THEN NULLIF(my_user_id, '') END) AS launcher_home_users")
+                ->selectRaw("COUNT(DISTINCT CASE WHEN event_name = 'launcher_home_view' THEN NULLIF(my_user_id, '') END) AS launcher_home_dedicated_users")
+                ->selectRaw("COUNT(DISTINCT CASE WHEN {$launcherHomeFallback} THEN NULLIF(my_user_id, '') END) AS launcher_home_fallback_users")
                 ->selectRaw("COUNT(DISTINCT CASE WHEN {$coreTask} THEN NULLIF(my_user_id, '') END) AS core_feature_complete_users")
                 ->groupBy($groupColumns)
                 ->get()
@@ -2453,6 +2464,28 @@ class FunnelAnalyticsService
                     $languageConfirmUsers = (int) ($row->language_confirm_users ?? 0);
                     $launcherSetupClickUsers = (int) ($row->launcher_setup_click_users ?? 0);
                     $launcherSetupSuccessUsers = (int) ($row->launcher_setup_success_users ?? 0);
+                    $launcherSettingResultEventUsers = (int) ($row->launcher_setting_result_event_users ?? 0);
+                    $launcherGuideExposureUsers = (int) ($row->launcher_guide_exposure_users ?? 0);
+                    $launcherGuideDedicatedUsers = (int) ($row->launcher_guide_dedicated_users ?? 0);
+                    $launcherSetupClickDedicatedUsers = (int) ($row->launcher_setup_click_dedicated_users ?? 0);
+                    $launcherHomeUsers = (int) ($row->launcher_home_users ?? 0);
+                    $launcherHomeDedicatedUsers = (int) ($row->launcher_home_dedicated_users ?? 0);
+                    $launcherSettingResultCoverageComplete = $launcherSetupClickUsers > 0 && $launcherSettingResultEventUsers >= $launcherSetupClickUsers;
+                    $trackingIssues = [];
+                    if ($launcherGuideExposureUsers > $launcherGuideDedicatedUsers) {
+                        $trackingIssues[] = '专用引导曝光打点覆盖不足，已用 screen_view 兼容统计';
+                    }
+                    if ($launcherSetupClickUsers > $launcherSetupClickDedicatedUsers) {
+                        $trackingIssues[] = '专用设置点击打点覆盖不足，已用 launcher_guide_continue 兼容统计';
+                    }
+                    if ($launcherSetupClickUsers > 0 && !$launcherSettingResultCoverageComplete) {
+                        $trackingIssues[] = $launcherSettingResultEventUsers === 0
+                            ? '设置结果未上报，成功率不可计算'
+                            : "设置结果覆盖不完整（{$launcherSettingResultEventUsers}/{$launcherSetupClickUsers}），成功率不可计算";
+                    }
+                    if ($launcherHomeUsers > $launcherHomeDedicatedUsers) {
+                        $trackingIssues[] = '专用首页打点覆盖不足，已用 screen_view.launcher_page 兼容统计';
+                    }
                     $coreFeatureCompleteUsers = (int) ($row->core_feature_complete_users ?? 0);
                     $rate = static fn (int $numerator, int $denominator): ?float => $denominator > 0
                         ? round($numerator * 100 / $denominator, 2)
@@ -2469,13 +2502,15 @@ class FunnelAnalyticsService
                         'languagePageExposureUsers' => $languagePageExposureUsers,
                         'languageConfirmUsers' => $languageConfirmUsers,
                         'languageConfirmRate' => $rate($languageConfirmUsers, $languagePageExposureUsers),
-                        'launcherGuideExposureUsers' => (int) ($row->launcher_guide_exposure_users ?? 0),
+                        'launcherGuideExposureUsers' => $launcherGuideExposureUsers,
                         'launcherSetupClickUsers' => $launcherSetupClickUsers,
                         'launcherSetupSuccessUsers' => $launcherSetupSuccessUsers,
-                        'launcherSetupSuccessRate' => $rate($launcherSetupSuccessUsers, $launcherSetupClickUsers),
-                        'launcherHomeUsers' => (int) ($row->launcher_home_users ?? 0),
+                        'launcherSetupSuccessRate' => $launcherSettingResultCoverageComplete ? $rate($launcherSetupSuccessUsers, $launcherSetupClickUsers) : null,
+                        'launcherHomeUsers' => $launcherHomeUsers,
                         'coreFeatureCompleteUsers' => $coreFeatureCompleteUsers,
                         'coreFeatureActivationRate' => $rate($coreFeatureCompleteUsers, $paidAttributedNewUsers),
+                        'trackingStatus' => count($trackingIssues) > 0 ? 'partial' : 'complete',
+                        'trackingIssues' => $trackingIssues,
                     ];
                 })
                 ->sortByDesc('dauUsers')
@@ -2497,7 +2532,7 @@ class FunnelAnalyticsService
                 'scope' => 'users',
                 'domain' => 'vpn',
                 'versionOptions' => $this->launcherVersionComparisonVersionOptions($params),
-                'notice' => "同项目、同日期范围、同平台和国家下按 {$dimensionLabel} 对比；付费归因新人取同区间 app_first_open 且 attribution_result.attribution_status=attributed 的用户，语言确认率=语言确认UV/语言页曝光UV，Launcher设置成功率=设置成功UV/点击立即设置UV，核心功能激活率=成功扫码或生成码UV/付费归因新人。分母没有数据时显示暂无，不按0%处理。",
+                'notice' => "同项目、同日期范围、同平台和国家下按 {$dimensionLabel} 对比；付费归因新人取同区间 app_first_open 且 attribution_result.attribution_status=attributed 的用户，语言确认率=语言确认UV/语言页曝光UV，Launcher设置成功率=设置成功UV/点击立即设置UV，核心功能激活率=成功扫码或生成码UV/付费归因新人。专用事件缺失但存在可确认的通用 screen_view/element_click 时兼容统计并在打点状态中提示；设置结果没有明确事件时保持暂无。摘要为各分组相加，跨版本用户可能重复。",
             ];
         } catch (Throwable $exception) {
             Log::warning('jkcl_launcher_version_comparison_failed', ['message' => $exception->getMessage()]);

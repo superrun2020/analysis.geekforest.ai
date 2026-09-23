@@ -70,6 +70,14 @@ test("VPN and Launcher version comparisons stay separate", async () => {
   assert.match(service, /launcherVersionComparisonFromEvents/);
   assert.match(service, /versionProduct/);
   assert.match(service, /versionComparisonFromA003VpnSummary/);
+  assert.match(service, /launcher_guide_page/);
+  assert.match(service, /launcher_page/);
+  assert.match(service, /trackingIssues/);
+  assert.match(source, /打点状态/);
+  assert.match(service, /设置结果未上报/);
+  assert.match(source, /row\.trackingIssues/);
+  assert.match(service, /launcherSettingResultCoverageComplete/);
+  assert.match(source, /hasObservedRate/);
 });
 
 test("deep-dive stage counts ignore ratio metric cards", async () => {

@@ -3281,3 +3281,8 @@ tr:hover td { background: #f5f8ff; }
 .operations-subnav { min-height: 48px; padding: 6px 16px; display: flex; gap: 8px; align-items: center; border-bottom: 1px solid #dfe5ec; background: #fff; }
 .operations-state { min-height: 320px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: #425466; }
 .operations-state.error strong { color: #b42318; }
+.tracking-status-column { min-width: 240px; }
+.tracking-issue-cell { min-width: 240px; white-space: normal; }
+.tracking-issue-cell > strong { display: inline-block; color: #b45309; margin-bottom: 4px; }
+.tracking-issue-cell > small { display: block; color: var(--muted-foreground); line-height: 1.45; margin-top: 3px; }
+.tracking-issue-cell > .tracking-complete { color: #15803d; }

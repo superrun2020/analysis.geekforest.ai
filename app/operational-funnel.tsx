@@ -2984,7 +2984,8 @@ function VersionComparison({ data, domain, versionProduct, projectCode, appIdent
         const denKey = column.den;
         const num = result[numKey] ?? rows.reduce((sum, row) => sum + Number(row[numKey] ?? 0), 0);
         const den = result[denKey] ?? rows.reduce((sum, row) => sum + Number(row[denKey] ?? 0), 0);
-        result[column.key] = den > 0 ? (num / den) * 100 : null;
+        const hasObservedRate = rows.some((row) => row[column.key] !== null && row[column.key] !== undefined);
+        result[column.key] = hasObservedRate && den > 0 ? (num / den) * 100 : null;
       }
     });
     return result;
@@ -3003,6 +3004,7 @@ function VersionComparison({ data, domain, versionProduct, projectCode, appIdent
         {!rows.length && !loading ? <section className="surface"><div className="empty-table-state"><strong>当前筛选范围没有可对比数据</strong><span>请确认所选维度字段已上报，并选择包含多个分组的日期范围。</span></div></section> : <section className="surface"><div className="table-wrap"><table className="version-compare-table">
           <thead><tr>
             {activeDimensions.map((item) => <th key={item} className="sortable dimension-sortable" onClick={() => toggleSort(`dimension:${item}`)}><span>{versionCompareDimensionLabel(item, versionDimensionOptions)}</span>{(item === "stat_date" || item === "app_version") && <Button htmlType="button" className="inline-sort-desc" onClick={(event) => { event.stopPropagation(); setDimensionSortDesc(item); }}>降序</Button>}{sortKey === `dimension:${item}` && <span className="sort-indicator">{sortDirection === "asc" ? "▲" : "▼"}</span>}</th>)}
+            {versionProduct === "launcher" && <th className="tracking-status-column">打点状态</th>}
             {selectedColumns.map((column) => <th key={column.key} className="sortable" title={column.help} onClick={() => toggleSort(column.key)}><span>{column.label}</span>{column.unit === "ratio" && <small title={column.help ?? "同组分子分母计算的比例"}>%</small>}{sortKey === column.key && <span className="sort-indicator">{sortDirection === "asc" ? "▲" : "▼"}</span>}</th>)}
           </tr></thead>
           <tbody>{sortedRows.map((row) => {
@@ -3010,6 +3012,7 @@ function VersionComparison({ data, domain, versionProduct, projectCode, appIdent
             const isBaseline = text(row.dimensionLabel) === text(baseline?.dimensionLabel);
             return <tr key={text(row.dimensionKey ?? row.dimensionLabel)} className={isBaseline ? "row-baseline" : ""}>
               {activeDimensions.map((item, index) => <td key={item}><strong>{renderDimensionValue(row, item)}</strong>{index === 0 && isBaseline && <small>当前基准</small>}{index === 0 && sampleSmall && <small className="sample-small">小样本</small>}</td>)}
+              {versionProduct === "launcher" && <td className="tracking-issue-cell">{Array.isArray(row.trackingIssues) && row.trackingIssues.length ? <><strong>需补打点</strong>{row.trackingIssues.map((issue: string) => <small key={issue}>{issue}</small>)}</> : <strong className="tracking-complete">完整</strong>}</td>}
               {selectedColumns.map((column) => <td key={column.key}>
                 {formatCell(row[column.key], column.unit)}
                 {column.unit === "ratio" && !isBaseline && baseline ? rateDelta(row[column.key], baseline[column.key]) : null}
@@ -3018,6 +3021,7 @@ function VersionComparison({ data, domain, versionProduct, projectCode, appIdent
           })}</tbody>
           {rows.length > 1 && <tfoot><tr>
             <td colSpan={activeDimensions.length}><strong>摘要</strong><small>全部 {rows.length} 组</small></td>
+            {versionProduct === "launcher" && <td><strong>查看各版本问题</strong></td>}
             {selectedColumns.map((column) => <td key={column.key}><strong>{formatCell(totals[column.key], column.unit)}</strong></td>)}
           </tr></tfoot>}
         </table></div><div className="version-compare-footnote">数据源：{text(comparison.source)}；口径：{text(comparison.notice)}</div></section>}
