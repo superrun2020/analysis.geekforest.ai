@@ -26,7 +26,7 @@ import { trackingApiBaseUrl } from "./api-base-url";
 import { createCodexQueryLinks } from "./codex-query-links-api";
 import { OperationsWorkspace, operationsEntries, legacyOperationsEntries, type OperationsEntry } from "./operations-workspace";
 
-const APP_VERSION = "V173";
+const APP_VERSION = "V174";
 const VERSION_MANIFEST_PATH = "/version.json";
 
 type PageKey =

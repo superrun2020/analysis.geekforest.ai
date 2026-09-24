@@ -39,6 +39,10 @@ class FunnelAnalyticsService
         ['code' => 'post_connect_impression', 'name' => '连接后广告展示', 'event' => 'ad_impression'],
     ];
 
+    private const VPN_TERMINAL_RESULT_STATUSES = [
+        'success', 'failed', 'failure', 'error', 'timeout', 'cancelled', 'canceled', 'prohibited',
+    ];
+
     private const ADS_EVENT_FUNNEL_STEPS = [
         ['code' => 'opportunity', 'name' => 'Opportunity', 'event' => 'ad_opportunity'],
         ['code' => 'cache_hit', 'name' => 'Cache Hit', 'event' => 'ad_cache_hit', 'branch' => true],
@@ -745,7 +749,7 @@ class FunnelAnalyticsService
      */
     private function analysisPageCacheKey(string $namespace, array $params): string
     {
-        $version = $namespace === 'server_vpn_overall' ? 'v173:' : '';
+        $version = $namespace === 'server_vpn_overall' ? 'v174:' : '';
         return 'jkcl_funnel:page:' . $namespace . ':' . $version . md5(json_encode(
             $this->sortForCacheKey($params),
             JSON_UNESCAPED_UNICODE
@@ -6880,6 +6884,274 @@ class FunnelAnalyticsService
         }
     }
 
+    /** @param array<int, array<string, mixed>> $rows */
+    private function serverVpnHourlyStartAlerts(array $rows, array $thresholds): array
+    {
+        $alerts = [];
+        foreach (collect($rows)->groupBy('serverId') as $serverId => $series) {
+            $ordered = $series->sortBy('statHour')->values()->all();
+            for ($index = $thresholds['baselineHours']; $index < count($ordered) - $thresholds['confirmationHours']; $index++) {
+                $windowStart = $index - $thresholds['baselineHours'];
+                $windowEnd = $index + $thresholds['confirmationHours'];
+                $window = array_slice($ordered, $windowStart, $windowEnd - $windowStart + 1);
+                $timestamps = array_map(static fn (array $row): int => strtotime((string) $row['statHour']), $window);
+                $consecutive = true;
+                for ($position = 1; $position < count($timestamps); $position++) {
+                    if ($timestamps[$position] - $timestamps[$position - 1] !== 3600) {
+                        $consecutive = false;
+                        break;
+                    }
+                }
+                if (!$consecutive) continue;
+
+                $baselineRows = array_slice($ordered, $windowStart, $thresholds['baselineHours']);
+                $current = $ordered[$index];
+                $confirmationRows = array_slice($ordered, $index + 1, $thresholds['confirmationHours']);
+                $healthyBaselineHours = collect($baselineRows)->every(static fn (array $row): bool =>
+                    (int) $row['connectionResultCount'] >= $thresholds['minimumBaselineHourlyResults']
+                    && (float) $row['connectionSuccessRate'] >= $thresholds['minimumBaselineSuccessRate']
+                );
+                if (!$healthyBaselineHours) continue;
+                $baselineResults = array_sum(array_column($baselineRows, 'connectionResultCount'));
+                $baselineSuccesses = array_sum(array_column($baselineRows, 'connectionSuccessCount'));
+                $currentResults = (int) $current['connectionResultCount'];
+                $confirmationResults = array_sum(array_column($confirmationRows, 'connectionResultCount'));
+                $confirmationSuccesses = array_sum(array_column($confirmationRows, 'connectionSuccessCount'));
+                if ($baselineResults < $thresholds['minimumBaselineResults']
+                    || $currentResults < $thresholds['minimumHourlyResults']
+                    || $confirmationResults < $thresholds['minimumHourlyResults']) continue;
+
+                $baselineRate = round($baselineSuccesses / $baselineResults * 100, 2);
+                $currentRate = (float) $current['connectionSuccessRate'];
+                $confirmationRate = round($confirmationSuccesses / $confirmationResults * 100, 2);
+                $dropPp = round($baselineRate - $currentRate, 2);
+                if ($baselineRate < $thresholds['minimumBaselineSuccessRate']
+                    || $currentRate > $thresholds['maximumCurrentSuccessRate']
+                    || $confirmationRate > $thresholds['maximumConfirmationSuccessRate']
+                    || $dropPp < $thresholds['minimumDropPp']) continue;
+
+                $alerts[] = [
+                    'type' => 'hourly_node_success_drop',
+                    'severity' => 'high',
+                    'serverId' => $serverId,
+                    'startHour' => $current['statHour'],
+                    'baselineHours' => $thresholds['baselineHours'],
+                    'baselineResultCount' => $baselineResults,
+                    'baselineSuccessRate' => $baselineRate,
+                    'currentResultCount' => $currentResults,
+                    'currentSuccessRate' => $currentRate,
+                    'confirmationResultCount' => $confirmationResults,
+                    'confirmationSuccessRate' => $confirmationRate,
+                    'dropPp' => $dropPp,
+                    'title' => "{$serverId} 疑似从 {$current['statHour']} 开始受限",
+                    'evidence' => "此前{$thresholds['baselineHours']}小时成功率 {$baselineRate}%，该小时降至 {$currentRate}%，后续小时 {$confirmationRate}%，下降 {$dropPp} 个百分点",
+                    'suggestion' => '建议切换该节点并复测，同时检查同IP段、ASN和入口国家表现；该提示是持续小时级突降证据，不等同于已确认封禁。',
+                ];
+                break;
+            }
+        }
+
+        usort($alerts, static fn (array $left, array $right): int => strcmp((string) $right['startHour'], (string) $left['startHour']));
+        return $alerts;
+    }
+
+    private function serverVpnHourlyAnalysis(array $params, string $projectCode): array
+    {
+        $thresholds = [
+            'maximumDays' => 7,
+            'baselineHours' => 3,
+            'confirmationHours' => 1,
+            'minimumBaselineResults' => 90,
+            'minimumBaselineHourlyResults' => 30,
+            'minimumHourlyResults' => 30,
+            'minimumBaselineSuccessRate' => 50.0,
+            'maximumCurrentSuccessRate' => 20.0,
+            'maximumConfirmationSuccessRate' => 30.0,
+            'minimumDropPp' => 30.0,
+        ];
+        $empty = [
+            'available' => false,
+            'rows' => [],
+            'alerts' => [],
+            'alertCount' => 0,
+            'totalHourlyRows' => 0,
+            'omittedRows' => 0,
+            'mayBeTruncated' => false,
+            'thresholds' => $thresholds,
+            'timezone' => 'UTC+8',
+        ];
+
+        try {
+            $offset = 8;
+            $timezone = sprintf('%+03d:00', $offset);
+            $timezoneLabel = 'UTC' . ($offset >= 0 ? '+' : '') . $offset;
+            $dateFrom = Carbon::parse((string) $params['dateFrom'], $timezone)->startOfDay();
+            $dateTo = Carbon::parse((string) $params['dateTo'], $timezone)->startOfDay();
+            $today = Carbon::now($timezone)->startOfDay();
+            $days = (int) $dateFrom->diffInDays($dateTo) + 1;
+            if ($dateFrom->greaterThan($dateTo) || $dateTo->greaterThan($today)) {
+                return array_replace($empty, ['reason' => '小时报表不读取未来日期，请选择截至今天的日期范围']);
+            }
+            if ($days > $thresholds['maximumDays']) {
+                return array_replace($empty, ['reason' => "小时报表最多查询 {$thresholds['maximumDays']} 天，请缩小日期范围"]);
+            }
+            if (!empty($params['nodeCountry']) && !$this->isAllSummaryFilterValue((string) $params['nodeCountry'])) {
+                return array_replace($empty, ['reason' => '小时原始事件没有可靠的VPN出口国家字段，请清除VPN出口国家筛选后查看小时趋势']);
+            }
+
+            $eventTable = $this->eventTable();
+            $hourExpression = "DATE_FORMAT(DATE_ADD(event_time_utc, INTERVAL {$offset} HOUR), '%Y-%m-%d %H:00:00')";
+            $resultExpression = "LOWER(COALESCE(NULLIF(vpn_status, ''), NULLIF(result_status, ''), ''))";
+            $utcFrom = $dateFrom->copy()->utc();
+            $utcTo = $dateTo->copy()->addDay()->utc();
+            $nowUtc = Carbon::now('UTC');
+            if ($utcTo->greaterThan($nowUtc)) $utcTo = $nowUtc;
+
+            $query = DB::connection('adb')->table($eventTable)
+                ->where('project_code', $projectCode)
+                ->whereBetween('event_date', [$utcFrom->toDateString(), $utcTo->toDateString()])
+                ->where('event_time_utc', '>=', $utcFrom->toDateTimeString())
+                ->where('event_time_utc', '<', $utcTo->toDateTimeString())
+                ->where('event_name', 'vpn_connection_result')
+                ->whereIn(DB::raw($resultExpression), self::VPN_TERMINAL_RESULT_STATUSES)
+                ->whereRaw("NULLIF(TRIM(CAST(connection_id AS CHAR)), '') IS NOT NULL");
+            if (!empty($params['appIdentifier'])) $query->where('app_identifier', (string) $params['appIdentifier']);
+
+            $rankedResults = $query->selectRaw("{$hourExpression} AS stat_hour")
+                ->selectRaw('TRIM(CAST(server_id AS CHAR)) AS normalized_server_id')
+                ->selectRaw('app_identifier, country_code, platform, app_version, network_type, protocol')
+                ->selectRaw('connection_id')
+                ->selectRaw("CASE WHEN {$resultExpression} = 'success' THEN 'success' ELSE 'failed' END AS normalized_result")
+                ->selectRaw('ROW_NUMBER() OVER (PARTITION BY project_code, app_identifier, connection_id ORDER BY event_time_utc DESC, event_id DESC) AS result_rank');
+            $latestResults = DB::connection('adb')->query()
+                ->fromSub($rankedResults, 'ranked_results')
+                ->where('result_rank', 1)
+                ->whereRaw("NULLIF(TRIM(CAST(normalized_server_id AS CHAR)), '') IS NOT NULL");
+            foreach ([
+                'country' => 'country_code',
+                'platform' => 'platform',
+                'appVersion' => 'app_version',
+                'networkType' => 'network_type',
+                'serverId' => 'normalized_server_id',
+                'protocol' => 'protocol',
+            ] as $key => $column) {
+                if (empty($params[$key]) || $this->isAllSummaryFilterValue((string) $params[$key])) continue;
+                $value = trim((string) $params[$key]);
+                if ($value === '(unknown)') {
+                    $latestResults->where(function (Builder $blankQuery) use ($column): void {
+                        $blankQuery->whereNull($column)->orWhereRaw("TRIM(CAST({$column} AS CHAR)) = ''");
+                    });
+                } elseif ($key === 'country') {
+                    $latestResults->whereRaw("UPPER(TRIM(CAST({$column} AS CHAR))) = ?", [strtoupper($value)]);
+                } elseif ($key === 'platform') {
+                    $latestResults->whereRaw("LOWER(TRIM(CAST({$column} AS CHAR))) = ?", [strtolower($value)]);
+                } else {
+                    $latestResults->whereRaw("TRIM(CAST({$column} AS CHAR)) = ?", [$value]);
+                }
+            }
+
+            $groupedQuery = DB::connection('adb')->query()
+                ->fromSub($latestResults, 'hourly_results')
+                ->where('result_rank', 1)
+                ->selectRaw('stat_hour, normalized_server_id AS server_id')
+                ->selectRaw('COUNT(*) AS connection_result_count')
+                ->selectRaw("SUM(CASE WHEN normalized_result = 'success' THEN 1 ELSE 0 END) AS connection_success_count")
+                ->selectRaw("SUM(CASE WHEN normalized_result = 'failed' THEN 1 ELSE 0 END) AS connection_failed_count")
+                ->groupBy('stat_hour', 'normalized_server_id');
+            $metricRows = $groupedQuery->orderBy('stat_hour')->orderBy('normalized_server_id')->limit(10001)->get();
+            $totalHourlyRows = $metricRows->count();
+            if ($totalHourlyRows > 10000) {
+                return array_replace($empty, [
+                    'reason' => '小时节点组合超过10000组，请选择具体节点或缩小日期范围',
+                    'totalHourlyRows' => $totalHourlyRows,
+                    'timezone' => $timezoneLabel,
+                    'source' => $eventTable,
+                ]);
+            }
+            if ($metricRows->isEmpty()) {
+                return array_replace($empty, [
+                    'reason' => '当前项目、日期和筛选范围没有小时级连接结果事件',
+                    'timezone' => $timezoneLabel,
+                    'source' => $eventTable,
+                ]);
+            }
+
+            $rows = $metricRows->map(function ($row) use ($thresholds): array {
+                $results = (int) ($row->connection_result_count ?? 0);
+                $successes = (int) ($row->connection_success_count ?? 0);
+                $failures = (int) ($row->connection_failed_count ?? 0);
+                $successRate = $results > 0 ? round($successes / $results * 100, 2) : null;
+                $status = match (true) {
+                    $results < $thresholds['minimumHourlyResults'] => 'insufficient',
+                    $successRate <= $thresholds['maximumCurrentSuccessRate'] => 'bad',
+                    $successRate < $thresholds['minimumBaselineSuccessRate'] => 'warn',
+                    default => 'good',
+                };
+                return [
+                    'rowKey' => hash('sha256', (string) $row->stat_hour . '|' . (string) $row->server_id),
+                    'statHour' => (string) $row->stat_hour,
+                    'serverId' => (string) $row->server_id,
+                    'connectionResultCount' => $results,
+                    'connectionSuccessCount' => $successes,
+                    'connectionFailedCount' => $failures,
+                    'connectionSuccessRate' => $successRate,
+                    'status' => $status,
+                ];
+            })->values()->all();
+            $alerts = $this->serverVpnHourlyStartAlerts($rows, $thresholds);
+            $alertKeys = array_fill_keys(array_map(static fn (array $alert): string => $alert['serverId'] . '|' . $alert['startHour'], $alerts), true);
+            foreach ($rows as &$row) {
+                $row['detectedStart'] = isset($alertKeys[$row['serverId'] . '|' . $row['statHour']]);
+                if ($row['detectedStart']) $row['status'] = 'bad';
+            }
+            unset($row);
+            usort($rows, static function (array $left, array $right): int {
+                $hourOrder = strcmp($right['statHour'], $left['statHour']);
+                return $hourOrder !== 0 ? $hourOrder : ($right['connectionResultCount'] <=> $left['connectionResultCount']);
+            });
+            $rowLimit = 1000;
+            $returnedRows = array_slice($rows, 0, $rowLimit);
+            $totals = [
+                'nodeCount' => count(array_unique(array_column($rows, 'serverId'))),
+                'hourCount' => count(array_unique(array_column($rows, 'statHour'))),
+                'connectionResultCount' => array_sum(array_column($rows, 'connectionResultCount')),
+                'connectionSuccessCount' => array_sum(array_column($rows, 'connectionSuccessCount')),
+                'connectionFailedCount' => array_sum(array_column($rows, 'connectionFailedCount')),
+            ];
+            $totals['connectionSuccessRate'] = $totals['connectionResultCount'] > 0
+                ? round($totals['connectionSuccessCount'] / $totals['connectionResultCount'] * 100, 2)
+                : null;
+
+            return [
+                'available' => true,
+                'projectCode' => $projectCode,
+                'dateFrom' => $params['dateFrom'],
+                'dateTo' => $params['dateTo'],
+                'timezone' => $timezoneLabel,
+                'rows' => $returnedRows,
+                'rowLimit' => $rowLimit,
+                'totalHourlyRows' => $totalHourlyRows,
+                'omittedRows' => max(0, $totalHourlyRows - count($returnedRows)),
+                'mayBeTruncated' => $totalHourlyRows > count($returnedRows),
+                'alerts' => $alerts,
+                'alertCount' => count($alerts),
+                'thresholds' => $thresholds,
+                'totals' => $totals,
+                'source' => $eventTable,
+                'notice' => '小时成功率按每个 connection_id 的最后一条明确连接结果计算；使用本地小时（UTC+8）。只有此前连续3个小时各自满足样本量和基线成功率、当前小时发生明显突降且后续小时继续偏低时，才标记该节点在查询范围内的首个疑似开始受限小时。',
+            ];
+        } catch (Throwable $exception) {
+            Log::warning('jkcl_server_vpn_hourly_analysis_failed', [
+                'projectCode' => $projectCode,
+                'message' => $exception->getMessage(),
+            ]);
+            return array_replace($empty, [
+                'reason' => '节点小时趋势读取失败',
+                'warnings' => ['hourly_analysis_failed'],
+            ]);
+        }
+    }
+
     /**
      * Internal server-node quality for the explicitly approved VPN projects.
      * Connection metrics come from ADB; node inventory is enriched from nxpanel.
@@ -7246,6 +7518,7 @@ class FunnelAnalyticsService
             $projectCode,
             $serverIds
         );
+        $hourlyAnalysis = $this->serverVpnHourlyAnalysis($params, $projectCode);
 
         return [
             'context' => $this->context(array_replace($params, ['projectCode' => $projectCode])),
@@ -7276,6 +7549,7 @@ class FunnelAnalyticsService
                 'mayBeTruncated' => $totalGroupedRows > count($rows),
                 'totals' => $totals,
                 'riskAnalysis' => $riskAnalysis,
+                'hourlyAnalysis' => $hourlyAnalysis,
                 'inventoryAvailable' => $inventoryAvailable,
                 'enrichmentWarnings' => $enrichmentWarnings,
                 'queriedAt' => Carbon::now(config('app.timezone', 'Asia/Shanghai'))->toDateTimeString(),

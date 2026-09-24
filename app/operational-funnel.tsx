@@ -3565,6 +3565,11 @@ function ServerVpnOverall({ data, initialDates, appliedConfig, hasQueried, query
   const riskReady = riskAnalysis?.available === true;
   const riskAlerts: AnyRow[] = riskReady && Array.isArray(riskAnalysis.alerts) ? riskAnalysis.alerts : [];
   const riskMapping = riskAnalysis?.mapping ?? {};
+  const hourlyAnalysis = report.hourlyAnalysis ?? null;
+  const hourlyReady = hourlyAnalysis?.available === true;
+  const hourlyRows: AnyRow[] = hourlyReady && Array.isArray(hourlyAnalysis.rows) ? hourlyAnalysis.rows : [];
+  const hourlyAlerts: AnyRow[] = hourlyReady && Array.isArray(hourlyAnalysis.alerts) ? hourlyAnalysis.alerts : [];
+  const hourlyTotals = hourlyAnalysis?.totals ?? {};
   const draftMatchesApplied = serverVpnQueryIdentity(serverVpnDraft) === serverVpnQueryIdentity(appliedConfig);
   const options = draftMatchesApplied ? rawOptions : {};
   const optionMeta = draftMatchesApplied ? report.dimensionOptionMeta ?? {} : {};
@@ -3599,6 +3604,16 @@ function ServerVpnOverall({ data, initialDates, appliedConfig, hasQueried, query
     const csv = [columns.map((column) => safeCsvCell(column.label)).join(","), ...rows.map((row) => columns.map((column) => safeCsvCell(row.dimensionValues?.[column.key] ?? row[column.key])).join(","))].join("\n");
     const url = URL.createObjectURL(new Blob([`\ufeff${csv}`], { type: "text/csv;charset=utf-8" }));
     const link = document.createElement("a"); link.href = url; link.download = `server-vpn-overall-${report.projectCode ?? "project"}-${report.dateFrom ?? "date"}.csv`; link.click(); URL.revokeObjectURL(url);
+  };
+  const exportHourlyCsv = () => {
+    if (!hourlyReady || hourlyAnalysis.mayBeTruncated || !hourlyRows.length) return;
+    const columns = [
+      ["statHour", `小时（${hourlyAnalysis.timezone ?? "UTC+8"}）`], ["serverId", "节点"], ["connectionResultCount", "连接结果"],
+      ["connectionSuccessCount", "连接成功"], ["connectionFailedCount", "连接失败"], ["connectionSuccessRate", "连接成功率"], ["detectedStart", "疑似开始受限"],
+    ];
+    const csv = [columns.map(([, label]) => safeCsvCell(label)).join(","), ...hourlyRows.map((row) => columns.map(([key]) => safeCsvCell(row[key])).join(","))].join("\n");
+    const url = URL.createObjectURL(new Blob([`\ufeff${csv}`], { type: "text/csv;charset=utf-8" }));
+    const link = document.createElement("a"); link.href = url; link.download = `server-vpn-hourly-${report.projectCode ?? "project"}-${report.dateFrom ?? "date"}.csv`; link.click(); URL.revokeObjectURL(url);
   };
   const dimensionOption = (key: string, selected?: string): string[] => {
     const values: string[] = Array.isArray(options[key]) ? options[key] : [];
@@ -3660,6 +3675,27 @@ function ServerVpnOverall({ data, initialDates, appliedConfig, hasQueried, query
               const typeLabel = alert.type === "country_node_blocking" ? "疑似被入口国家屏蔽" : alert.type === "ip_range_flagged" ? "IP段可能被标记" : alert.type === "asn_flagged" ? "ASN可能被标记" : "网络风险";
               return <tr key={`${text(alert.type)}-${text(alert.title)}-${index}`} className="row-bad"><td><span className="status-chip bad">{typeLabel}</span></td><td><strong>{text(alert.title)}</strong>{alert.asnName && <small>{text(alert.asnName)}</small>}</td><td><strong>{text(alert.evidence)}</strong>{Array.isArray(alert.ips) && <small>{alert.ips.map((ip: string) => text(ip)).join("、")}</small>}</td><td>{text(alert.suggestion)}</td></tr>;
             })}</tbody></table></div> : <div className="overall-empty-state">当前范围未达到风险提示阈值。没有提示不代表绝对安全，可结合更长日期范围继续观察。</div>}
+          </>}
+      </section>}
+      {showReportData && <section className="server-vpn-risk-analysis server-vpn-hourly-analysis">
+        <div className="surface-title"><div><h3>节点小时趋势</h3><p>按 {text(hourlyAnalysis?.timezone ?? "UTC+8")} 展示每个节点的明确连接结果，用于定位节点疑似从哪个小时开始受限、成功率何时发生持续突降。</p></div><div>{hourlyReady && <Button htmlType="button" onClick={exportHourlyCsv} disabled={hourlyAnalysis.mayBeTruncated || !hourlyRows.length}>{hourlyAnalysis.mayBeTruncated ? "筛选节点后导出" : "导出小时 CSV"}</Button>}<span>{hourlyReady ? `${number(hourlyAnalysis.alertCount)} 个起始点` : "暂不可用"}</span></div></div>
+        {!hourlyReady
+          ? <div className="diagnosis-no-reasons compact warn"><strong>小时报表暂不可用</strong><p>{text(hourlyAnalysis?.reason ?? "当前响应未包含V174小时分析结果，请刷新后重新查询。")}</p></div>
+          : <>
+            <div className="overall-active-hint">判定规则：此前连续 {number(hourlyAnalysis.thresholds?.baselineHours)} 个小时，每小时至少 {number(hourlyAnalysis.thresholds?.minimumBaselineHourlyResults)} 个结果且成功率均 ≥ {percent(hourlyAnalysis.thresholds?.minimumBaselineSuccessRate)}（合计至少 {number(hourlyAnalysis.thresholds?.minimumBaselineResults)} 个结果）；当前小时至少 {number(hourlyAnalysis.thresholds?.minimumHourlyResults)} 个结果、成功率 ≤ {percent(hourlyAnalysis.thresholds?.maximumCurrentSuccessRate)}、下降 ≥ {number(hourlyAnalysis.thresholds?.minimumDropPp)} 个百分点，并由后续小时成功率 ≤ {percent(hourlyAnalysis.thresholds?.maximumConfirmationSuccessRate)} 确认。每个节点只标记范围内首个起始点，最多查询 {number(hourlyAnalysis.thresholds?.maximumDays)} 天。</div>
+            <div className="summary-grid server-vpn-summary-grid">
+              <article><span>小时覆盖</span><strong>{number(hourlyTotals.hourCount)}</strong><small>{number(hourlyTotals.nodeCount)} 个节点 · {text(hourlyAnalysis.timezone)}</small></article>
+              <article><span>明确连接结果</span><strong>{number(hourlyTotals.connectionResultCount)}</strong><small>成功 {number(hourlyTotals.connectionSuccessCount)} · 失败 {number(hourlyTotals.connectionFailedCount)}</small></article>
+              <article><span>小时范围成功率</span><strong>{percent(hourlyTotals.connectionSuccessRate)}</strong><small>每个 connection_id 只取最后一条明确结果</small></article>
+              <article><span>疑似开始受限</span><strong>{number(hourlyAnalysis.alertCount)}</strong><small>必须有突降前基线和突降后确认小时</small></article>
+            </div>
+            {hourlyAlerts.length ? <div className="table-wrap"><table className="version-compare-table server-vpn-risk-table"><thead><tr><th>节点</th><th>疑似开始小时</th><th>此前3小时</th><th>当前小时</th><th>后续确认小时</th><th>判断</th></tr></thead><tbody>{hourlyAlerts.map((alert, index) => <tr key={`${text(alert.serverId)}-${text(alert.startHour)}-${index}`} className="row-bad"><td><strong>{text(alert.serverId)}</strong></td><td><strong>{text(alert.startHour)}</strong><small>{text(hourlyAnalysis.timezone)}</small></td><td><strong>{percent(alert.baselineSuccessRate)}</strong><small>{number(alert.baselineResultCount)} 个结果</small></td><td><strong>{percent(alert.currentSuccessRate)}</strong><small>{number(alert.currentResultCount)} 个结果 · 下降 {number(alert.dropPp)}pp</small></td><td><strong>{percent(alert.confirmationSuccessRate)}</strong><small>{number(alert.confirmationResultCount)} 个结果</small></td><td><strong>{text(alert.title)}</strong><small>{text(alert.suggestion)}</small></td></tr>)}</tbody></table></div> : <div className="overall-empty-state">当前范围没有达到“持续小时级突降”阈值的节点。单个低成功率小时不会被直接认定为封禁起点。</div>}
+            {hourlyAnalysis.mayBeTruncated && <div className="diagnosis-no-reasons compact warn"><strong>小时明细展示 {number(hourlyRows.length)} / {number(hourlyAnalysis.totalHourlyRows)} 组</strong><p>省略 {number(hourlyAnalysis.omittedRows)} 组；起始点检测仍使用完整范围，CSV为避免导出不完整已禁用。请选择具体节点后重新查询。</p></div>}
+            <div className="table-wrap"><table className="version-compare-table server-vpn-hourly-table"><thead><tr><th>状态</th><th>小时（{text(hourlyAnalysis.timezone)}）</th><th>节点</th><th>连接结果</th><th>成功</th><th>失败</th><th>成功率</th></tr></thead><tbody>{hourlyRows.length ? hourlyRows.map((row) => {
+              const hourlyStatus = row.detectedStart ? { label: "疑似起点", className: "bad" } : row.status === "bad" ? { label: "低成功率", className: "bad" } : row.status === "warn" ? { label: "关注", className: "warn" } : row.status === "good" ? { label: "正常", className: "good" } : { label: "样本不足", className: "muted" };
+              return <tr key={text(row.rowKey)} className={row.status === "bad" ? "row-bad" : row.status === "warn" ? "row-warn" : ""}><td><span className={`status-chip ${hourlyStatus.className}`}>{hourlyStatus.label}</span></td><td><strong>{text(row.statHour)}</strong></td><td><strong>{text(row.serverId)}</strong></td><td>{number(row.connectionResultCount)}</td><td>{number(row.connectionSuccessCount)}</td><td>{number(row.connectionFailedCount)}</td><td><strong>{percent(row.connectionSuccessRate)}</strong></td></tr>;
+            }) : <tr><td colSpan={7}>当前筛选范围没有小时明细</td></tr>}</tbody></table></div>
+            <div className="matrix-footnote">{text(hourlyAnalysis.notice)} 数据源：{text(hourlyAnalysis.source)}。</div>
           </>}
       </section>}
       {showReportData && report.inventoryAvailable === false && <div className="diagnosis-no-reasons compact warn"><strong>节点资料暂不可用</strong><p>连接质量数据仍正常展示；节点库恢复后自动补充名称、地区和资源状态。</p></div>}
