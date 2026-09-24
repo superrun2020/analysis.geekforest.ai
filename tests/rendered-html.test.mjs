@@ -78,6 +78,14 @@ test("server VPN Overall is restricted to internal node projects", async () => {
   assert.match(source, /VPN出口国家/);
   assert.match(source, /App版本/);
   assert.match(source, /ASN暂不可用/);
+  assert.match(source, /区域屏蔽与网络标记分析/);
+  assert.match(source, /疑似被入口国家屏蔽/);
+  assert.match(source, /IP段可能被标记/);
+  assert.match(source, /ASN可能被标记/);
+  assert.match(source, /证据型风险提示/);
+  assert.match(source, /riskReady/);
+  assert.match(source, /当前响应未包含V173风险分析结果/);
+  assert.match(source, /已排除多IP域名映射/);
   assert.match(source, /serverVpnDataMatches/);
   assert.match(source, /forceRefresh: serverVpnQueryKey > 0/);
   assert.match(api, /server_vpn_overall/);
@@ -110,6 +118,20 @@ test("server VPN Overall is restricted to internal node projects", async () => {
   assert.match(service, /inventoryAvailable/);
   assert.match(service, /connection\('ad_revenue'\)/);
   assert.match(service, /服务器VPN Overall仅支持 A003、A005、A007/);
+  assert.match(service, /serverVpnRiskAnalysis/);
+  assert.match(service, /country_node_blocking/);
+  assert.match(service, /ip_range_flagged/);
+  assert.match(service, /asn_flagged/);
+  assert.match(service, /jkcl_vpn_domain_asn/);
+  assert.match(service, /connection_failed_count/);
+  assert.match(service, /connection_result_count/);
+  assert.match(service, /server_vpn_overall.*v173/s);
+  assert.match(service, /validOutcomeRows/);
+  assert.match(service, /knownCountryRows/);
+  assert.match(service, /\$countryRows = \(clone \$riskBaseQuery\)\s*->whereRaw\(\$validOutcomeCondition\)/);
+  assert.match(service, /excludedInvalidOutcomeRowCount/);
+  assert.match(service, /ambiguous_domain_ip_mapping_excluded/);
+  assert.match(service, /ambiguous_ip_asn_mapping_excluded/);
 });
 
 test("VPN comparison and Launcher Overall stay separate", async () => {

@@ -745,7 +745,8 @@ class FunnelAnalyticsService
      */
     private function analysisPageCacheKey(string $namespace, array $params): string
     {
-        return 'jkcl_funnel:page:' . $namespace . ':' . md5(json_encode(
+        $version = $namespace === 'server_vpn_overall' ? 'v173:' : '';
+        return 'jkcl_funnel:page:' . $namespace . ':' . $version . md5(json_encode(
             $this->sortForCacheKey($params),
             JSON_UNESCAPED_UNICODE
         ));
@@ -6565,6 +6566,320 @@ class FunnelAnalyticsService
         return $query;
     }
 
+    private function serverVpnCountryBlockingAlerts($countryRows, ?string $focusCountry, array $thresholds): array
+    {
+        $alerts = [];
+        $countryRows = $countryRows->filter(static function ($row): bool {
+            $country = strtoupper(trim((string) ($row->country_code ?? '')));
+            $results = (int) ($row->connection_result_count ?? 0);
+            $failures = (int) ($row->connection_failed_count ?? 0);
+            return $country !== '' && $country !== '(UNKNOWN)' && $failures <= $results;
+        })->values();
+        $rowsByServer = $countryRows->groupBy(static fn ($row): string => (string) $row->server_id);
+        foreach ($rowsByServer as $serverId => $nodeRows) {
+            foreach ($nodeRows as $targetRow) {
+                $country = strtoupper(trim((string) ($targetRow->country_code ?? '')));
+                if ($country === '' || $country === '(UNKNOWN)' || ($focusCountry !== null && $country !== $focusCountry)) continue;
+                $targetResults = (int) ($targetRow->connection_result_count ?? 0);
+                $targetFailures = (int) ($targetRow->connection_failed_count ?? 0);
+                if ($targetResults < $thresholds['minimumCountryResults'] || $targetFailures > $targetResults) continue;
+                $peerResults = 0;
+                $peerFailures = 0;
+                foreach ($nodeRows as $peerRow) {
+                    if ((string) $peerRow->country_code === (string) $targetRow->country_code) continue;
+                    $peerResults += (int) ($peerRow->connection_result_count ?? 0);
+                    $peerFailures += (int) ($peerRow->connection_failed_count ?? 0);
+                }
+                if ($peerResults < $thresholds['minimumPeerResults'] || $peerFailures > $peerResults) continue;
+                $targetFailureRate = round($targetFailures / $targetResults * 100, 2);
+                $peerFailureRate = round($peerFailures / $peerResults * 100, 2);
+                $gap = round($targetFailureRate - $peerFailureRate, 2);
+                if ($targetFailureRate < $thresholds['highFailureRate']
+                    || $peerFailureRate > $thresholds['healthyPeerFailureRate']
+                    || $gap < $thresholds['minimumFailureGapPp']) continue;
+                $alerts[] = [
+                    'type' => 'country_node_blocking',
+                    'severity' => 'high',
+                    'title' => "{$country} → {$serverId} 疑似被入口国家屏蔽",
+                    'country' => $country,
+                    'serverId' => $serverId,
+                    'targetResultCount' => $targetResults,
+                    'targetFailureCount' => $targetFailures,
+                    'targetFailureRate' => $targetFailureRate,
+                    'peerResultCount' => $peerResults,
+                    'peerFailureCount' => $peerFailures,
+                    'peerFailureRate' => $peerFailureRate,
+                    'failureGapPp' => $gap,
+                    'evidence' => "{$country}失败率 {$targetFailureRate}%，其他国家 {$peerFailureRate}%，相差 {$gap} 个百分点",
+                    'suggestion' => "建议为 {$country} 更换其他节点，并复测确认；这是一条统计风险提示，不是已确认封禁。",
+                    'score' => $gap,
+                ];
+            }
+        }
+
+        return $alerts;
+    }
+
+    /**
+     * Evidence-based risk hints for country-specific blocking, IPv4 /24 ranges,
+     * and ASN clusters. These are statistical alerts, never proof of blocking.
+     */
+    private function serverVpnRiskAnalysis(string $table, array $params, string $projectCode, array $serverIds): array
+    {
+        $thresholds = [
+            'minimumCountryResults' => 50,
+            'minimumPeerResults' => 100,
+            'highFailureRate' => 70.0,
+            'healthyPeerFailureRate' => 30.0,
+            'minimumFailureGapPp' => 40.0,
+            'minimumNetworkIps' => 2,
+            'minimumIpResults' => 50,
+        ];
+        $empty = [
+            'available' => true,
+            'alerts' => [],
+            'alertCount' => 0,
+            'thresholds' => $thresholds,
+            'mapping' => [
+                'available' => false,
+                'source' => 'jkcl_vpn_domain_asn',
+                'serverCount' => count($serverIds),
+                'mappedIpServerCount' => 0,
+                'mappedAsnServerCount' => 0,
+                'ipRangeAvailable' => false,
+                'asnAvailable' => false,
+            ],
+            'warnings' => [],
+        ];
+
+        try {
+            $analysisParams = array_replace($params, ['projectCode' => $projectCode]);
+            $countryExpression = $this->serverVpnDimensionExpression('country_code');
+            $serverExpression = $this->serverVpnDimensionExpression('server_id');
+            $riskBaseQuery = $this->serverVpnBaseQuery($table, $analysisParams, 'country');
+            $validOutcomeCondition = 'COALESCE(connection_result_count, 0) >= 0'
+                . ' AND COALESCE(connection_failed_count, 0) >= 0'
+                . ' AND COALESCE(connection_failed_count, 0) <= COALESCE(connection_result_count, 0)';
+            $invalidOutcomeRowCount = (int) (clone $riskBaseQuery)
+                ->whereRaw("NOT ({$validOutcomeCondition})")
+                ->count();
+            $countryRows = (clone $riskBaseQuery)
+                ->whereRaw($validOutcomeCondition)
+                ->selectRaw("{$serverExpression} AS server_id")
+                ->selectRaw("{$countryExpression} AS country_code")
+                ->selectRaw('COALESCE(SUM(connection_result_count), 0) AS connection_result_count')
+                ->selectRaw('COALESCE(SUM(connection_failed_count), 0) AS connection_failed_count')
+                ->groupByRaw($serverExpression)
+                ->groupByRaw($countryExpression)
+                ->get();
+
+            if ($countryRows->isEmpty()) return array_replace($empty, [
+                'warnings' => $invalidOutcomeRowCount > 0 ? ['inconsistent_outcome_counts_excluded'] : [],
+                'excludedInvalidOutcomeRowCount' => $invalidOutcomeRowCount,
+            ]);
+            $hasOutcomeInconsistency = $invalidOutcomeRowCount > 0;
+            $validOutcomeRows = $countryRows->filter(static fn ($row): bool =>
+                (int) ($row->connection_failed_count ?? 0) <= (int) ($row->connection_result_count ?? 0)
+            )->values();
+            $knownCountryRows = $validOutcomeRows->filter(static function ($row): bool {
+                $country = strtoupper(trim((string) ($row->country_code ?? '')));
+                return $country !== '' && $country !== '(UNKNOWN)';
+            })->values();
+
+            $networkMap = [];
+            foreach ($serverIds as $serverId) {
+                $normalizedServerId = trim((string) $serverId);
+                if ($this->isPublicExitIp($normalizedServerId) && filter_var($normalizedServerId, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+                    $parts = explode('.', $normalizedServerId);
+                    $networkMap[$normalizedServerId] = [
+                        'ip' => $normalizedServerId,
+                        'ipRange' => implode('.', array_slice($parts, 0, 3)) . '.0/24',
+                        'asn' => null,
+                        'asnName' => null,
+                    ];
+                }
+            }
+
+            $mappingAvailable = false;
+            $ambiguousDomainCount = 0;
+            $ambiguousIpAsnCount = 0;
+            if (Schema::hasTable('jkcl_vpn_domain_asn')) {
+                $mappingAvailable = true;
+                foreach (array_chunk($serverIds, 250) as $serverIdChunk) {
+                    $mappingRows = DB::table('jkcl_vpn_domain_asn')
+                        ->where('project_code', $projectCode)
+                        ->where(function (Builder $mappingQuery) use ($serverIdChunk): void {
+                            $mappingQuery->whereIn('domain', $serverIdChunk)->orWhereIn('ip', $serverIdChunk);
+                        })
+                        ->select(['domain', 'ip', 'asn', 'asn_name', 'resolved_at'])
+                        ->get()
+                        ->filter(function ($mappingRow): bool {
+                            $ip = trim((string) ($mappingRow->ip ?? ''));
+                            return $this->isPublicExitIp($ip) && filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== false;
+                        });
+                    foreach ($mappingRows->groupBy(static fn ($row): string => trim((string) ($row->domain ?? ''))) as $domain => $domainRows) {
+                        if ($domain === '' || !in_array($domain, $serverIdChunk, true)) continue;
+                        $distinctIps = $domainRows->pluck('ip')->map(static fn ($ip): string => trim((string) $ip))->unique()->values();
+                        if ($distinctIps->count() !== 1) {
+                            $ambiguousDomainCount++;
+                            continue;
+                        }
+                        $mappingRow = $domainRows->sortByDesc(static fn ($row): string => (string) ($row->resolved_at ?? ''))->first();
+                        $ip = (string) $distinctIps->first();
+                        $parts = explode('.', $ip);
+                        $networkMap[$domain] = [
+                            'ip' => $ip,
+                            'ipRange' => implode('.', array_slice($parts, 0, 3)) . '.0/24',
+                            'asn' => trim((string) ($mappingRow->asn ?? '')) ?: null,
+                            'asnName' => trim((string) ($mappingRow->asn_name ?? '')) ?: null,
+                        ];
+                    }
+                    foreach ($mappingRows->groupBy(static fn ($row): string => trim((string) ($row->ip ?? ''))) as $ip => $ipRows) {
+                        if ($ip === '' || !in_array($ip, $serverIdChunk, true)) continue;
+                        $distinctAsns = $ipRows->pluck('asn')->map(static fn ($asn): string => trim((string) $asn))->filter()->unique()->values();
+                        if ($distinctAsns->count() > 1) $ambiguousIpAsnCount++;
+                        $mappingRow = $ipRows->sortByDesc(static fn ($row): string => (string) ($row->resolved_at ?? ''))->first();
+                        $parts = explode('.', $ip);
+                        $networkMap[$ip] = [
+                            'ip' => $ip,
+                            'ipRange' => implode('.', array_slice($parts, 0, 3)) . '.0/24',
+                            'asn' => $distinctAsns->count() === 1 ? (string) $distinctAsns->first() : null,
+                            'asnName' => $distinctAsns->count() === 1 ? (trim((string) ($mappingRow->asn_name ?? '')) ?: null) : null,
+                        ];
+                    }
+                }
+            }
+
+            $countryFilter = trim((string) ($params['country'] ?? ''));
+            $focusCountry = $countryFilter !== '' && !$this->isAllSummaryFilterValue($countryFilter)
+                ? strtoupper($countryFilter)
+                : null;
+            $alerts = $this->serverVpnCountryBlockingAlerts($knownCountryRows, $focusCountry, $thresholds);
+
+            $networkRows = $focusCountry === null
+                ? $validOutcomeRows
+                : $knownCountryRows->filter(static fn ($row): bool => strtoupper(trim((string) ($row->country_code ?? ''))) === $focusCountry);
+            $nodeTotals = $networkRows->groupBy(static fn ($row): string => (string) $row->server_id)
+                ->map(static function ($nodeRows, string $serverId): array {
+                    return [
+                        'serverId' => $serverId,
+                        'results' => (int) $nodeRows->sum('connection_result_count'),
+                        'failures' => (int) $nodeRows->sum('connection_failed_count'),
+                    ];
+                });
+            $ipTotals = [];
+            foreach ($nodeTotals as $serverId => $nodeTotal) {
+                $mapping = $networkMap[$serverId] ?? null;
+                if (!$mapping || empty($mapping['ip'])) continue;
+                $ip = $mapping['ip'];
+                if (!isset($ipTotals[$ip])) $ipTotals[$ip] = array_merge($mapping, ['serverIds' => [], 'results' => 0, 'failures' => 0]);
+                $ipTotals[$ip]['serverIds'][] = $serverId;
+                $ipTotals[$ip]['results'] += $nodeTotal['results'];
+                $ipTotals[$ip]['failures'] += $nodeTotal['failures'];
+            }
+            foreach ($ipTotals as &$ipTotal) {
+                $ipTotal['serverIds'] = array_values(array_unique($ipTotal['serverIds']));
+                $ipTotal['failureRate'] = $ipTotal['results'] > 0 ? round($ipTotal['failures'] / $ipTotal['results'] * 100, 2) : null;
+            }
+            unset($ipTotal);
+
+            $eligibleIps = collect($ipTotals)->filter(static fn (array $row): bool =>
+                $row['results'] >= $thresholds['minimumIpResults'] && $row['failures'] <= $row['results']
+            );
+            foreach ($eligibleIps->groupBy('ipRange') as $ipRange => $rangeRows) {
+                if ($rangeRows->count() < $thresholds['minimumNetworkIps']) continue;
+                if ($rangeRows->contains(static fn (array $row): bool => $row['failureRate'] < $thresholds['highFailureRate'])) continue;
+                $results = (int) $rangeRows->sum('results');
+                $failures = (int) $rangeRows->sum('failures');
+                $failureRate = $results > 0 ? round($failures / $results * 100, 2) : null;
+                $alerts[] = [
+                    'type' => 'ip_range_flagged',
+                    'severity' => 'high',
+                    'title' => "{$ipRange} IP段可能被标记",
+                    'ipRange' => $ipRange,
+                    'ipCount' => $rangeRows->count(),
+                    'ips' => $rangeRows->pluck('ip')->values()->all(),
+                    'resultCount' => $results,
+                    'failureCount' => $failures,
+                    'failureRate' => $failureRate,
+                    'evidence' => "同一 /24 IP段内 {$rangeRows->count()} 个有足够样本的IP失败率均不低于 {$thresholds['highFailureRate']}%，合计失败率 {$failureRate}%",
+                    'suggestion' => '建议更换到其他IP段的节点并复测；这是一条统计风险提示，不代表该IP段已被确认标记。',
+                    'score' => $failureRate,
+                ];
+            }
+
+            $asnRows = $eligibleIps->filter(static fn (array $row): bool => !empty($row['asn']));
+            foreach ($asnRows->groupBy('asn') as $asn => $groupRows) {
+                if ($groupRows->count() < $thresholds['minimumNetworkIps']) continue;
+                if ($groupRows->contains(static fn (array $row): bool => $row['failureRate'] < $thresholds['highFailureRate'])) continue;
+                $results = (int) $groupRows->sum('results');
+                $failures = (int) $groupRows->sum('failures');
+                $failureRate = $results > 0 ? round($failures / $results * 100, 2) : null;
+                $asnName = $groupRows->pluck('asnName')->filter()->first();
+                $alerts[] = [
+                    'type' => 'asn_flagged',
+                    'severity' => 'high',
+                    'title' => "{$asn} ASN可能被标记",
+                    'asn' => $asn,
+                    'asnName' => $asnName,
+                    'ipCount' => $groupRows->count(),
+                    'ips' => $groupRows->pluck('ip')->values()->all(),
+                    'resultCount' => $results,
+                    'failureCount' => $failures,
+                    'failureRate' => $failureRate,
+                    'evidence' => "同一ASN下 {$groupRows->count()} 个有足够样本的IP失败率均不低于 {$thresholds['highFailureRate']}%，合计失败率 {$failureRate}%",
+                    'suggestion' => '建议切换到其他ASN下的节点并复测；这是一条统计风险提示，不代表该ASN已被确认标记。',
+                    'score' => $failureRate,
+                ];
+            }
+
+            usort($alerts, static fn (array $left, array $right): int => ($right['score'] ?? 0) <=> ($left['score'] ?? 0));
+            $alerts = array_slice($alerts, 0, 100);
+            $mappedIpServerCount = count(array_filter($serverIds, static fn ($serverId): bool => !empty($networkMap[(string) $serverId]['ip'])));
+            $mappedAsnServerCount = count(array_filter($serverIds, static fn ($serverId): bool => !empty($networkMap[(string) $serverId]['asn'])));
+            $warnings = [];
+            if (!$mappingAvailable) $warnings[] = 'network_mapping_table_unavailable';
+            if ($mappedIpServerCount < count($serverIds)) $warnings[] = 'partial_ip_mapping';
+            if ($mappedAsnServerCount < count($serverIds)) $warnings[] = 'partial_asn_mapping';
+            if ($hasOutcomeInconsistency) $warnings[] = 'inconsistent_outcome_counts_excluded';
+            if ($ambiguousDomainCount > 0) $warnings[] = 'ambiguous_domain_ip_mapping_excluded';
+            if ($ambiguousIpAsnCount > 0) $warnings[] = 'ambiguous_ip_asn_mapping_excluded';
+
+            return [
+                'available' => true,
+                'alerts' => $alerts,
+                'alertCount' => count($alerts),
+                'thresholds' => $thresholds,
+                'mapping' => [
+                    'available' => $mappingAvailable,
+                    'source' => 'default.jkcl_vpn_domain_asn',
+                    'serverCount' => count($serverIds),
+                    'mappedIpServerCount' => $mappedIpServerCount,
+                    'mappedAsnServerCount' => $mappedAsnServerCount,
+                    'distinctMappedIps' => count($ipTotals),
+                    'distinctMappedAsns' => $asnRows->pluck('asn')->unique()->count(),
+                    'ambiguousDomainCount' => $ambiguousDomainCount,
+                    'ambiguousIpAsnCount' => $ambiguousIpAsnCount,
+                    'ipRangeAvailable' => $mappedIpServerCount > 0,
+                    'asnAvailable' => $mappedAsnServerCount > 0,
+                ],
+                'warnings' => $warnings,
+                'excludedInvalidOutcomeRowCount' => $invalidOutcomeRowCount,
+                'notice' => '证据型风险提示：仅基于明确失败结果、样本量和对照差异，不把未返回结果算作失败，也不等同于已确认封禁或网络标记。',
+            ];
+        } catch (Throwable $exception) {
+            Log::warning('jkcl_server_vpn_risk_analysis_failed', [
+                'projectCode' => $projectCode,
+                'message' => $exception->getMessage(),
+            ]);
+            return array_replace($empty, [
+                'available' => false,
+                'reason' => '区域屏蔽与网络标记分析暂不可用',
+                'warnings' => ['risk_analysis_failed'],
+            ]);
+        }
+    }
+
     /**
      * Internal server-node quality for the explicitly approved VPN projects.
      * Connection metrics come from ADB; node inventory is enriched from nxpanel.
@@ -6925,6 +7240,12 @@ class FunnelAnalyticsService
         $totals['avgDurationMs'] = $totals['durationSampleCount'] > 0
             ? round($totals['durationWeightedSum'] / $totals['durationSampleCount'], 1)
             : null;
+        $riskAnalysis = $this->serverVpnRiskAnalysis(
+            $vpnQualityTable,
+            $params,
+            $projectCode,
+            $serverIds
+        );
 
         return [
             'context' => $this->context(array_replace($params, ['projectCode' => $projectCode])),
@@ -6954,6 +7275,7 @@ class FunnelAnalyticsService
                 'omittedRows' => max(0, $totalGroupedRows - count($rows)),
                 'mayBeTruncated' => $totalGroupedRows > count($rows),
                 'totals' => $totals,
+                'riskAnalysis' => $riskAnalysis,
                 'inventoryAvailable' => $inventoryAvailable,
                 'enrichmentWarnings' => $enrichmentWarnings,
                 'queriedAt' => Carbon::now(config('app.timezone', 'Asia/Shanghai'))->toDateTimeString(),

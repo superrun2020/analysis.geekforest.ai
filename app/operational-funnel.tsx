@@ -3561,6 +3561,10 @@ function ServerVpnOverall({ data, initialDates, appliedConfig, hasQueried, query
   const activeDimensions: string[] = Array.isArray(report.dimensions) ? report.dimensions : appliedConfig?.dimensions ?? [];
   const rawOptions = report.dimensionOptions ?? {};
   const coverage = report.dimensionCoverage ?? {};
+  const riskAnalysis = report.riskAnalysis ?? null;
+  const riskReady = riskAnalysis?.available === true;
+  const riskAlerts: AnyRow[] = riskReady && Array.isArray(riskAnalysis.alerts) ? riskAnalysis.alerts : [];
+  const riskMapping = riskAnalysis?.mapping ?? {};
   const draftMatchesApplied = serverVpnQueryIdentity(serverVpnDraft) === serverVpnQueryIdentity(appliedConfig);
   const options = draftMatchesApplied ? rawOptions : {};
   const optionMeta = draftMatchesApplied ? report.dimensionOptionMeta ?? {} : {};
@@ -3643,6 +3647,21 @@ function ServerVpnOverall({ data, initialDates, appliedConfig, hasQueried, query
         <article><span>结果覆盖率</span><strong>{percent(totals.resultCoverageRate)}</strong><small>未返回结果不计为失败</small></article>
         <article><span>平均耗时</span><strong>{totals.avgDurationMs === null || totals.avgDurationMs === undefined ? "—" : `${number(totals.avgDurationMs)} ms`}</strong><small>按耗时样本加权</small></article>
       </div>}
+      {showReportData && <section className="server-vpn-risk-analysis">
+        <div className="surface-title"><div><h3>区域屏蔽与网络标记分析</h3><p>证据型风险提示：只统计明确失败结果；达到样本量和差异阈值才提示，不等同于已确认封禁或标记。</p></div><span>{riskReady ? `${number(riskAlerts.length)} 条提示` : "暂不可用"}</span></div>
+        {!riskReady
+          ? <div className="diagnosis-no-reasons compact warn"><strong>风险分析暂不可用</strong><p>{text(riskAnalysis?.reason ?? "当前响应未包含V173风险分析结果，请刷新后重新查询。")}</p></div>
+          : <>
+            <div className="overall-active-hint">规则：国家节点失败率 ≥ {number(riskAnalysis.thresholds?.highFailureRate)}%、其他国家 ≤ {number(riskAnalysis.thresholds?.healthyPeerFailureRate)}%、差异 ≥ {number(riskAnalysis.thresholds?.minimumFailureGapPp)} 个百分点；IP段/ASN至少 {number(riskAnalysis.thresholds?.minimumNetworkIps)} 个IP且每个IP至少 {number(riskAnalysis.thresholds?.minimumIpResults)} 个连接结果。</div>
+            {(Number(riskMapping.mappedIpServerCount ?? 0) < Number(riskMapping.serverCount ?? 0) || Number(riskMapping.mappedAsnServerCount ?? 0) < Number(riskMapping.serverCount ?? 0)) && <div className="diagnosis-no-reasons compact warn"><strong>IP/ASN映射覆盖不完整</strong><p>当前节点 {number(riskMapping.serverCount)} 个，已映射IP {number(riskMapping.mappedIpServerCount)} 个、ASN {number(riskMapping.mappedAsnServerCount)} 个。IP段和ASN提示只基于已映射节点，未使用组织名称冒充ASN。</p></div>}
+            {Array.isArray(riskAnalysis.warnings) && riskAnalysis.warnings.includes("inconsistent_outcome_counts_excluded") && <div className="diagnosis-no-reasons compact warn"><strong>已排除结果计数异常样本</strong><p>{number(riskAnalysis.excludedInvalidOutcomeRowCount)} 条源数据存在负数结果/失败计数，或明确失败数大于连接结果数，已在聚合前排除，避免影响国家、IP段和ASN提示。</p></div>}
+            {Array.isArray(riskAnalysis.warnings) && riskAnalysis.warnings.includes("ambiguous_domain_ip_mapping_excluded") && <div className="diagnosis-no-reasons compact warn"><strong>已排除多IP域名映射</strong><p>{number(riskMapping.ambiguousDomainCount)} 个节点域名对应多个历史或当前IP，无法确认本次连接实际命中的IP，未纳入IP段和ASN提示。</p></div>}
+            {riskAlerts.length ? <div className="table-wrap"><table className="version-compare-table server-vpn-risk-table"><thead><tr><th>风险类型</th><th>提示</th><th>证据</th><th>建议</th></tr></thead><tbody>{riskAlerts.map((alert, index) => {
+              const typeLabel = alert.type === "country_node_blocking" ? "疑似被入口国家屏蔽" : alert.type === "ip_range_flagged" ? "IP段可能被标记" : alert.type === "asn_flagged" ? "ASN可能被标记" : "网络风险";
+              return <tr key={`${text(alert.type)}-${text(alert.title)}-${index}`} className="row-bad"><td><span className="status-chip bad">{typeLabel}</span></td><td><strong>{text(alert.title)}</strong>{alert.asnName && <small>{text(alert.asnName)}</small>}</td><td><strong>{text(alert.evidence)}</strong>{Array.isArray(alert.ips) && <small>{alert.ips.map((ip: string) => text(ip)).join("、")}</small>}</td><td>{text(alert.suggestion)}</td></tr>;
+            })}</tbody></table></div> : <div className="overall-empty-state">当前范围未达到风险提示阈值。没有提示不代表绝对安全，可结合更长日期范围继续观察。</div>}
+          </>}
+      </section>}
       {showReportData && report.inventoryAvailable === false && <div className="diagnosis-no-reasons compact warn"><strong>节点资料暂不可用</strong><p>连接质量数据仍正常展示；节点库恢复后自动补充名称、地区和资源状态。</p></div>}
       {showReportData && <div className="table-wrap"><table className="version-compare-table server-vpn-overall-table"><thead><tr><th>状态</th>{activeDimensions.map((dimension) => <th key={dimension}>{serverVpnDimensionLabel(dimension)}</th>)}{SERVER_VPN_METRICS.filter((metric) => visibleMetrics.includes(metric.key)).map((metric) => <th key={metric.key}>{metric.label}</th>)}</tr></thead><tbody>
         {rows.length ? rows.map((row) => {
