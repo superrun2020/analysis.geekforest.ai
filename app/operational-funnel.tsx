@@ -7,6 +7,8 @@ import { getCompanyAuthToken } from "./company-auth";
 import { trackingApiBaseUrl } from "./api-base-url";
 import { queryFunnel, type FunnelPageKey, type FunnelQuery, type FunnelQueryPackageItem } from "./funnel-analysis-api";
 
+type VpnReportSectionKey = "matrix" | "serverVpn" | "serverVpnHourly" | "exitIp" | "adOverall" | "adDns" | "vpnVersions" | "launcherVersions";
+
 type Props = {
   enabled: boolean;
   page: FunnelPageKey;
@@ -29,8 +31,8 @@ type Props = {
   initialDomain?: "ads" | "vpn" | "quality";
   lockDomain?: boolean;
   softFailure?: boolean;
-  reportSection?: "matrix" | "serverVpn" | "exitIp" | "adOverall" | "adDns" | "vpnVersions" | "launcherVersions";
-  onReportSectionChange?: (section: "matrix" | "serverVpn" | "exitIp" | "adOverall" | "adDns" | "vpnVersions" | "launcherVersions") => void;
+  reportSection?: VpnReportSectionKey;
+  onReportSectionChange?: (section: VpnReportSectionKey) => void;
   hideReportTabs?: boolean;
   onSnapshotChange?: (snapshot: OperationalReportSnapshot | null) => void;
 };
@@ -3714,6 +3716,93 @@ function ServerVpnOverall({ data, initialDates, appliedConfig, hasQueried, query
   </div>;
 }
 
+const SERVER_VPN_HOURLY_METRICS = [
+  { key: "connectionResultCount", label: "连接结果" },
+  { key: "connectionSuccessCount", label: "连接成功" },
+  { key: "connectionFailedCount", label: "连接失败" },
+  { key: "connectionSuccessRate", label: "连接成功率", ratio: true },
+] as const;
+type ServerVpnHourlyMetricKey = typeof SERVER_VPN_HOURLY_METRICS[number]["key"];
+
+function ServerVpnHourlyOverall({ data, initialDates, appliedConfig, hasQueried, querying, queryError, onQuery, onRefresh }: {
+  data: AnyRow;
+  initialDates: { dateFrom: string; dateTo: string };
+  appliedConfig: ServerVpnQueryConfig | null;
+  hasQueried: boolean;
+  querying: boolean;
+  queryError: string;
+  onQuery: (config: ServerVpnQueryConfig) => void;
+  onRefresh: () => void;
+}) {
+  const defaultConfig = (): ServerVpnQueryConfig => ({ projectCode: "A003", dateFrom: initialDates.dateFrom, dateTo: initialDates.dateTo, dimensions: ["stat_hour", "server_id"] });
+  const [draft, setDraft] = useState<ServerVpnQueryConfig>(() => appliedConfig ?? defaultConfig());
+  const [visibleMetrics, setVisibleMetrics] = useState<ServerVpnHourlyMetricKey[]>(SERVER_VPN_HOURLY_METRICS.map((item) => item.key));
+  const [pageIndex, setPageIndex] = useState(1);
+  useEffect(() => { if (appliedConfig) setDraft(appliedConfig); }, [appliedConfig]);
+  const report = data.serverVpnHourlyOverall ?? {};
+  const rows: AnyRow[] = Array.isArray(report.rows) ? report.rows : [];
+  const alerts: AnyRow[] = Array.isArray(report.alerts) ? report.alerts : [];
+  const totals = report.totals ?? {};
+  const draftMatchesApplied = serverVpnQueryIdentity(draft) === serverVpnQueryIdentity(appliedConfig);
+  const reportMatchesApplied = serverVpnQueryIdentity({ projectCode: report.projectCode, dateFrom: report.dateFrom, dateTo: report.dateTo, dimensions: report.dimensions, ...(report.filters ?? {}) }) === serverVpnQueryIdentity(appliedConfig);
+  const settled = Boolean(appliedConfig && draftMatchesApplied && reportMatchesApplied && report.queriedAt && !querying && !queryError);
+  const ready = settled && report.available === true;
+  const pageSize = 200;
+  const pageCount = Math.max(1, Math.ceil(rows.length / pageSize));
+  const visibleRows = rows.slice((Math.min(pageIndex, pageCount) - 1) * pageSize, Math.min(pageIndex, pageCount) * pageSize);
+  const nodeOptions = draftMatchesApplied
+    ? Array.from(new Set(rows.map((row) => String(row.serverId ?? "")).filter(Boolean))).sort()
+    : [];
+  useEffect(() => setPageIndex(1), [report.queriedAt]);
+  const setFilter = (key: keyof ServerVpnQueryConfig, value: string) => setDraft((current) => ({
+    ...current,
+    [key]: value || undefined,
+    ...(key === "serverId" ? {} : { serverId: undefined }),
+  }));
+  const toggleMetric = (key: ServerVpnHourlyMetricKey) => setVisibleMetrics((current) => current.includes(key) ? current.filter((item) => item !== key) : [...current, key]);
+  const exportCsv = () => {
+    if (!ready || !rows.length) return;
+    const columns = [["statHour", `小时（${report.timezone ?? "UTC+8"}）`], ["serverId", "节点"], ...SERVER_VPN_HOURLY_METRICS.filter((metric) => visibleMetrics.includes(metric.key)).map((metric) => [metric.key, metric.label])];
+    const csv = [columns.map(([, label]) => safeCsvCell(label)).join(","), ...rows.map((row) => columns.map(([key]) => safeCsvCell(row[key])).join(","))].join("\n");
+    const url = URL.createObjectURL(new Blob([`\ufeff${csv}`], { type: "text/csv;charset=utf-8" }));
+    const link = document.createElement("a"); link.href = url; link.download = `server-vpn-hourly-overall-${report.projectCode ?? "project"}-${report.dateFrom ?? "date"}.csv`; link.click(); URL.revokeObjectURL(url);
+  };
+
+  return <div className="page-stack server-vpn-hourly-overall-page vpn-overall-report">
+    <section className="surface matrix-overall-config overall-config-card">
+      <div className="overall-config-row dimension-row"><span className="overall-config-label">维度</span><label className="overall-chip active disabled"><input type="checkbox" checked readOnly /><span>小时维度（UTC+8）</span></label><label className="overall-chip active disabled"><input type="checkbox" checked readOnly /><span>节点维度</span></label></div>
+      <div className="overall-config-row metric-row"><span className="overall-config-label">统计字段</span>{SERVER_VPN_HOURLY_METRICS.map((item) => <label key={item.key} className={`overall-chip ${visibleMetrics.includes(item.key) ? "active" : ""}`}><input type="checkbox" checked={visibleMetrics.includes(item.key)} onChange={() => toggleMetric(item.key)} /><span>{item.label}</span></label>)}</div>
+      <div className="overall-filter-row">
+        <label className="overall-filter-item date-range-control"><span>日期范围：</span><input type="date" value={draft.dateFrom} onChange={(event) => { if (!event.target.value) return; setDraft((current) => ({ ...current, dateFrom: event.target.value, dateTo: current.dateTo < event.target.value ? event.target.value : current.dateTo, serverId: undefined })); }} /><b>→</b><input type="date" value={draft.dateTo} min={draft.dateFrom} onChange={(event) => { if (event.target.value) setDraft((current) => ({ ...current, dateTo: event.target.value, serverId: undefined })); }} /></label>
+        <label className="overall-filter-item"><span>项目代号：</span><select value={draft.projectCode} onChange={(event) => setDraft({ ...defaultConfig(), projectCode: event.target.value as ServerVpnQueryConfig["projectCode"], dateFrom: draft.dateFrom, dateTo: draft.dateTo })}>{SERVER_VPN_PROJECTS.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+        <label className="overall-filter-item"><span>入口国家：</span><input value={draft.country ?? ""} placeholder="全部，如 IR" onChange={(event) => setFilter("country", event.target.value)} /></label>
+        <label className="overall-filter-item"><span>平台：</span><select value={draft.platform ?? ""} onChange={(event) => setFilter("platform", event.target.value)}><option value="">全部平台</option><option value="android">Android</option><option value="ios">iOS</option></select></label>
+        <label className="overall-filter-item"><span>App版本：</span><input value={draft.appVersion ?? ""} placeholder="全部版本" onChange={(event) => setFilter("appVersion", event.target.value)} /></label>
+      </div>
+      <div className="overall-filter-row">
+        <label className="overall-filter-item"><span>网络类型：</span><input value={draft.networkType ?? ""} placeholder="全部网络" onChange={(event) => setFilter("networkType", event.target.value)} /></label>
+        <label className="overall-filter-item"><span>节点：</span><select value={draft.serverId ?? ""} onChange={(event) => setFilter("serverId", event.target.value)}><option value="">全部节点</option>{draft.serverId && !nodeOptions.includes(draft.serverId) && <option value={draft.serverId}>{draft.serverId}</option>}{nodeOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+        <label className="overall-filter-item"><span>协议：</span><input value={draft.protocol ?? ""} placeholder="全部协议" onChange={(event) => setFilter("protocol", event.target.value)} /></label>
+      </div>
+      <div className="overall-action-row"><div className="overall-view-actions"><span>固定按小时 × 节点聚合；最多查询 7 天</span></div><div className="overall-query-actions"><Button htmlType="button" onClick={exportCsv} disabled={!ready || !rows.length}>导出小时 CSV</Button><Button htmlType="button" onClick={() => { setDraft(defaultConfig()); setVisibleMetrics(SERVER_VPN_HOURLY_METRICS.map((item) => item.key)); }}>重置</Button><Button htmlType="button" className="primary" onClick={() => onQuery({ ...draft, dimensions: ["stat_hour", "server_id"] })} disabled={querying}>⌕ {querying ? "查询中…" : "查询"}</Button></div></div>
+      <div className="overall-active-hint">待查询：小时 × 节点 · {draft.projectCode} · {draft.dateFrom} → {draft.dateTo}；一次查询返回范围内每个小时、每个节点的完整连接结果。</div>
+    </section>
+    <section className="surface overall-result-card">
+      <div className="overall-result-tools"><div><strong>服务器V小时overall</strong><span>{!hasQueried ? "等待查询" : querying ? "查询中" : !draftMatchesApplied ? "配置待应用" : queryError ? "查询失败" : ready ? `${number(rows.length)} 个小时×节点组合` : "等待结果"}</span>{appliedConfig && <small>已应用：{appliedConfig.projectCode} · {appliedConfig.dateFrom} → {appliedConfig.dateTo} · 小时 × 节点</small>}</div><Button htmlType="button" onClick={onRefresh} disabled={!settled}>刷新</Button></div>
+      {!hasQueried && <div className="overall-empty-state">选择项目、日期和筛选条件后点击查询。</div>}
+      {hasQueried && !draftMatchesApplied && <div className="overall-empty-state">配置已修改，当前结果已隐藏；点击查询应用新条件。</div>}
+      {querying && draftMatchesApplied && <div className="overall-empty-state">正在读取小时 × 节点连接结果。</div>}
+      {queryError && <div className="diagnosis-no-reasons compact warn"><strong>查询失败</strong><p>{queryError}</p></div>}
+      {settled && report.available === false && <div className="diagnosis-no-reasons compact warn"><strong>小时报表暂不可用</strong><p>{text(report.reason)}</p></div>}
+      {ready && <><div className="summary-grid server-vpn-summary-grid"><article><span>小时覆盖</span><strong>{number(totals.hourCount)}</strong><small>{number(totals.nodeCount)} 个节点 · {text(report.timezone)}</small></article><article><span>明确连接结果</span><strong>{number(totals.connectionResultCount)}</strong><small>成功 {number(totals.connectionSuccessCount)} · 失败 {number(totals.connectionFailedCount)}</small></article><article><span>连接成功率</span><strong>{percent(totals.connectionSuccessRate)}</strong><small>未返回结果不计失败</small></article><article><span>疑似开始受限</span><strong>{number(report.alertCount)}</strong><small>每节点最多一个严格起始点</small></article></div>
+        {alerts.length > 0 && <div className="table-wrap"><table className="version-compare-table"><thead><tr><th>节点</th><th>疑似开始小时</th><th>基线成功率</th><th>当前成功率</th><th>后续确认</th></tr></thead><tbody>{alerts.map((alert, index) => <tr key={`${text(alert.serverId)}-${text(alert.startHour)}-${index}`} className="row-bad"><td><strong>{text(alert.serverId)}</strong></td><td>{text(alert.startHour)}</td><td>{percent(alert.baselineSuccessRate)}</td><td>{percent(alert.currentSuccessRate)}</td><td>{percent(alert.confirmationSuccessRate)}</td></tr>)}</tbody></table></div>}
+        <div className="table-wrap"><table className="version-compare-table server-vpn-hourly-table"><thead><tr><th>状态</th><th>小时（{text(report.timezone)}）</th><th>节点</th>{SERVER_VPN_HOURLY_METRICS.filter((metric) => visibleMetrics.includes(metric.key)).map((metric) => <th key={metric.key}>{metric.label}</th>)}</tr></thead><tbody>{visibleRows.map((row) => { const status = row.detectedStart ? { label: "疑似起点", className: "bad" } : row.status === "bad" ? { label: "低成功率", className: "bad" } : row.status === "warn" ? { label: "关注", className: "warn" } : row.status === "good" ? { label: "正常", className: "good" } : { label: "样本不足", className: "muted" }; return <tr key={text(row.rowKey)} className={row.status === "bad" ? "row-bad" : row.status === "warn" ? "row-warn" : ""}><td><span className={`status-chip ${status.className}`}>{status.label}</span></td><td><strong>{text(row.statHour)}</strong></td><td><strong>{text(row.serverId)}</strong></td>{SERVER_VPN_HOURLY_METRICS.filter((metric) => visibleMetrics.includes(metric.key)).map((metric) => <td key={metric.key}><strong>{"ratio" in metric && metric.ratio ? percent(row[metric.key]) : number(row[metric.key])}</strong></td>)}</tr>; })}</tbody></table></div>
+        <div className="overall-action-row"><div className="overall-view-actions"><span>第 {number(Math.min(pageIndex, pageCount))} / {number(pageCount)} 页 · 每页 {number(pageSize)} 行 · 共 {number(rows.length)} 行</span></div><div className="overall-query-actions"><Button htmlType="button" disabled={pageIndex <= 1} onClick={() => setPageIndex((value) => Math.max(1, value - 1))}>上一页</Button><Button htmlType="button" disabled={pageIndex >= pageCount} onClick={() => setPageIndex((value) => Math.min(pageCount, value + 1))}>下一页</Button></div></div>
+        <div className="matrix-footnote">{text(report.notice)} 数据源：{text(report.source)}；查询时间：{text(report.queriedAt)}。</div></>}
+    </section>
+  </div>;
+}
+
 const EXIT_IP_COLUMNS = [
   { key: "sessionCount", label: "Session数量" },
   { key: "stableSessionCount", label: "稳定Session" },
@@ -3906,6 +3995,13 @@ export function OperationalFunnel(props: Props) {
   const [serverVpnAppliedConfig, setServerVpnAppliedConfig] = useState<ServerVpnQueryConfig | null>(null);
   const [serverVpnHasQueried, setServerVpnHasQueried] = useState(false);
   const [serverVpnQueryKey, setServerVpnQueryKey] = useState(0);
+  const [serverVpnHourlyData, setServerVpnHourlyData] = useState<AnyRow | null>(null);
+  const [serverVpnHourlyLoading, setServerVpnHourlyLoading] = useState(false);
+  const [serverVpnHourlyError, setServerVpnHourlyError] = useState("");
+  const [serverVpnHourlyAppliedConfig, setServerVpnHourlyAppliedConfig] = useState<ServerVpnQueryConfig | null>(null);
+  const [serverVpnHourlyHasQueried, setServerVpnHourlyHasQueried] = useState(false);
+  const [serverVpnHourlyQueryKey, setServerVpnHourlyQueryKey] = useState(0);
+  const [serverVpnHourlyQueryMode, setServerVpnHourlyQueryMode] = useState<"query" | "refresh">("query");
   const [adOverallData, setAdOverallData] = useState<AnyRow | null>(null);
   const [adOverallLoading, setAdOverallLoading] = useState(false);
   const [adOverallError, setAdOverallError] = useState("");
@@ -3924,9 +4020,9 @@ export function OperationalFunnel(props: Props) {
   const [exitIpQueryKey, setExitIpQueryKey] = useState(0);
   const [exitIpFilters, setExitIpFilters] = useState<ExitIpFilters>(DEFAULT_EXIT_IP_FILTERS);
   const [exitIpHasQueried, setExitIpHasQueried] = useState(false);
-  const [internalVpnReportSection, setInternalVpnReportSection] = useState<"matrix" | "serverVpn" | "exitIp" | "adOverall" | "adDns" | "vpnVersions" | "launcherVersions">("matrix");
+  const [internalVpnReportSection, setInternalVpnReportSection] = useState<VpnReportSectionKey>("matrix");
   const vpnReportSection = props.reportSection ?? internalVpnReportSection;
-  const setVpnReportSection = (section: "matrix" | "serverVpn" | "exitIp" | "adOverall" | "adDns" | "vpnVersions" | "launcherVersions") => {
+  const setVpnReportSection = (section: VpnReportSectionKey) => {
     props.onReportSectionChange?.(section);
     if (!props.reportSection) setInternalVpnReportSection(section);
   };
@@ -4146,6 +4242,37 @@ export function OperationalFunnel(props: Props) {
   }, [props.page, vpnReportSection, props.enabled, serverVpnHasQueried, serverVpnAppliedConfig, serverVpnQueryKey]);
 
   useEffect(() => {
+    if (props.page !== "network_failure_matrix" || vpnReportSection !== "serverVpnHourly" || !props.enabled || !serverVpnHourlyHasQueried || !serverVpnHourlyAppliedConfig) return;
+    let active = true;
+    const controller = new AbortController();
+    setServerVpnHourlyLoading(true);
+    setServerVpnHourlyError("");
+    setServerVpnHourlyData(null);
+    const forceRefresh = serverVpnHourlyQueryMode === "refresh";
+    if (forceRefresh) setServerVpnHourlyQueryMode("query");
+    queryFunnel<AnyRow>({
+      page: "server_vpn_hourly_overall",
+      dateFrom: serverVpnHourlyAppliedConfig.dateFrom,
+      dateTo: serverVpnHourlyAppliedConfig.dateTo,
+      projectCode: serverVpnHourlyAppliedConfig.projectCode,
+      dimensions: ["stat_hour", "server_id"],
+      country: serverVpnHourlyAppliedConfig.country,
+      platform: serverVpnHourlyAppliedConfig.platform as "android" | "ios" | undefined,
+      appVersion: serverVpnHourlyAppliedConfig.appVersion,
+      networkType: serverVpnHourlyAppliedConfig.networkType,
+      serverId: serverVpnHourlyAppliedConfig.serverId,
+      protocol: serverVpnHourlyAppliedConfig.protocol,
+      domain: "vpn",
+      unit: "sessions",
+      forceRefresh,
+    }, controller.signal)
+      .then((result) => { if (active) setServerVpnHourlyData(result); })
+      .catch((reason) => { if (active) { setServerVpnHourlyData(null); setServerVpnHourlyError(reason instanceof Error ? reason.message : "查询失败"); } })
+      .finally(() => { if (active) setServerVpnHourlyLoading(false); });
+    return () => { active = false; controller.abort(); };
+  }, [props.page, vpnReportSection, props.enabled, serverVpnHourlyHasQueried, serverVpnHourlyAppliedConfig, serverVpnHourlyQueryKey]);
+
+  useEffect(() => {
     if (props.page !== "network_failure_matrix" || vpnReportSection !== "matrix" || !props.enabled || !props.projectCode) return;
     let active = true;
     const controller = new AbortController();
@@ -4349,9 +4476,20 @@ export function OperationalFunnel(props: Props) {
         ...(serverVpnSnapshot.filters ?? {}),
       }) === serverVpnQueryIdentity(serverVpnAppliedConfig);
     const visibleServerVpnData = serverVpnDataMatches ? serverVpnData : null;
+    const serverVpnHourlySnapshot = serverVpnHourlyData?.serverVpnHourlyOverall;
+    const serverVpnHourlyDataMatches = serverVpnHourlySnapshot
+      && serverVpnHourlyAppliedConfig
+      && serverVpnQueryIdentity({
+        projectCode: serverVpnHourlySnapshot.projectCode,
+        dateFrom: serverVpnHourlySnapshot.dateFrom,
+        dateTo: serverVpnHourlySnapshot.dateTo,
+        dimensions: serverVpnHourlySnapshot.dimensions,
+        ...(serverVpnHourlySnapshot.filters ?? {}),
+      }) === serverVpnQueryIdentity(serverVpnHourlyAppliedConfig);
+    const visibleServerVpnHourlyData = serverVpnHourlyDataMatches ? serverVpnHourlyData : null;
     return <div className="page-stack">
-      {!props.hideReportTabs && <nav className="operational-tabs workbench-tabs"><Button className={vpnReportSection === "matrix" ? "active" : ""} onClick={() => setVpnReportSection("matrix")}>VPN Overall</Button><Button className={vpnReportSection === "serverVpn" ? "active" : ""} onClick={() => setVpnReportSection("serverVpn")}>服务器VPN Overall</Button><Button className={vpnReportSection === "exitIp" ? "active" : ""} onClick={() => setVpnReportSection("exitIp")}>出口IP质量</Button><Button className={vpnReportSection === "adOverall" ? "active" : ""} onClick={() => setVpnReportSection("adOverall")}>广告漏斗Overall</Button><Button className={vpnReportSection === "adDns" ? "active" : ""} onClick={() => setVpnReportSection("adDns")}>广告DNS诊断</Button><Button className={vpnReportSection === "vpnVersions" ? "active" : ""} onClick={() => setVpnReportSection("vpnVersions")}>VPN版本对比</Button><Button className={vpnReportSection === "launcherVersions" ? "active" : ""} onClick={() => setVpnReportSection("launcherVersions")}>Launcher Overall</Button></nav>}
-      {vpnReportSection === "serverVpn" ? <ServerVpnOverall data={visibleServerVpnData ?? { serverVpnOverall: { available: true, rows: [], totals: {}, dimensionOptions: {}, dimensionCoverage: {}, source: "等待查询", notice: "配置后点击查询" } }} initialDates={dates} appliedConfig={serverVpnAppliedConfig} hasQueried={serverVpnHasQueried} querying={serverVpnLoading} queryError={serverVpnError} onQuery={(config) => { setServerVpnData(null); setServerVpnError(""); setServerVpnAppliedConfig(config); setServerVpnHasQueried(true); setServerVpnQueryKey((value) => value + 1); }} onRefresh={() => { if (!serverVpnAppliedConfig) return; setServerVpnData(null); setServerVpnQueryKey((value) => value + 1); }} /> : vpnReportSection === "vpnVersions" || vpnReportSection === "launcherVersions" ? <VersionComparison key={`${vpnReportSection}-${props.appVersion}`} data={{}} domain="vpn" versionProduct={vpnReportSection === "launcherVersions" ? "launcher" : "vpn"} projectCode={props.projectCode} appIdentifier={props.appIdentifier} platform={props.platform} country={props.country} appVersion={props.appVersion} initialRange={props.range} refreshKey={props.refreshKey + matrixQueryKey} projectOptions={props.projectOptions} countryOptions={props.countryOptions} onProjectSelect={props.onProjectSelect} onRangeChange={props.onRangeChange} onCountryChange={props.onCountryChange} onPlatformChange={props.onPlatformChange} /> : vpnReportSection === "exitIp" ? <ExitIpQualityReport data={loadingExitIpData} detailData={exitIpDetailData} dates={dates} projectCode={props.projectCode} platform={props.platform} country={props.country} appVersion={props.appVersion} projectOptions={props.projectOptions} countryOptions={props.countryOptions} appVersionOptions={props.appVersionOptions} queried={exitIpHasQueried} activeFilters={exitIpFilters} querying={exitIpLoading} detailLoading={exitIpDetailLoading} queryError={exitIpError} detailError={exitIpDetailError} selectedIpRow={selectedIpRow} onSelectIp={setSelectedIpRow} onQuery={(filters) => { setExitIpFilters(filters); setExitIpHasQueried(true); setSelectedIpRow(null); setExitIpQueryKey((value) => value + 1); }} onProjectSelect={(value) => { setExitIpHasQueried(false); props.onProjectSelect?.(value); }} onRangeChange={(value) => { setExitIpHasQueried(false); props.onRangeChange?.(value); }} onCountryChange={(value) => { setExitIpHasQueried(false); props.onCountryChange?.(value); }} onAppVersionChange={(value) => { setExitIpHasQueried(false); props.onAppVersionChange?.(value); }} onPlatformChange={(value) => { setExitIpHasQueried(false); props.onPlatformChange?.(value); }} /> : vpnReportSection === "adDns" ? <AdDnsReport data={loadingAdDnsData} dimensions={adDnsDimensions} dates={dates} projectCode={props.projectCode} platform={props.platform} country={props.country} appVersion={props.appVersion} projectOptions={props.projectOptions} countryOptions={props.countryOptions} appVersionOptions={props.appVersionOptions} querying={adDnsLoading} queryError={adDnsError} onQuery={(nextDimensions) => { setAdDnsDimensions(nextDimensions); setAdDnsQueryKey((value) => value + 1); }} onProjectSelect={props.onProjectSelect} onRangeChange={props.onRangeChange} onCountryChange={props.onCountryChange} onAppVersionChange={props.onAppVersionChange} onPlatformChange={props.onPlatformChange} /> : vpnReportSection === "adOverall" ? <AdOverallReport data={loadingAdOverallData} dimensions={adOverallDimensions} dates={dates} projectCode={props.projectCode} platform={props.platform} country={props.country} appVersion={props.appVersion} projectOptions={props.projectOptions} countryOptions={props.countryOptions} appVersionOptions={props.appVersionOptions} querying={adOverallLoading} queryError={adOverallError} onQuery={(nextDimensions) => { setAdOverallDimensions(nextDimensions); setAdOverallQueryKey((value) => value + 1); }} onProjectSelect={props.onProjectSelect} onRangeChange={props.onRangeChange} onCountryChange={props.onCountryChange} onAppVersionChange={props.onAppVersionChange} onPlatformChange={props.onPlatformChange} /> : <AdNetworkFailureMatrix data={loadingMatrixData} dimensions={matrixDimensions} dates={dates} projectCode={props.projectCode} platform={props.platform} country={props.country} appVersion={props.appVersion} projectOptions={props.projectOptions} countryOptions={props.countryOptions} appVersionOptions={props.appVersionOptions} querying={matrixLoading} queryError={matrixError} onQuery={(nextDimensions) => { setMatrixDimensions(nextDimensions); setMatrixQueryKey((value) => value + 1); }} onProjectSelect={props.onProjectSelect} onRangeChange={props.onRangeChange} onCountryChange={props.onCountryChange} onAppVersionChange={props.onAppVersionChange} onPlatformChange={props.onPlatformChange} />}
+      {!props.hideReportTabs && <nav className="operational-tabs workbench-tabs"><Button className={vpnReportSection === "matrix" ? "active" : ""} onClick={() => setVpnReportSection("matrix")}>VPN Overall</Button><Button className={vpnReportSection === "serverVpn" ? "active" : ""} onClick={() => setVpnReportSection("serverVpn")}>服务器VPN Overall</Button><Button className={vpnReportSection === "serverVpnHourly" ? "active" : ""} onClick={() => setVpnReportSection("serverVpnHourly")}>服务器V小时overall</Button><Button className={vpnReportSection === "exitIp" ? "active" : ""} onClick={() => setVpnReportSection("exitIp")}>出口IP质量</Button><Button className={vpnReportSection === "adOverall" ? "active" : ""} onClick={() => setVpnReportSection("adOverall")}>广告漏斗Overall</Button><Button className={vpnReportSection === "adDns" ? "active" : ""} onClick={() => setVpnReportSection("adDns")}>广告DNS诊断</Button><Button className={vpnReportSection === "vpnVersions" ? "active" : ""} onClick={() => setVpnReportSection("vpnVersions")}>VPN版本对比</Button><Button className={vpnReportSection === "launcherVersions" ? "active" : ""} onClick={() => setVpnReportSection("launcherVersions")}>Launcher Overall</Button></nav>}
+      {vpnReportSection === "serverVpn" ? <ServerVpnOverall data={visibleServerVpnData ?? { serverVpnOverall: { available: true, rows: [], totals: {}, dimensionOptions: {}, dimensionCoverage: {}, source: "等待查询", notice: "配置后点击查询" } }} initialDates={dates} appliedConfig={serverVpnAppliedConfig} hasQueried={serverVpnHasQueried} querying={serverVpnLoading} queryError={serverVpnError} onQuery={(config) => { setServerVpnData(null); setServerVpnError(""); setServerVpnAppliedConfig(config); setServerVpnHasQueried(true); setServerVpnQueryKey((value) => value + 1); }} onRefresh={() => { if (!serverVpnAppliedConfig) return; setServerVpnData(null); setServerVpnQueryKey((value) => value + 1); }} /> : vpnReportSection === "serverVpnHourly" ? <ServerVpnHourlyOverall data={visibleServerVpnHourlyData ?? { serverVpnHourlyOverall: { available: true, rows: [], alerts: [], totals: {}, source: "等待查询", notice: "配置后点击查询" } }} initialDates={dates} appliedConfig={serverVpnHourlyAppliedConfig} hasQueried={serverVpnHourlyHasQueried} querying={serverVpnHourlyLoading} queryError={serverVpnHourlyError} onQuery={(config) => { setServerVpnHourlyData(null); setServerVpnHourlyError(""); setServerVpnHourlyQueryMode("query"); setServerVpnHourlyAppliedConfig(config); setServerVpnHourlyHasQueried(true); setServerVpnHourlyQueryKey((value) => value + 1); }} onRefresh={() => { if (!serverVpnHourlyAppliedConfig) return; setServerVpnHourlyData(null); setServerVpnHourlyQueryMode("refresh"); setServerVpnHourlyQueryKey((value) => value + 1); }} /> : vpnReportSection === "vpnVersions" || vpnReportSection === "launcherVersions" ? <VersionComparison key={`${vpnReportSection}-${props.appVersion}`} data={{}} domain="vpn" versionProduct={vpnReportSection === "launcherVersions" ? "launcher" : "vpn"} projectCode={props.projectCode} appIdentifier={props.appIdentifier} platform={props.platform} country={props.country} appVersion={props.appVersion} initialRange={props.range} refreshKey={props.refreshKey + matrixQueryKey} projectOptions={props.projectOptions} countryOptions={props.countryOptions} onProjectSelect={props.onProjectSelect} onRangeChange={props.onRangeChange} onCountryChange={props.onCountryChange} onPlatformChange={props.onPlatformChange} /> : vpnReportSection === "exitIp" ? <ExitIpQualityReport data={loadingExitIpData} detailData={exitIpDetailData} dates={dates} projectCode={props.projectCode} platform={props.platform} country={props.country} appVersion={props.appVersion} projectOptions={props.projectOptions} countryOptions={props.countryOptions} appVersionOptions={props.appVersionOptions} queried={exitIpHasQueried} activeFilters={exitIpFilters} querying={exitIpLoading} detailLoading={exitIpDetailLoading} queryError={exitIpError} detailError={exitIpDetailError} selectedIpRow={selectedIpRow} onSelectIp={setSelectedIpRow} onQuery={(filters) => { setExitIpFilters(filters); setExitIpHasQueried(true); setSelectedIpRow(null); setExitIpQueryKey((value) => value + 1); }} onProjectSelect={(value) => { setExitIpHasQueried(false); props.onProjectSelect?.(value); }} onRangeChange={(value) => { setExitIpHasQueried(false); props.onRangeChange?.(value); }} onCountryChange={(value) => { setExitIpHasQueried(false); props.onCountryChange?.(value); }} onAppVersionChange={(value) => { setExitIpHasQueried(false); props.onAppVersionChange?.(value); }} onPlatformChange={(value) => { setExitIpHasQueried(false); props.onPlatformChange?.(value); }} /> : vpnReportSection === "adDns" ? <AdDnsReport data={loadingAdDnsData} dimensions={adDnsDimensions} dates={dates} projectCode={props.projectCode} platform={props.platform} country={props.country} appVersion={props.appVersion} projectOptions={props.projectOptions} countryOptions={props.countryOptions} appVersionOptions={props.appVersionOptions} querying={adDnsLoading} queryError={adDnsError} onQuery={(nextDimensions) => { setAdDnsDimensions(nextDimensions); setAdDnsQueryKey((value) => value + 1); }} onProjectSelect={props.onProjectSelect} onRangeChange={props.onRangeChange} onCountryChange={props.onCountryChange} onAppVersionChange={props.onAppVersionChange} onPlatformChange={props.onPlatformChange} /> : vpnReportSection === "adOverall" ? <AdOverallReport data={loadingAdOverallData} dimensions={adOverallDimensions} dates={dates} projectCode={props.projectCode} platform={props.platform} country={props.country} appVersion={props.appVersion} projectOptions={props.projectOptions} countryOptions={props.countryOptions} appVersionOptions={props.appVersionOptions} querying={adOverallLoading} queryError={adOverallError} onQuery={(nextDimensions) => { setAdOverallDimensions(nextDimensions); setAdOverallQueryKey((value) => value + 1); }} onProjectSelect={props.onProjectSelect} onRangeChange={props.onRangeChange} onCountryChange={props.onCountryChange} onAppVersionChange={props.onAppVersionChange} onPlatformChange={props.onPlatformChange} /> : <AdNetworkFailureMatrix data={loadingMatrixData} dimensions={matrixDimensions} dates={dates} projectCode={props.projectCode} platform={props.platform} country={props.country} appVersion={props.appVersion} projectOptions={props.projectOptions} countryOptions={props.countryOptions} appVersionOptions={props.appVersionOptions} querying={matrixLoading} queryError={matrixError} onQuery={(nextDimensions) => { setMatrixDimensions(nextDimensions); setMatrixQueryKey((value) => value + 1); }} onProjectSelect={props.onProjectSelect} onRangeChange={props.onRangeChange} onCountryChange={props.onCountryChange} onAppVersionChange={props.onAppVersionChange} onPlatformChange={props.onPlatformChange} />}
     </div>;
   }
 

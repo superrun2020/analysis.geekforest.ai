@@ -677,7 +677,7 @@ class FunnelAnalyticsService
         // double-caching it under a second key.
         $skipCache = ($page === 'workbench' && ($params['domain'] ?? 'ads') === 'vpn')
             || ($page === 'exit_ip_quality' && !empty($params['forceRefresh']))
-            || ($page === 'server_vpn_overall' && !empty($params['forceRefresh']));
+            || (in_array($page, ['server_vpn_overall', 'server_vpn_hourly_overall'], true) && !empty($params['forceRefresh']));
         if (in_array($page, $this->cacheableQueryPages(), true) && !$skipCache) {
             return $this->cacheAnalysisResult($page, $params, function () use ($page, $params): array {
                 return $this->dispatchQuery($page, $params);
@@ -696,7 +696,7 @@ class FunnelAnalyticsService
      */
     private function cacheableQueryPages(): array
     {
-        return ['overview', 'workbench', 'diagnosis', 'path', 'evidence', 'server_vpn_overall', 'version_comparison', 'ad_overall', 'ad_dns_report', 'exit_ip_quality', 'domain_report'];
+        return ['overview', 'workbench', 'diagnosis', 'path', 'evidence', 'server_vpn_overall', 'server_vpn_hourly_overall', 'version_comparison', 'ad_overall', 'ad_dns_report', 'exit_ip_quality', 'domain_report'];
     }
 
     /**
@@ -716,6 +716,7 @@ class FunnelAnalyticsService
             'snapshot' => $this->snapshot(),
             'network_failure_matrix' => $this->networkFailureMatrix($params),
             'server_vpn_overall' => $this->serverVpnOverallPage($params),
+            'server_vpn_hourly_overall' => $this->serverVpnHourlyOverallPage($params),
             'version_comparison' => $this->versionComparisonPage($params),
             'ad_overall' => $this->adOverallPage($params),
             'ad_dns_report' => $this->adDnsReportPage($params),
@@ -749,7 +750,11 @@ class FunnelAnalyticsService
      */
     private function analysisPageCacheKey(string $namespace, array $params): string
     {
-        $version = $namespace === 'server_vpn_overall' ? 'v174:' : '';
+        $version = match ($namespace) {
+            'server_vpn_overall' => 'v174:',
+            'server_vpn_hourly_overall' => 'v175:',
+            default => '',
+        };
         return 'jkcl_funnel:page:' . $namespace . ':' . $version . md5(json_encode(
             $this->sortForCacheKey($params),
             JSON_UNESCAPED_UNICODE
@@ -6955,8 +6960,9 @@ class FunnelAnalyticsService
         return $alerts;
     }
 
-    private function serverVpnHourlyAnalysis(array $params, string $projectCode): array
+    private function serverVpnHourlyAnalysis(array $params, string $projectCode, int $rowLimit = 1000): array
     {
+        $rowLimit = max(1, min(10000, $rowLimit));
         $thresholds = [
             'maximumDays' => 7,
             'baselineHours' => 3,
@@ -7109,7 +7115,6 @@ class FunnelAnalyticsService
                 $hourOrder = strcmp($right['statHour'], $left['statHour']);
                 return $hourOrder !== 0 ? $hourOrder : ($right['connectionResultCount'] <=> $left['connectionResultCount']);
             });
-            $rowLimit = 1000;
             $returnedRows = array_slice($rows, 0, $rowLimit);
             $totals = [
                 'nodeCount' => count(array_unique(array_column($rows, 'serverId'))),
@@ -7150,6 +7155,45 @@ class FunnelAnalyticsService
                 'warnings' => ['hourly_analysis_failed'],
             ]);
         }
+    }
+
+    private function serverVpnHourlyOverallPage(array $params): array
+    {
+        $projectCode = strtoupper(trim((string) ($params['projectCode'] ?? '')));
+        if (!in_array($projectCode, ['A003', 'A005', 'A007'], true)) {
+            throw new InvalidArgumentException('服务器VPN Overall仅支持 A003、A005、A007');
+        }
+        if (!empty($params['dimension']) && !empty($params['dimensions'])) {
+            throw new InvalidArgumentException('服务器VPN Overall不能同时提交 dimension 和 dimensions');
+        }
+        $dimensions = is_array($params['dimensions'] ?? null)
+            ? array_values(array_unique($params['dimensions']))
+            : (!empty($params['dimension']) ? [(string) $params['dimension']] : ['stat_hour', 'server_id']);
+        sort($dimensions);
+        if ($dimensions !== ['server_id', 'stat_hour']) {
+            throw new InvalidArgumentException('服务器V小时overall固定使用小时 × 节点维度');
+        }
+
+        $analysisParams = array_replace($params, ['projectCode' => $projectCode]);
+        $analysis = $this->serverVpnHourlyAnalysis($analysisParams, $projectCode, 10000);
+        $filters = [];
+        foreach (['country', 'platform', 'appVersion', 'networkType', 'serverId', 'protocol'] as $filter) {
+            if (!empty($params[$filter]) && !$this->isAllSummaryFilterValue((string) $params[$filter])) {
+                $filters[$filter] = trim((string) $params[$filter]);
+            }
+        }
+
+        return [
+            'context' => $this->context(array_replace($params, ['projectCode' => $projectCode])),
+            'serverVpnHourlyOverall' => array_replace($analysis, [
+                'projectCode' => $projectCode,
+                'dateFrom' => $params['dateFrom'],
+                'dateTo' => $params['dateTo'],
+                'dimensions' => ['stat_hour', 'server_id'],
+                'filters' => $filters,
+                'queriedAt' => Carbon::now(config('app.timezone', 'Asia/Shanghai'))->toDateTimeString(),
+            ]),
+        ];
     }
 
     /**

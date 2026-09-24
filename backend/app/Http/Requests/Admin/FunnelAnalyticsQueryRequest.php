@@ -34,7 +34,7 @@ class FunnelAnalyticsQueryRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'page' => ['required', Rule::in(['overview', 'workbench', 'diagnosis', 'cohort', 'path', 'evidence', 'issues', 'snapshot', 'network_failure_matrix', 'server_vpn_overall', 'version_comparison', 'ad_overall', 'ad_dns_report', 'exit_ip_quality', 'domain_report'])],
+            'page' => ['required', Rule::in(['overview', 'workbench', 'diagnosis', 'cohort', 'path', 'evidence', 'issues', 'snapshot', 'network_failure_matrix', 'server_vpn_overall', 'server_vpn_hourly_overall', 'version_comparison', 'ad_overall', 'ad_dns_report', 'exit_ip_quality', 'domain_report'])],
             'dateFrom' => 'required|date_format:Y-m-d',
             'dateTo' => 'required|date_format:Y-m-d|after_or_equal:dateFrom',
             'projectCode' => 'nullable|string|max:64',
@@ -50,9 +50,9 @@ class FunnelAnalyticsQueryRequest extends FormRequest
             'domain' => ['nullable', Rule::in(['vpn', 'ads', 'quality'])],
             'versionProduct' => ['nullable', Rule::in(['vpn', 'launcher'])],
             'unit' => ['nullable', Rule::in(['users', 'sessions', 'events'])],
-            'dimension' => ['nullable', Rule::in(['event_date', 'stat_date', 'project_code', 'app_version', 'user_country_code', 'country_code', 'node_country', 'platform', 'network_type', 'asn', 'server_id', 'protocol', 'device_model', 'ad_format', 'placement'])],
+            'dimension' => ['nullable', Rule::in(['event_date', 'stat_date', 'stat_hour', 'project_code', 'app_version', 'user_country_code', 'country_code', 'node_country', 'platform', 'network_type', 'asn', 'server_id', 'protocol', 'device_model', 'ad_format', 'placement'])],
             'dimensions' => 'nullable|array|min:1|max:8',
-            'dimensions.*' => ['string', Rule::in(['event_date', 'stat_date', 'project_code', 'app_version', 'user_country_code', 'country_code', 'node_country', 'platform', 'network_type', 'asn', 'server_id', 'protocol', 'event_name', 'raw_event_name', 'dns_provider', 'dns_server', 'target_id', 'test_type', 'matched_route'])],
+            'dimensions.*' => ['string', Rule::in(['event_date', 'stat_date', 'stat_hour', 'project_code', 'app_version', 'user_country_code', 'country_code', 'node_country', 'platform', 'network_type', 'asn', 'server_id', 'protocol', 'event_name', 'raw_event_name', 'dns_provider', 'dns_server', 'target_id', 'test_type', 'matched_route'])],
             'startStep' => 'nullable|string|max:100',
             'endStep' => 'nullable|string|max:100',
             'screenName' => 'nullable|string|max:100',
@@ -116,14 +116,17 @@ class FunnelAnalyticsQueryRequest extends FormRequest
                 }
             }
 
-            if ($this->input('page') === 'server_vpn_overall') {
+            if (in_array($this->input('page'), ['server_vpn_overall', 'server_vpn_hourly_overall'], true)) {
                 $projectCode = strtoupper(trim((string) $this->input('projectCode', '')));
                 if ($projectCode === '') {
                     $validator->errors()->add('projectCode', '服务器VPN Overall必须选择项目');
                 } elseif (!in_array($projectCode, ['A003', 'A005', 'A007'], true)) {
                     $validator->errors()->add('projectCode', '服务器VPN Overall仅支持 A003、A005、A007');
                 }
-                $allowedDimensions = ['stat_date', 'country_code', 'node_country', 'app_version', 'platform', 'network_type', 'server_id', 'protocol'];
+                $hourlyPage = $this->input('page') === 'server_vpn_hourly_overall';
+                $allowedDimensions = $hourlyPage
+                    ? ['stat_hour', 'server_id']
+                    : ['stat_date', 'country_code', 'node_country', 'app_version', 'platform', 'network_type', 'server_id', 'protocol'];
                 if ($this->filled('dimension') && $this->filled('dimensions')) {
                     $validator->errors()->add('dimensions', '服务器VPN Overall不能同时提交 dimension 和 dimensions');
                 }
@@ -135,6 +138,13 @@ class FunnelAnalyticsQueryRequest extends FormRequest
                         $validator->errors()->add('dimensions', '服务器VPN Overall的ASN维度暂不可用');
                     } elseif (!in_array($dimension, $allowedDimensions, true)) {
                         $validator->errors()->add('dimensions', "服务器VPN Overall不支持维度：{$dimension}");
+                    }
+                }
+                if ($hourlyPage && $requestedDimensions) {
+                    $normalized = array_values(array_unique($requestedDimensions));
+                    sort($normalized);
+                    if ($normalized !== ['server_id', 'stat_hour']) {
+                        $validator->errors()->add('dimensions', '服务器V小时overall固定使用小时 × 节点维度');
                     }
                 }
             }

@@ -57,11 +57,16 @@ test("server VPN Overall is restricted to internal node projects", async () => {
 
   assert.match(page, /serverVpn/);
   assert.match(page, /服务器VPN Overall/);
+  assert.match(page, /serverVpnHourly/);
+  assert.match(page, /服务器V小时overall/);
   assert.match(source, /SERVER_VPN_PROJECTS/);
   assert.match(source, /A003/);
   assert.match(source, /A005/);
   assert.match(source, /A007/);
   assert.match(source, /ServerVpnOverall/);
+  assert.match(source, /ServerVpnHourlyOverall/);
+  assert.match(source, /小时维度/);
+  assert.match(source, /vpnReportSection === "serverVpnHourly"/);
   assert.match(source, /SERVER_VPN_DIMENSIONS/);
   assert.match(source, /SERVER_VPN_METRICS/);
   assert.match(source, /serverVpnDraft/);
@@ -91,14 +96,20 @@ test("server VPN Overall is restricted to internal node projects", async () => {
   assert.match(source, /已排除多IP域名映射/);
   assert.match(source, /serverVpnDataMatches/);
   assert.match(source, /forceRefresh: serverVpnQueryKey > 0/);
+  assert.match(source, /const forceRefresh = serverVpnHourlyQueryMode === "refresh"/);
+  assert.match(source, /if \(forceRefresh\) setServerVpnHourlyQueryMode\("query"\)/);
+  assert.match(source, /const nodeOptions = draftMatchesApplied/);
   assert.match(api, /server_vpn_overall/);
+  assert.match(api, /server_vpn_hourly_overall/);
   assert.match(api, /nodeCountry\?: string/);
   assert.match(request, /server_vpn_overall/);
+  assert.match(request, /server_vpn_hourly_overall/);
   assert.match(request, /服务器VPN Overall必须选择项目/);
   assert.match(request, /服务器VPN Overall不能同时提交 dimension 和 dimensions/);
   assert.match(request, /服务器VPN Overall的ASN维度暂不可用/);
   assert.match(request, /服务器VPN Overall不支持维度/);
   assert.match(service, /serverVpnOverallPage/);
+  assert.match(service, /serverVpnHourlyOverallPage/);
   assert.match(service, /serverVpnDimensions/);
   assert.match(service, /服务器VPN Overall不能同时提交 dimension 和 dimensions/);
   assert.match(service, /服务器VPN Overall至少需要一个有效维度/);
