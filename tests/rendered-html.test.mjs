@@ -54,6 +54,12 @@ test("server VPN Overall is restricted to internal node projects", async () => {
     file("backend/app/Http/Requests/Admin/FunnelAnalyticsQueryRequest.php"),
     file("backend/app/Services/FunnelAnalyticsService.php"),
   ]);
+  const legacyOverallUi = source.match(/function ServerVpnOverall[\s\S]*?(?=const SERVER_VPN_HOURLY_METRICS)/)?.[0] ?? "";
+  const legacyOverallService = service.match(/private function serverVpnOverallPage[\s\S]*?(?=\n    private function )/)?.[0] ?? "";
+  assert.ok(legacyOverallUi);
+  assert.ok(legacyOverallService);
+  assert.doesNotMatch(legacyOverallUi, /hourlyAnalysis|节点小时趋势|导出小时 CSV/);
+  assert.doesNotMatch(legacyOverallService, /serverVpnHourlyAnalysis/);
 
   assert.match(page, /serverVpn/);
   assert.match(page, /服务器VPN Overall/);
@@ -88,14 +94,13 @@ test("server VPN Overall is restricted to internal node projects", async () => {
   assert.match(source, /IP段可能被标记/);
   assert.match(source, /ASN可能被标记/);
   assert.match(source, /证据型风险提示/);
-  assert.match(source, /节点小时趋势/);
-  assert.match(source, /疑似从.*开始受限/);
   assert.match(source, /UTC\+8/);
   assert.match(source, /riskReady/);
   assert.match(source, /当前响应未包含V173风险分析结果/);
   assert.match(source, /已排除多IP域名映射/);
   assert.match(source, /serverVpnDataMatches/);
-  assert.match(source, /forceRefresh: serverVpnQueryKey > 0/);
+  assert.match(source, /const forceRefresh = serverVpnQueryMode === "refresh"/);
+  assert.match(source, /if \(forceRefresh\) setServerVpnQueryMode\("query"\)/);
   assert.match(source, /const forceRefresh = serverVpnHourlyQueryMode === "refresh"/);
   assert.match(source, /if \(forceRefresh\) setServerVpnHourlyQueryMode\("query"\)/);
   assert.match(source, /const nodeOptions = draftMatchesApplied/);
@@ -136,7 +141,6 @@ test("server VPN Overall is restricted to internal node projects", async () => {
   assert.match(service, /serverVpnHourlyAnalysis/);
   assert.match(service, /serverVpnHourlyStartAlerts/);
   assert.match(service, /ROW_NUMBER\(\) OVER/);
-  assert.match(service, /hourlyAnalysis/);
   assert.match(service, /VPN_TERMINAL_RESULT_STATUSES/);
   assert.match(service, /'timeout'.*'cancelled'.*'prohibited'/s);
   assert.match(service, /minimumBaselineHourlyResults/);
@@ -149,7 +153,7 @@ test("server VPN Overall is restricted to internal node projects", async () => {
   assert.match(service, /jkcl_vpn_domain_asn/);
   assert.match(service, /connection_failed_count/);
   assert.match(service, /connection_result_count/);
-  assert.match(service, /server_vpn_overall.*v174/s);
+  assert.match(service, /server_vpn_overall.*v176/s);
   assert.match(service, /validOutcomeRows/);
   assert.match(service, /knownCountryRows/);
   assert.match(service, /\$countryRows = \(clone \$riskBaseQuery\)\s*->whereRaw\(\$validOutcomeCondition\)/);

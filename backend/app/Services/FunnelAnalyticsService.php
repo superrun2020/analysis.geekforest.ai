@@ -751,7 +751,7 @@ class FunnelAnalyticsService
     private function analysisPageCacheKey(string $namespace, array $params): string
     {
         $version = match ($namespace) {
-            'server_vpn_overall' => 'v174:',
+            'server_vpn_overall' => 'v176:',
             'server_vpn_hourly_overall' => 'v175:',
             default => '',
         };
@@ -7562,8 +7562,6 @@ class FunnelAnalyticsService
             $projectCode,
             $serverIds
         );
-        $hourlyAnalysis = $this->serverVpnHourlyAnalysis($params, $projectCode);
-
         return [
             'context' => $this->context(array_replace($params, ['projectCode' => $projectCode])),
             'serverVpnOverall' => [
@@ -7593,7 +7591,6 @@ class FunnelAnalyticsService
                 'mayBeTruncated' => $totalGroupedRows > count($rows),
                 'totals' => $totals,
                 'riskAnalysis' => $riskAnalysis,
-                'hourlyAnalysis' => $hourlyAnalysis,
                 'inventoryAvailable' => $inventoryAvailable,
                 'enrichmentWarnings' => $enrichmentWarnings,
                 'queriedAt' => Carbon::now(config('app.timezone', 'Asia/Shanghai'))->toDateTimeString(),
