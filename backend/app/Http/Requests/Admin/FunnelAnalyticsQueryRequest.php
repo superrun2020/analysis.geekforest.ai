@@ -81,6 +81,8 @@ class FunnelAnalyticsQueryRequest extends FormRequest
             'maxTcpSuccessRate' => 'nullable|numeric|min:0|max:100',
             'maxAdLoadSuccessRate' => 'nullable|numeric|min:0|max:100',
             'forceRefresh' => 'nullable|boolean',
+            'optionsOnly' => 'nullable|boolean',
+            'riskOnly' => 'nullable|boolean',
             'pageIndex' => 'nullable|integer|min:1',
             'pageSize' => 'nullable|integer|min:1|max:100',
         ];

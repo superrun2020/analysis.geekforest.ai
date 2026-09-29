@@ -33,6 +33,7 @@ class JkclFunnelRoute
             $router->get('/date-session-summary', [JkclFunnelController::class, 'dateSessionSummary']);
             $router->post('/query', [JkclFunnelController::class, 'query']);
             $router->post('/ai-analysis', [JkclFunnelController::class, 'aiAnalysis']);
+            $router->post('/ai-summary', [JkclFunnelController::class, 'aiSummary']);
             $router->post('/tracking-event-coverage', [JkclFunnelController::class, 'trackingEventCoverage']);
             $router->post('/codex-links', [JkclFunnelController::class, 'createCodexQueryLinks']);
             $router->post('/project-report-shares', [JkclFunnelController::class, 'createProjectReportShare']);

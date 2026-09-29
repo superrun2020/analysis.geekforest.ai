@@ -38,6 +38,8 @@ export type FunnelQuery = {
   maxTcpSuccessRate?: number;
   maxAdLoadSuccessRate?: number;
   forceRefresh?: boolean;
+  optionsOnly?: boolean;
+  riskOnly?: boolean;
   pageIndex?: number;
   pageSize?: number;
   issueId?: string;

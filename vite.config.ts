@@ -20,6 +20,15 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
           secure: true,
         },
+        "/api/v3": {
+          target: "https://analysis.geekforest.ai",
+          changeOrigin: true,
+          secure: true,
+          headers: {
+            Origin: "https://analysis.geekforest.ai",
+            Referer: "https://analysis.geekforest.ai/",
+          },
+        },
       },
     },
     preview: {

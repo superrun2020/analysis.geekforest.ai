@@ -129,6 +129,31 @@ class JkclFunnelController extends Controller
         }
     }
 
+    /** Return one lightweight AI summary without creating a share report. */
+    public function aiSummary(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'context' => 'required|array',
+            'context.projectCode' => 'required|string|max:64',
+            'context.dateFrom' => 'required|date',
+            'context.dateTo' => 'required|date',
+            'metrics' => 'required|array|max:20',
+            'signals' => 'nullable|array|max:20',
+            'ask' => 'nullable|string|max:500',
+        ]);
+
+        $projectCode = (string) data_get($data, 'context.projectCode', '');
+        if ($denied = $this->projectDenied($request, $projectCode)) {
+            return $denied;
+        }
+
+        try {
+            return $this->ok($this->service->generateAiSummary($data));
+        } catch (InvalidArgumentException $exception) {
+            return response()->json(['code' => 422, 'msg' => $exception->getMessage(), 'data' => null], 422);
+        }
+    }
+
     /** Check whether expected tracking events were received for one project/date. */
     public function trackingEventCoverage(Request $request): JsonResponse
     {

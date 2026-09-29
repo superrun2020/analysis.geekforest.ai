@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "antd";
 import type { ReactNode } from "react";
 import { getCompanyAuthToken } from "./company-auth";
@@ -2526,6 +2526,22 @@ async function requestAiAnalysis(payload: AnyRow) {
   return body.data ?? body;
 }
 
+async function requestAiSummary(payload: AnyRow, signal?: AbortSignal) {
+  const baseUrl = trackingApiBaseUrl();
+  if (!baseUrl) throw new Error("未配置漏斗分析服务地址");
+  const token = getCompanyAuthToken();
+  if (!token) throw new Error("登录已失效");
+  const response = await fetch(`${baseUrl}/api/v3/jkcl-funnel/ai-summary`, {
+    method: "POST",
+    headers: { Accept: "application/json", "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify(payload),
+    signal,
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok || (body.code !== undefined && body.code !== 0)) throw new Error(body.msg || body.error || `AI 摘要接口 HTTP ${response.status}`);
+  return body.data ?? body;
+}
+
 function aiResultText(result: AnyRow | null) {
   if (!result) return "";
   return text(result.markdown ?? result.document ?? result.analysis ?? result.summary ?? JSON.stringify(result, null, 2));
@@ -3499,6 +3515,7 @@ const SERVER_VPN_METRICS = [
   { key: "ipChangedRate", label: "出口IP变化率", ratio: true },
   { key: "avgDurationMs", label: "平均耗时", milliseconds: true },
 ] as const;
+const SERVER_VPN_PRIMARY_METRICS: ServerVpnMetricKey[] = ["connectionAttemptCount", "connectionResultCount", "connectionSuccessCount", "connectionFailedCount", "connectionSuccessRate", "resultCoverageRate"];
 type ServerVpnMetricKey = typeof SERVER_VPN_METRICS[number]["key"];
 type ServerVpnQueryConfig = {
   projectCode: (typeof SERVER_VPN_PROJECTS)[number];
@@ -3513,6 +3530,7 @@ type ServerVpnQueryConfig = {
   serverId?: string;
   protocol?: string;
 };
+type ServerVpnHourlySelection = { config: ServerVpnQueryConfig; serverId: string; mode: "day" | "range"; focusDate?: string };
 
 function serverVpnDimensionLabel(key: string) {
   return SERVER_VPN_DIMENSIONS.find((item) => item.key === key)?.label ?? key;
@@ -3535,46 +3553,189 @@ function serverVpnQueryIdentity(config: Partial<ServerVpnQueryConfig> | null | u
   });
 }
 
+function serverVpnOptionIdentity(config: Partial<ServerVpnQueryConfig> | null | undefined) {
+  if (!config) return "";
+  return JSON.stringify({
+    projectCode: config.projectCode ?? "",
+    dateFrom: config.dateFrom ?? "",
+    dateTo: config.dateTo ?? "",
+  });
+}
+
 function safeCsvCell(value: unknown) {
   const raw = String(value ?? "");
   const neutralized = /^[=+\-@\t\r]/.test(raw) ? `'${raw}` : raw;
   return `"${neutralized.replaceAll('"', '""')}"`;
 }
 
-function ServerVpnOverall({ data, initialDates, appliedConfig, hasQueried, querying, queryError, onQuery, onRefresh }: {
+function localDateString(value: Date) {
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function MetricInfo({ label, children }: { label: string; children: ReactNode }) {
+  return <details className="metric-info"><summary aria-label={`${label}说明`} title={`${label}说明`}>ⓘ</summary><span>{children}</span></details>;
+}
+
+function ServerVpnOverall({ data, optionData, optionsLoading, riskData, riskLoading, hourlyData, hourlyLoading, hourlyError, initialDates, appliedConfig, hasQueried, querying, queryError, onOptionsConfigChange, onSelectNode, onQuery, onRefresh }: {
   data: AnyRow;
+  optionData: AnyRow | null;
+  optionsLoading: boolean;
+  riskData: AnyRow | null;
+  riskLoading: boolean;
+  hourlyData: AnyRow | null;
+  hourlyLoading: boolean;
+  hourlyError: string;
   initialDates: { dateFrom: string; dateTo: string };
   appliedConfig: ServerVpnQueryConfig | null;
   hasQueried: boolean;
   querying: boolean;
   queryError: string;
+  onOptionsConfigChange: (config: ServerVpnQueryConfig) => void;
+  onSelectNode: (selection: ServerVpnHourlySelection) => void;
   onQuery: (config: ServerVpnQueryConfig) => void;
   onRefresh: () => void;
 }) {
-  const defaultConfig = (): ServerVpnQueryConfig => ({ projectCode: "A003", dateFrom: initialDates.dateFrom, dateTo: initialDates.dateTo, dimensions: ["country_code", "node_country", "server_id", "protocol"] });
+  const defaultConfig = (): ServerVpnQueryConfig => ({ projectCode: "A003", dateFrom: initialDates.dateFrom, dateTo: initialDates.dateTo, dimensions: ["stat_date", "server_id"] });
   const [serverVpnDraft, setServerVpnDraft] = useState<ServerVpnQueryConfig>(() => appliedConfig ?? defaultConfig());
-  const [visibleMetrics, setVisibleMetrics] = useState<ServerVpnMetricKey[]>(SERVER_VPN_METRICS.map((item) => item.key));
+  const [visibleMetrics, setVisibleMetrics] = useState<ServerVpnMetricKey[]>(SERVER_VPN_PRIMARY_METRICS);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [selectedNode, setSelectedNode] = useState("");
+  const [selectedTrendDate, setSelectedTrendDate] = useState("");
+  const [anomalyOverviewMode, setAnomalyOverviewMode] = useState<"date" | "node">("date");
+  const [hourlyView, setHourlyView] = useState<"day" | "range">("day");
+  const [selectedHourlyIndex, setSelectedHourlyIndex] = useState<number | null>(null);
+  const [nodeSearch, setNodeSearch] = useState("");
+  const [attentionOnly, setAttentionOnly] = useState(false);
+  const [nodePage, setNodePage] = useState(1);
+  const [nodePageSize, setNodePageSize] = useState<20 | 50 | 100>(50);
+  const [aiSummary, setAiSummary] = useState("");
+  const [aiSummaryLoading, setAiSummaryLoading] = useState(false);
+  const [aiSummaryRefreshKey, setAiSummaryRefreshKey] = useState(0);
   useEffect(() => {
-    if (appliedConfig) setServerVpnDraft(appliedConfig);
+    if (appliedConfig) {
+      setServerVpnDraft(appliedConfig);
+      setSelectedNode("");
+      setSelectedTrendDate("");
+      setSelectedHourlyIndex(null);
+      setNodeSearch("");
+      setAttentionOnly(false);
+      setNodePage(1);
+      setAiSummary("");
+    }
   }, [appliedConfig]);
+  const draftOptionIdentity = serverVpnOptionIdentity(serverVpnDraft);
+  useEffect(() => {
+    onOptionsConfigChange(serverVpnDraft);
+  }, [draftOptionIdentity, onOptionsConfigChange]);
   const report = data.serverVpnOverall ?? {};
   const rows: AnyRow[] = Array.isArray(report.rows) ? report.rows : [];
   const totals = report.totals ?? {};
   const activeDimensions: string[] = Array.isArray(report.dimensions) ? report.dimensions : appliedConfig?.dimensions ?? [];
-  const rawOptions = report.dimensionOptions ?? {};
+  const optionReport = optionData?.serverVpnOverall ?? {};
+  const rawOptions = optionReport.dimensionOptions ?? {};
   const coverage = report.dimensionCoverage ?? {};
-  const riskAnalysis = report.riskAnalysis ?? null;
+  const riskAnalysis = riskData?.serverVpnOverall?.riskAnalysis ?? null;
   const riskReady = riskAnalysis?.available === true;
   const riskAlerts: AnyRow[] = riskReady && Array.isArray(riskAnalysis.alerts) ? riskAnalysis.alerts : [];
   const riskMapping = riskAnalysis?.mapping ?? {};
-  const hourlyAnalysis = report.hourlyAnalysis ?? null;
+  const hourlyAnalysis = hourlyData?.serverVpnHourlyOverall ?? null;
   const hourlyReady = hourlyAnalysis?.available === true;
   const hourlyRows: AnyRow[] = hourlyReady && Array.isArray(hourlyAnalysis.rows) ? hourlyAnalysis.rows : [];
   const hourlyAlerts: AnyRow[] = hourlyReady && Array.isArray(hourlyAnalysis.alerts) ? hourlyAnalysis.alerts : [];
   const hourlyTotals = hourlyAnalysis?.totals ?? {};
+  const hourlyChartRows = [...hourlyRows].sort((left, right) => String(left.statHour).localeCompare(String(right.statHour)));
+  const hourlyPointWidth = 48;
+  const hourlyChartWidth = Math.max(720, hourlyChartRows.length * hourlyPointWidth);
+  const hourlyChartPoints = hourlyChartRows.map((row, index) => {
+    const x = 24 + index * hourlyPointWidth;
+    const rate = Math.max(0, Math.min(100, normalizeRate(row.connectionSuccessRate) ?? 0));
+    return `${x},${10 + (100 - rate) * .8}`;
+  }).join(" ");
+  const hourlyMaxResults = Math.max(1, ...hourlyChartRows.map((row) => Number(row.connectionResultCount ?? 0)));
+  const selectedHourlyRow = selectedHourlyIndex === null ? null : hourlyChartRows[selectedHourlyIndex] ?? null;
+  const hourlyAnomalyIndices = hourlyChartRows.map((row, index) => row.detectedStart || row.status === "bad" || row.status === "warn" ? index : -1).filter((index) => index >= 0);
+  const selectRelativeHourlyAnomaly = (direction: -1 | 1) => {
+    if (!hourlyAnomalyIndices.length) return;
+    const currentPosition = selectedHourlyIndex === null ? -1 : hourlyAnomalyIndices.indexOf(selectedHourlyIndex);
+    const nextPosition = direction === 1
+      ? (currentPosition + 1 + hourlyAnomalyIndices.length) % hourlyAnomalyIndices.length
+      : (currentPosition <= 0 ? hourlyAnomalyIndices.length - 1 : currentPosition - 1);
+    setSelectedHourlyIndex(hourlyAnomalyIndices[nextPosition]);
+  };
+  const anomalyRank: Record<string, number> = { bad: 0, warn: 1, unavailable: 2, good: 3 };
+  const sortedRows = [...rows].sort((left, right) => (anomalyRank[left.status] ?? 2) - (anomalyRank[right.status] ?? 2) || Number(left.connectionSuccessRate ?? 101) - Number(right.connectionSuccessRate ?? 101));
+  const attentionNodeCount = sortedRows.filter((row) => row.status === "bad" || row.status === "warn").length;
+  const normalizedNodeSearch = nodeSearch.trim().toLowerCase();
+  const filteredNodeRows = sortedRows.filter((row) => {
+    if (attentionOnly && row.status !== "bad" && row.status !== "warn") return false;
+    if (!normalizedNodeSearch) return true;
+    return [row.serverId, row.nodeName, row.organization, row.dimensionLabel, ...Object.values(row.dimensionValues ?? {})]
+      .some((value) => String(value ?? "").toLowerCase().includes(normalizedNodeSearch));
+  });
+  const nodePageCount = Math.max(1, Math.ceil(filteredNodeRows.length / nodePageSize));
+  const effectiveNodePage = Math.min(nodePage, nodePageCount);
+  const visibleNodeRows = filteredNodeRows.slice((effectiveNodePage - 1) * nodePageSize, effectiveNodePage * nodePageSize);
+  const nodePageFrom = filteredNodeRows.length ? (effectiveNodePage - 1) * nodePageSize + 1 : 0;
+  const nodePageTo = Math.min(effectiveNodePage * nodePageSize, filteredNodeRows.length);
+  const recommendedNodes = Array.from(new Map(sortedRows.map((row) => [String(row.serverId ?? row.dimensionValues?.server_id ?? ""), row])).entries())
+    .filter(([serverId, row]) => serverId && (row.status === "bad" || row.status === "warn"))
+    .slice(0, 3);
+  const dailyRows = Array.from(rows.reduce((days, row) => {
+    const date = String(row.dimensionValues?.stat_date ?? "");
+    if (!date) return days;
+    const current = days.get(date) ?? { statDate: date, connectionAttemptCount: 0, connectionResultCount: 0, connectionSuccessCount: 0, connectionFailedCount: 0 };
+    current.connectionAttemptCount += Number(row.connectionAttemptCount ?? 0);
+    current.connectionResultCount += Number(row.connectionResultCount ?? 0);
+    current.connectionSuccessCount += Number(row.connectionSuccessCount ?? 0);
+    current.connectionFailedCount += Number(row.connectionFailedCount ?? 0);
+    days.set(date, current);
+    return days;
+  }, new Map<string, AnyRow>()).values()).map((day) => ({
+    ...day,
+    connectionSuccessRate: day.connectionResultCount > 0 ? day.connectionSuccessCount / day.connectionResultCount * 100 : null,
+    resultCoverageRate: day.connectionAttemptCount > 0 ? day.connectionResultCount / day.connectionAttemptCount * 100 : null,
+    status: day.connectionResultCount < 20 ? "unavailable" : day.connectionSuccessCount / day.connectionResultCount * 100 < 40 ? "bad" : day.connectionSuccessCount / day.connectionResultCount * 100 < 60 ? "warn" : "good",
+  })).sort((left, right) => String(left.statDate).localeCompare(String(right.statDate)));
+  const nodeOverviewRows = Array.from(rows.reduce((nodes, row) => {
+    const serverId = String(row.serverId ?? row.dimensionValues?.server_id ?? "");
+    if (!serverId) return nodes;
+    const current = nodes.get(serverId) ?? {
+      projectCode: String(report.projectCode ?? appliedConfig?.projectCode ?? serverVpnDraft.projectCode),
+      serverId,
+      nodeName: row.nodeName,
+      connectionAttemptCount: 0,
+      connectionResultCount: 0,
+      connectionSuccessCount: 0,
+      connectionFailedCount: 0,
+      abnormalDates: new Set<string>(),
+      worstDate: "",
+      worstRate: 101,
+    };
+    const results = Number(row.connectionResultCount ?? 0);
+    const successes = Number(row.connectionSuccessCount ?? 0);
+    const rate = normalizeRate(row.connectionSuccessRate) ?? (results > 0 ? successes / results * 100 : 101);
+    const date = String(row.dimensionValues?.stat_date ?? "");
+    current.connectionAttemptCount += Number(row.connectionAttemptCount ?? 0);
+    current.connectionResultCount += results;
+    current.connectionSuccessCount += successes;
+    current.connectionFailedCount += Number(row.connectionFailedCount ?? Math.max(0, results - successes));
+    if (date && (row.status === "bad" || row.status === "warn")) current.abnormalDates.add(date);
+    if (date && rate < current.worstRate) { current.worstRate = rate; current.worstDate = date; }
+    nodes.set(serverId, current);
+    return nodes;
+  }, new Map<string, AnyRow>()).values()).map((node) => {
+    const connectionSuccessRate = node.connectionResultCount > 0 ? node.connectionSuccessCount / node.connectionResultCount * 100 : null;
+    const resultCoverageRate = node.connectionAttemptCount > 0 ? node.connectionResultCount / node.connectionAttemptCount * 100 : null;
+    const status = node.connectionResultCount < 20 ? "unavailable" : connectionSuccessRate < 40 ? "bad" : connectionSuccessRate < 60 ? "warn" : "good";
+    const impactScore = Math.max(0, node.connectionFailedCount) * (1 + Math.max(0, node.abnormalDates.size - 1) * .25);
+    return { ...node, connectionSuccessRate, resultCoverageRate, status, abnormalDayCount: node.abnormalDates.size, impactScore };
+  }).sort((left, right) => Number(right.impactScore) - Number(left.impactScore) || Number(right.connectionFailedCount) - Number(left.connectionFailedCount));
   const draftMatchesApplied = serverVpnQueryIdentity(serverVpnDraft) === serverVpnQueryIdentity(appliedConfig);
-  const options = draftMatchesApplied ? rawOptions : {};
-  const optionMeta = draftMatchesApplied ? report.dimensionOptionMeta ?? {} : {};
+  const options = rawOptions;
+  const optionMeta = optionReport.dimensionOptionMeta ?? {};
   const reportMatchesApplied = serverVpnQueryIdentity({
     projectCode: report.projectCode,
     dateFrom: report.dateFrom,
@@ -3585,6 +3746,96 @@ function ServerVpnOverall({ data, initialDates, appliedConfig, hasQueried, query
   const reportReady = Boolean(appliedConfig && draftMatchesApplied && reportMatchesApplied && report.queriedAt);
   const showSettledReport = reportReady && !querying && !queryError;
   const showReportData = showSettledReport && report.available !== false;
+  const successRate = Number(totals.connectionSuccessRate ?? 0);
+  const coverageRate = Number(totals.resultCoverageRate ?? 0);
+  const attentionCount = sortedRows.filter((row) => row.status === "bad" || row.status === "warn").length;
+  const abnormalDayCount = dailyRows.filter((row) => row.status === "bad" || row.status === "warn").length;
+  const topAbnormalDays = dailyRows.filter((row) => row.status === "bad" || row.status === "warn")
+    .sort((left, right) => Number(right.connectionFailedCount ?? 0) - Number(left.connectionFailedCount ?? 0))
+    .slice(0, 3)
+    .map((row) => ({ date: row.statDate, successRate: row.connectionSuccessRate, effectiveResults: row.connectionResultCount, failures: row.connectionFailedCount }));
+  const hourlySelectedDate = selectedTrendDate || topAbnormalDays[0]?.date || dailyRows.at(-1)?.statDate || appliedConfig?.dateTo || serverVpnDraft.dateTo;
+  const problemNodeMap = new Map<string, AnyRow>();
+  sortedRows.forEach((row) => {
+    if (row.status !== "bad" && row.status !== "warn") return;
+    const serverId = String(row.serverId ?? row.dimensionValues?.server_id ?? "");
+    if (!serverId) return;
+    const current = problemNodeMap.get(serverId) ?? { serverId, effectiveResults: 0, successes: 0, failures: 0, dates: new Set<string>(), worstDate: "", worstRate: 101 };
+    const results = Number(row.connectionResultCount ?? 0);
+    const successes = Number(row.connectionSuccessCount ?? 0);
+    const failures = Number(row.connectionFailedCount ?? Math.max(0, results - successes));
+    const rate = Number(row.connectionSuccessRate ?? (results > 0 ? successes / results * 100 : 101));
+    const date = String(row.dimensionValues?.stat_date ?? "");
+    current.effectiveResults += results;
+    current.successes += successes;
+    current.failures += failures;
+    if (date) current.dates.add(date);
+    if (rate < current.worstRate) { current.worstRate = rate; current.worstDate = date; }
+    problemNodeMap.set(serverId, current);
+  });
+  const topProblemNodes = Array.from(problemNodeMap.values()).map((node) => ({
+    serverId: node.serverId,
+    successRate: node.effectiveResults > 0 ? Math.round(node.successes / node.effectiveResults * 10000) / 100 : null,
+    effectiveResults: node.effectiveResults,
+    failures: node.failures,
+    abnormalDays: node.dates.size,
+    worstDate: node.worstDate,
+    worstRate: node.worstRate,
+    impactScore: Math.round(Math.max(0, 100 - (node.effectiveResults > 0 ? node.successes / node.effectiveResults * 100 : 100)) * Math.sqrt(Math.max(1, node.effectiveResults)) * (1 + Math.max(0, node.dates.size - 1) * .25)),
+  })).sort((left, right) => right.impactScore - left.impactScore).slice(0, 5);
+  const hourlyEvidence = hourlyReady ? {
+    selectedNode,
+    range: `${text(hourlyAnalysis.dateFrom)} → ${text(hourlyAnalysis.dateTo)}`,
+    loaded: true,
+    alerts: hourlyAlerts.slice(0, 3).map((alert) => ({ startHour: alert.startHour, baselineSuccessRate: alert.baselineSuccessRate, currentSuccessRate: alert.currentSuccessRate, dropPp: alert.dropPp, effectiveResults: alert.currentResultCount })),
+  } : { selectedNode: selectedNode || null, loaded: false, alerts: [] };
+  const riskEvidence = riskReady ? riskAlerts.slice(0, 3).map((alert) => ({ type: alert.type, title: alert.title, evidence: alert.evidence })) : [];
+  const dayText = topAbnormalDays.map((day) => day.date).filter(Boolean).join("、");
+  const nodeText = topProblemNodes.slice(0, 3).map((node) => node.serverId).join("、");
+  const firstHourlyAlert = hourlyEvidence.alerts[0];
+  const diagnosisStage = riskReady ? "已结合网络风险" : hourlyReady ? "已补充小时数据" : "初步分析";
+  const ruleSummary = `${successRate < 40 ? "当前区间存在明显连接异常" : successRate < 70 ? "当前区间连接质量需要关注" : "当前区间连接质量整体稳定"}，成功率 ${percent(totals.connectionSuccessRate)}、结果覆盖率 ${percent(totals.resultCoverageRate)}。${dayText ? `异常主要集中在 ${dayText}` : "暂未定位到明确异常日期"}${nodeText ? `，优先关注节点 ${nodeText}` : ""}。${firstHourlyAlert ? `${selectedNode} 最早在 ${text(firstHourlyAlert.startHour)} 出现持续突降，下降 ${number(firstHourlyAlert.dropPp)} 个百分点。` : selectedNode && hourlyReady ? `${selectedNode} 已加载小时数据，但未达到持续突降阈值。` : "尚未加载问题节点的小时数据，暂时无法判断准确开始时间。"}${riskEvidence.length ? `当前风险证据提示：${riskEvidence.map((item) => text(item.title)).join("；")}。` : riskReady ? "当前国家、IP段和ASN证据尚不足以确认网络限制。" : "网络风险证据仍在后台分析。"}${coverageRate < 70 ? "结果覆盖率偏低，结论需谨慎。" : "建议按上述日期和节点继续下钻小时趋势。"}`;
+  const aiSummaryIdentity = showReportData ? JSON.stringify({
+    projectCode: report.projectCode,
+    dateFrom: report.dateFrom,
+    dateTo: report.dateTo,
+    queriedAt: report.queriedAt,
+    attempts: totals.connectionAttemptCount,
+    results: totals.connectionResultCount,
+    successRate: totals.connectionSuccessRate,
+    coverageRate: totals.resultCoverageRate,
+    attentionCount,
+    abnormalDayCount,
+    topAbnormalDays,
+    topProblemNodes,
+    hourlyEvidence,
+    riskEvidence,
+  }) : "";
+  useEffect(() => {
+    if (!aiSummaryIdentity) return;
+    let active = true;
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      setAiSummaryLoading(true);
+      requestAiSummary({
+        context: { projectCode: report.projectCode, dateFrom: report.dateFrom, dateTo: report.dateTo, timezone: "UTC+8" },
+        metrics: {
+          activeNodes: totals.nodeCount,
+          connectionAttempts: totals.connectionAttemptCount,
+          effectiveResults: totals.connectionResultCount,
+          connectionSuccessRate: totals.connectionSuccessRate,
+          resultCoverageRate: totals.resultCoverageRate,
+          averageDurationMs: totals.avgDurationMs,
+        },
+        signals: { attentionCount, abnormalDayCount, abnormalDays: topAbnormalDays, problemNodes: topProblemNodes, hourlyEvidence, riskEvidence, riskReady, mayBeTruncated: Boolean(report.mayBeTruncated), inventoryAvailable: report.inventoryAvailable !== false },
+        ask: "固定用四句话依次回答：是否异常；异常日期和问题节点；最早异常小时与有证据支持的原因方向；下一步排查动作。缺少小时或风险证据时必须明确说明，不推断未提供的原因。",
+      }, controller.signal)
+        .then((result) => { if (active) setAiSummary(String(result?.summary ?? "").trim()); })
+        .catch(() => { if (active) setAiSummary(""); })
+        .finally(() => { if (active) setAiSummaryLoading(false); });
+    }, 700);
+    return () => { active = false; window.clearTimeout(timer); controller.abort(); };
+  }, [aiSummaryIdentity, aiSummaryRefreshKey]);
   const statusLabels: Record<string, { label: string; className: string }> = {
     good: { label: "正常", className: "good" }, warn: { label: "关注", className: "warn" }, bad: { label: "异常", className: "bad" }, unavailable: { label: "结果不足", className: "muted" },
   };
@@ -3624,27 +3875,34 @@ function ServerVpnOverall({ data, initialDates, appliedConfig, hasQueried, query
   const truncatedOptionLabels = Object.entries(optionMeta)
     .filter(([, meta]) => Boolean((meta as AnyRow)?.hasMore))
     .map(([key]) => ({ countries: "入口国家", nodeCountries: "VPN出口国家", platforms: "平台", appVersions: "App版本", networkTypes: "网络类型", serverIds: "节点", protocols: "协议" } as Record<string, string>)[key] ?? key);
+  const loadNodeTrend = (serverId: string, focusDate = selectedTrendDate, mode = hourlyView) => {
+    const effectiveDate = focusDate || hourlySelectedDate;
+    setSelectedNode(serverId);
+    setSelectedTrendDate(effectiveDate);
+    setSelectedHourlyIndex(null);
+    onSelectNode({ config: appliedConfig ?? serverVpnDraft, serverId, mode, focusDate: effectiveDate || undefined });
+  };
 
   return <div className="page-stack server-vpn-overall-page vpn-overall-report">
     <section className="surface matrix-overall-config overall-config-card">
       <div className="overall-config-row dimension-row"><span className="overall-config-label">维度</span>{SERVER_VPN_DIMENSIONS.map((item) => { const unavailable = "unavailable" in item && item.unavailable; return <label key={item.key} title={unavailable ? "ASN暂不可用：VPN质量汇总表尚未包含ASN维度" : item.label} className={`overall-chip ${serverVpnDraft.dimensions.includes(item.key) ? "active" : ""} ${unavailable ? "disabled" : ""}`}><input type="checkbox" checked={serverVpnDraft.dimensions.includes(item.key)} disabled={unavailable} onChange={() => toggleDimension(item.key)} /><span>{item.label}{unavailable ? "（暂不可用）" : ""}</span></label>; })}</div>
-      <div className="overall-config-row metric-row"><span className="overall-config-label">统计字段</span>{SERVER_VPN_METRICS.map((item) => <label key={item.key} className={`overall-chip ${visibleMetrics.includes(item.key) ? "active" : ""}`}><input type="checkbox" checked={visibleMetrics.includes(item.key)} onChange={() => toggleMetric(item.key)} /><span>{item.label}</span></label>)}</div>
+      <div className="overall-config-row metric-row"><span className="overall-config-label">关键指标</span>{SERVER_VPN_METRICS.filter((item) => showAdvanced || SERVER_VPN_PRIMARY_METRICS.includes(item.key)).map((item) => <label key={item.key} className={`overall-chip ${visibleMetrics.includes(item.key) ? "active" : ""}`}><input type="checkbox" checked={visibleMetrics.includes(item.key)} onChange={() => toggleMetric(item.key)} /><span>{item.label}</span></label>)}<Button htmlType="button" onClick={() => setShowAdvanced((value) => !value)}>{showAdvanced ? "收起更多" : "更多指标与筛选"}</Button></div>
       <div className="overall-filter-row">
         <label className="overall-filter-item date-range-control"><span>日期范围：</span><input type="date" value={serverVpnDraft.dateFrom} onChange={(event) => { if (!event.target.value) return; setServerVpnDraft((current) => ({ ...current, dateFrom: event.target.value, dateTo: current.dateTo < event.target.value ? event.target.value : current.dateTo })); }} /><b>→</b><input type="date" value={serverVpnDraft.dateTo} min={serverVpnDraft.dateFrom} onChange={(event) => { if (event.target.value) setServerVpnDraft((current) => ({ ...current, dateTo: event.target.value })); }} /></label>
         <label className="overall-filter-item"><span>项目代号：</span><select value={serverVpnDraft.projectCode} onChange={(event) => setServerVpnDraft({ ...defaultConfig(), projectCode: event.target.value as ServerVpnQueryConfig["projectCode"], dateFrom: serverVpnDraft.dateFrom, dateTo: serverVpnDraft.dateTo, dimensions: serverVpnDraft.dimensions })}>{SERVER_VPN_PROJECTS.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
         <label className="overall-filter-item"><span>入口国家：</span><select value={serverVpnDraft.country ?? ""} onChange={(event) => setFilter("country", event.target.value)}><option value="">全部国家</option>{dimensionOption("countries", serverVpnDraft.country).map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
         <label className="overall-filter-item"><span>VPN出口国家：</span><select value={serverVpnDraft.nodeCountry ?? ""} onChange={(event) => setFilter("nodeCountry", event.target.value)}><option value="">全部出口</option>{dimensionOption("nodeCountries", serverVpnDraft.nodeCountry).map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
-        <label className="overall-filter-item"><span>平台：</span><select value={serverVpnDraft.platform ?? ""} onChange={(event) => setFilter("platform", event.target.value)}><option value="">全部平台</option>{dimensionOption("platforms", serverVpnDraft.platform).map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
-        <label className="overall-filter-item"><span>App版本：</span><select value={serverVpnDraft.appVersion ?? ""} onChange={(event) => setFilter("appVersion", event.target.value)}><option value="">全部版本</option>{dimensionOption("appVersions", serverVpnDraft.appVersion).map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+        {showAdvanced && <label className="overall-filter-item"><span>平台：</span><select value={serverVpnDraft.platform ?? ""} onChange={(event) => setFilter("platform", event.target.value)}><option value="">全部平台</option>{dimensionOption("platforms", serverVpnDraft.platform).map((item) => <option key={item} value={item}>{item}</option>)}</select></label>}
+        {showAdvanced && <label className="overall-filter-item"><span>App版本：</span><select value={serverVpnDraft.appVersion ?? ""} onChange={(event) => setFilter("appVersion", event.target.value)}><option value="">全部版本</option>{dimensionOption("appVersions", serverVpnDraft.appVersion).map((item) => <option key={item} value={item}>{item}</option>)}</select></label>}
       </div>
       <div className="overall-filter-row">
-        <label className="overall-filter-item"><span>网络类型：</span><select value={serverVpnDraft.networkType ?? ""} onChange={(event) => setFilter("networkType", event.target.value)}><option value="">全部网络</option>{dimensionOption("networkTypes", serverVpnDraft.networkType).map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
-        <label className="overall-filter-item"><span>ASN：</span><select disabled value=""><option>ASN暂不可用</option></select></label>
+        {showAdvanced && <label className="overall-filter-item"><span>网络类型：</span><select value={serverVpnDraft.networkType ?? ""} onChange={(event) => setFilter("networkType", event.target.value)}><option value="">全部网络</option>{dimensionOption("networkTypes", serverVpnDraft.networkType).map((item) => <option key={item} value={item}>{item}</option>)}</select></label>}
+        {showAdvanced && <label className="overall-filter-item"><span>ASN：</span><select disabled value=""><option>ASN暂不可用</option></select></label>}
         <label className="overall-filter-item"><span>节点：</span><select value={serverVpnDraft.serverId ?? ""} onChange={(event) => setFilter("serverId", event.target.value)}><option value="">全部节点</option>{dimensionOption("serverIds", serverVpnDraft.serverId).map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
         <label className="overall-filter-item"><span>协议：</span><select value={serverVpnDraft.protocol ?? ""} onChange={(event) => setFilter("protocol", event.target.value)}><option value="">全部协议</option>{dimensionOption("protocols", serverVpnDraft.protocol).map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
       </div>
-      <div className="overall-action-row"><div className="overall-view-actions"><span>项目白名单：A003、A005、A007</span></div><div className="overall-query-actions"><Button htmlType="button" onClick={exportCsv} disabled={!showReportData || report.mayBeTruncated || !rows.length}>{report.mayBeTruncated ? "缩小范围后导出" : "导出 CSV"}</Button><Button htmlType="button" onClick={() => { setServerVpnDraft(defaultConfig()); setVisibleMetrics(SERVER_VPN_METRICS.map((item) => item.key)); }}>重置</Button><Button htmlType="button" className="primary" onClick={() => onQuery(serverVpnDraft)} disabled={querying}>⌕ {querying ? "查询中…" : "查询"}</Button></div></div>
-      <div className="overall-active-hint">待查询：{serverVpnDraft.dimensions.map(serverVpnDimensionLabel).join(" × ")} · 展示 {visibleMetrics.length} 个统计字段；展示列只影响当前结果表格，不发起后端查询。</div>
+      <div className="overall-action-row"><div className="overall-view-actions"><span>{optionsLoading ? "正在加载筛选选项…" : "项目白名单：A003、A005、A007"}</span></div><div className="overall-query-actions"><Button htmlType="button" onClick={exportCsv} disabled={!showReportData || report.mayBeTruncated || !rows.length}>{report.mayBeTruncated ? "缩小范围后导出" : "导出 CSV"}</Button><Button htmlType="button" onClick={() => { setServerVpnDraft(defaultConfig()); setVisibleMetrics(SERVER_VPN_PRIMARY_METRICS); setShowAdvanced(false); }}>重置</Button><Button htmlType="button" className="primary" onClick={() => onQuery(serverVpnDraft)} disabled={querying}>⌕ {querying ? "查询中…" : "查询"}</Button></div></div>
+      <div className="overall-active-hint">待查询：{serverVpnDraft.dimensions.map(serverVpnDimensionLabel).join(" × ")} · {visibleMetrics.length} 个指标</div>
       {truncatedOptionLabels.length > 0 && <div className="overall-active-hint">选项已限制为前 250 项：{truncatedOptionLabels.join("、")}；请先增加其他筛选缩小范围。</div>}
     </section>
 
@@ -3657,19 +3915,39 @@ function ServerVpnOverall({ data, initialDates, appliedConfig, hasQueried, query
       {showSettledReport && report.available === false && <div className="diagnosis-no-reasons compact warn"><strong>{appliedConfig?.projectCode} 当前没有服务器VPN汇总</strong><p>{text(report.reason)}。不会把未归属到该项目的节点混入结果。</p></div>}
       {showReportData && Number(coverage.asn?.totalRows ?? 0) > 0 && coverage.asn?.available === false && <div className="diagnosis-no-reasons compact warn"><strong>ASN暂不可用</strong><p>当前VPN质量汇总表没有ASN维度；页面明确显示 unknown/禁用筛选，不使用组织名称冒充ASN。</p></div>}
       {showReportData && report.mayBeTruncated && <div className="diagnosis-no-reasons compact warn"><strong>明细展示 {number(rows.length)} / {number(report.totalGroupedRows)} 组</strong><p>省略 {number(report.omittedRows)} 组；表格按连接尝试从高到低展示，汇总卡使用完整筛选范围。为避免导出不完整，CSV已禁用，请缩小维度或筛选范围。</p></div>}
-      {showReportData && <div className="summary-grid server-vpn-summary-grid">
-        <article><span>活跃节点</span><strong>{number(totals.nodeCount)}</strong><small>节点库匹配 {number(totals.inventoryMatchedCount)} · v2_ip_pool {number(totals.poolMatchedCount)}</small></article>
-        <article><span>连接尝试</span><strong>{number(totals.connectionAttemptCount)}</strong><small>已返回结果 {number(totals.connectionResultCount)}</small></article>
-        <article><span>连接成功率</span><strong>{percent(totals.connectionSuccessRate)}</strong><small>成功 {number(totals.connectionSuccessCount)} / 已返回结果 {number(totals.connectionResultCount)}</small></article>
-        <article><span>结果覆盖率</span><strong>{percent(totals.resultCoverageRate)}</strong><small>未返回结果不计为失败</small></article>
-        <article><span>平均耗时</span><strong>{totals.avgDurationMs === null || totals.avgDurationMs === undefined ? "—" : `${number(totals.avgDurationMs)} ms`}</strong><small>按耗时样本加权</small></article>
-      </div>}
+      {showReportData && <div className="overall-insight-layout"><div className="summary-grid server-vpn-summary-grid">
+          <article><span>活跃节点 <MetricInfo label="活跃节点">当前范围出现连接记录的节点数。</MetricInfo></span><strong>{number(totals.nodeCount)}</strong><small>节点库匹配 {number(totals.inventoryMatchedCount)}</small></article>
+          <article><span>连接尝试 <MetricInfo label="连接尝试">发起过连接的 connection_id 数量。</MetricInfo></span><strong>{number(totals.connectionAttemptCount)}</strong><small>有效结果 {number(totals.connectionResultCount)}</small></article>
+          <article><span>连接成功率 <MetricInfo label="连接成功率">成功数 ÷ 有效结果数；未返回最终状态的不进入分母。</MetricInfo></span><strong>{percent(totals.connectionSuccessRate)}</strong><small>成功 {number(totals.connectionSuccessCount)} / 有效结果 {number(totals.connectionResultCount)}</small></article>
+          <article><span>结果覆盖率 <MetricInfo label="结果覆盖率">有效结果数 ÷ 连接尝试数。</MetricInfo></span><strong>{percent(totals.resultCoverageRate)}</strong><small>衡量结果返回完整度</small></article>
+          <article><span>平均耗时 <MetricInfo label="平均耗时">按有耗时记录的样本加权计算。</MetricInfo></span><strong>{totals.avgDurationMs === null || totals.avgDurationMs === undefined ? "—" : `${number(totals.avgDurationMs)} ms`}</strong><small>加权平均</small></article>
+        </div><aside className="ai-quick-summary"><div><strong>问题定位分析</strong><span>{diagnosisStage}{aiSummaryLoading ? " · 更新中" : aiSummary ? " · AI" : " · 规则"}</span></div><p>{aiSummary || ruleSummary}</p><footer><small>定位日期、节点、开始时间与原因证据</small><Button htmlType="button" disabled={aiSummaryLoading} onClick={() => setAiSummaryRefreshKey((value) => value + 1)}>{aiSummaryLoading ? "分析中…" : "重新分析"}</Button></footer></aside></div>}
+      {showReportData && <section className="server-vpn-risk-analysis anomaly-overview-section">
+        <div className="surface-title"><div><h3>异常概览</h3><p>{anomalyOverviewMode === "date" ? "点击日期，聚焦当天" : "按异常影响排序；点击节点查看小时趋势"}</p></div><div className="anomaly-overview-actions"><Button htmlType="button" className={anomalyOverviewMode === "date" ? "active" : ""} onClick={() => setAnomalyOverviewMode("date")}>按日期</Button><Button htmlType="button" className={anomalyOverviewMode === "node" ? "active" : ""} onClick={() => setAnomalyOverviewMode("node")}>按项目与节点</Button><span>{anomalyOverviewMode === "date" ? selectedTrendDate ? `已聚焦 ${selectedTrendDate}` : `${dailyRows.filter((row) => row.status === "bad" || row.status === "warn").length} 个异常日期` : `${nodeOverviewRows.filter((row) => row.status === "bad" || row.status === "warn").length} 个异常节点`}</span></div></div>
+        {anomalyOverviewMode === "date" ? dailyRows.length ? <div className="table-wrap"><table className="version-compare-table"><thead><tr><th>状态</th><th>日期</th><th>连接尝试</th><th>有效结果</th><th>失败</th><th>成功率</th><th>结果覆盖率</th></tr></thead><tbody>{dailyRows.map((row) => { const status = statusLabels[row.status] ?? statusLabels.unavailable; return <tr key={row.statDate} className={`${row.status === "bad" ? "row-bad" : row.status === "warn" ? "row-warn" : ""} ${selectedTrendDate === row.statDate ? "row-selected" : ""}`.trim()} onClick={() => setSelectedTrendDate(row.statDate)}><td><span className={`status-chip ${status.className}`}>{status.label}</span></td><td><strong>{row.statDate}</strong></td><td>{number(row.connectionAttemptCount)}</td><td>{number(row.connectionResultCount)}</td><td>{number(row.connectionFailedCount)}</td><td><strong>{percent(row.connectionSuccessRate)}</strong></td><td>{percent(row.resultCoverageRate)}</td></tr>; })}</tbody></table></div> : <div className="overall-empty-state">请保留“日期”维度。</div>
+          : nodeOverviewRows.length ? <div className="table-wrap"><table className="version-compare-table"><thead><tr><th>状态</th><th>项目</th><th>节点</th><th>异常天数</th><th>有效结果</th><th>失败</th><th>成功率</th><th>结果覆盖率</th></tr></thead><tbody>{nodeOverviewRows.map((row) => { const status = statusLabels[row.status] ?? statusLabels.unavailable; return <tr key={`${row.projectCode}-${row.serverId}`} className={`${row.status === "bad" ? "row-bad" : row.status === "warn" ? "row-warn" : ""} ${selectedNode === row.serverId ? "row-selected" : ""}`.trim()} onClick={() => loadNodeTrend(row.serverId, row.worstDate)}><td><span className={`status-chip ${status.className}`}>{status.label}</span></td><td><strong>{row.projectCode}</strong></td><td><strong>{text(row.nodeName ?? row.serverId)}</strong><small>{row.nodeName ? row.serverId : "按异常影响排序"}</small></td><td>{number(row.abnormalDayCount)}</td><td>{number(row.connectionResultCount)}</td><td><strong>{number(row.connectionFailedCount)}</strong></td><td><strong>{percent(row.connectionSuccessRate)}</strong></td><td>{percent(row.resultCoverageRate)}</td></tr>; })}</tbody></table></div> : <div className="overall-empty-state">请保留“节点”维度。</div>}
+      </section>}
+      {showReportData && <section className="server-vpn-risk-analysis"><div className="surface-title"><div><h3>节点质量</h3><p>异常优先；点击节点查看小时趋势</p></div><span>{number(filteredNodeRows.length)} / {number(rows.length)} 组</span></div>
+        <div className="node-table-tools"><label><span>搜索节点/IP</span><input type="search" value={nodeSearch} placeholder="输入节点、IP或名称" onChange={(event) => { setNodeSearch(event.target.value); setNodePage(1); }} /></label><Button htmlType="button" className={attentionOnly ? "active" : ""} onClick={() => { setAttentionOnly((value) => !value); setNodePage(1); }}>{attentionNodeCount} 个需要关注</Button></div>
+        <div className="table-wrap"><table className="version-compare-table server-vpn-overall-table"><thead><tr><th>状态</th>{activeDimensions.map((dimension) => <th key={dimension}>{serverVpnDimensionLabel(dimension)}</th>)}{SERVER_VPN_METRICS.filter((metric) => visibleMetrics.includes(metric.key)).map((metric) => <th key={metric.key}>{metric.label}</th>)}</tr></thead><tbody>
+        {visibleNodeRows.length ? visibleNodeRows.map((row) => {
+          const status = statusLabels[row.status] ?? statusLabels.unavailable;
+          const rowServerId = String(row.serverId ?? row.dimensionValues?.server_id ?? "");
+          return <tr key={text(row.rowKey ?? row.dimensionLabel)} className={`${row.status === "bad" ? "row-bad" : row.status === "warn" ? "row-warn" : ""} ${selectedNode === rowServerId ? "row-selected" : ""}`.trim()} onClick={() => { if (!rowServerId) return; loadNodeTrend(rowServerId, String(row.dimensionValues?.stat_date ?? selectedTrendDate)); }}>
+            <td><span className={`status-chip ${status.className}`}>{status.label}</span></td>
+            {activeDimensions.map((dimension) => <td key={dimension}>{dimension === "server_id" ? <><strong>{text(row.nodeName ?? row.dimensionValues?.[dimension])}</strong><small>{text(row.dimensionValues?.[dimension])}{row.organization ? ` · ${text(row.organization)}` : ""}</small></> : <strong>{text(row.dimensionValues?.[dimension])}</strong>}</td>)}
+            {SERVER_VPN_METRICS.filter((metric) => visibleMetrics.includes(metric.key)).map((metric) => <td key={metric.key}><strong>{formatMetric(row, metric.key)}</strong></td>)}
+          </tr>;
+        }) : <tr><td colSpan={1 + activeDimensions.length + visibleMetrics.length}>{querying ? "正在读取服务器节点质量…" : normalizedNodeSearch || attentionOnly ? "没有匹配的节点" : "当前配置没有可展示的数据"}</td></tr>}
+      </tbody></table></div>
+        <div className="node-table-pagination"><span>第 {number(nodePageFrom)}–{number(nodePageTo)} 条，共 {number(filteredNodeRows.length)} 组</span><label>每页<select value={nodePageSize} onChange={(event) => { setNodePageSize(Number(event.target.value) as 20 | 50 | 100); setNodePage(1); }}><option value="20">20</option><option value="50">50</option><option value="100">100</option></select></label><Button htmlType="button" disabled={effectiveNodePage <= 1} onClick={() => setNodePage((value) => Math.max(1, value - 1))}>上一页</Button><span>{effectiveNodePage} / {nodePageCount}</span><Button htmlType="button" disabled={effectiveNodePage >= nodePageCount} onClick={() => setNodePage((value) => Math.min(nodePageCount, value + 1))}>下一页</Button></div>
+      </section>}
       {showReportData && <section className="server-vpn-risk-analysis">
-        <div className="surface-title"><div><h3>区域屏蔽与网络标记分析</h3><p>证据型风险提示：只统计明确失败结果；达到样本量和差异阈值才提示，不等同于已确认封禁或标记。</p></div><span>{riskReady ? `${number(riskAlerts.length)} 条提示` : "暂不可用"}</span></div>
-        {!riskReady
+        <div className="surface-title"><div><h3>网络风险</h3><p>异步识别国家、IP段和ASN风险</p></div><span>{riskLoading ? "分析中" : riskReady ? `${number(riskAlerts.length)} 条提示` : "暂不可用"}</span></div>
+        {riskLoading ? <div className="overall-empty-state">节点质量已返回，风险分析正在后台加载。</div> : !riskReady
           ? <div className="diagnosis-no-reasons compact warn"><strong>风险分析暂不可用</strong><p>{text(riskAnalysis?.reason ?? "当前响应未包含V173风险分析结果，请刷新后重新查询。")}</p></div>
           : <>
-            <div className="overall-active-hint">规则：国家节点失败率 ≥ {number(riskAnalysis.thresholds?.highFailureRate)}%、其他国家 ≤ {number(riskAnalysis.thresholds?.healthyPeerFailureRate)}%、差异 ≥ {number(riskAnalysis.thresholds?.minimumFailureGapPp)} 个百分点；IP段/ASN至少 {number(riskAnalysis.thresholds?.minimumNetworkIps)} 个IP且每个IP至少 {number(riskAnalysis.thresholds?.minimumIpResults)} 个连接结果。</div>
+            <details className="module-explanation"><summary>口径与判定规则</summary><div>国家节点失败率 ≥ {number(riskAnalysis.thresholds?.highFailureRate)}%、其他国家 ≤ {number(riskAnalysis.thresholds?.healthyPeerFailureRate)}%、差异 ≥ {number(riskAnalysis.thresholds?.minimumFailureGapPp)} 个百分点；IP段/ASN至少 {number(riskAnalysis.thresholds?.minimumNetworkIps)} 个IP，且每个IP至少 {number(riskAnalysis.thresholds?.minimumIpResults)} 个有效结果。</div></details>
             {(Number(riskMapping.mappedIpServerCount ?? 0) < Number(riskMapping.serverCount ?? 0) || Number(riskMapping.mappedAsnServerCount ?? 0) < Number(riskMapping.serverCount ?? 0)) && <div className="diagnosis-no-reasons compact warn"><strong>IP/ASN映射覆盖不完整</strong><p>当前节点 {number(riskMapping.serverCount)} 个，已映射IP {number(riskMapping.mappedIpServerCount)} 个、ASN {number(riskMapping.mappedAsnServerCount)} 个。IP段和ASN提示只基于已映射节点，未使用组织名称冒充ASN。</p></div>}
             {Array.isArray(riskAnalysis.warnings) && riskAnalysis.warnings.includes("inconsistent_outcome_counts_excluded") && <div className="diagnosis-no-reasons compact warn"><strong>已排除结果计数异常样本</strong><p>{number(riskAnalysis.excludedInvalidOutcomeRowCount)} 条源数据存在负数结果/失败计数，或明确失败数大于连接结果数，已在聚合前排除，避免影响国家、IP段和ASN提示。</p></div>}
             {Array.isArray(riskAnalysis.warnings) && riskAnalysis.warnings.includes("ambiguous_domain_ip_mapping_excluded") && <div className="diagnosis-no-reasons compact warn"><strong>已排除多IP域名映射</strong><p>{number(riskMapping.ambiguousDomainCount)} 个节点域名对应多个历史或当前IP，无法确认本次连接实际命中的IP，未纳入IP段和ASN提示。</p></div>}
@@ -3680,38 +3958,52 @@ function ServerVpnOverall({ data, initialDates, appliedConfig, hasQueried, query
           </>}
       </section>}
       {showReportData && <section className="server-vpn-risk-analysis server-vpn-hourly-analysis">
-        <div className="surface-title"><div><h3>节点小时趋势</h3><p>按 {text(hourlyAnalysis?.timezone ?? "UTC+8")} 展示每个节点的明确连接结果，用于定位节点疑似从哪个小时开始受限、成功率何时发生持续突降。</p></div><div>{hourlyReady && <Button htmlType="button" onClick={exportHourlyCsv} disabled={hourlyAnalysis.mayBeTruncated || !hourlyRows.length}>{hourlyAnalysis.mayBeTruncated ? "筛选节点后导出" : "导出小时 CSV"}</Button>}<span>{hourlyReady ? `${number(hourlyAnalysis.alertCount)} 个起始点` : "暂不可用"}</span></div></div>
-        {!hourlyReady
-          ? <div className="diagnosis-no-reasons compact warn"><strong>小时报表暂不可用</strong><p>{text(hourlyAnalysis?.reason ?? "当前响应未包含V174小时分析结果，请刷新后重新查询。")}</p></div>
+        <div className="surface-title"><div><h3>节点小时趋势</h3><p>单日查看24H；区间总图连续展示主查询的全部日期</p></div><div className="hourly-toolbar"><div className="hourly-range-actions"><Button htmlType="button" className={hourlyView === "day" ? "active" : ""} onClick={() => { setHourlyView("day"); if (selectedNode) loadNodeTrend(selectedNode, hourlySelectedDate, "day"); }}>单日24H</Button><Button htmlType="button" className={hourlyView === "range" ? "active" : ""} onClick={() => { setHourlyView("range"); if (selectedNode) loadNodeTrend(selectedNode, hourlySelectedDate, "range"); }}>区间总图</Button>{hourlyView === "day" ? <label className="hourly-inline-select"><span>日期</span><select value={hourlySelectedDate} onChange={(event) => { const date = event.target.value; setSelectedTrendDate(date); if (selectedNode) loadNodeTrend(selectedNode, date, "day"); }}>{dailyRows.map((row) => <option key={row.statDate} value={row.statDate}>{row.statDate}{row.status === "bad" || row.status === "warn" ? " · 异常" : ""}</option>)}</select></label> : <span className="hourly-query-range">原始区间：{appliedConfig?.dateFrom ?? report.dateFrom} → {appliedConfig?.dateTo ?? report.dateTo}</span>}<label className="hourly-inline-select"><span>节点</span><select value={selectedNode} onChange={(event) => { const serverId = event.target.value; if (serverId) loadNodeTrend(serverId, hourlySelectedDate, hourlyView); else setSelectedNode(""); }}><option value="">请选择节点</option>{nodeOverviewRows.map((row, index) => <option key={row.serverId} value={row.serverId}>{index + 1}. {row.nodeName ?? row.serverId} · {row.abnormalDayCount}天异常 · {percent(row.connectionSuccessRate)}</option>)}</select></label>{hourlyReady && <Button htmlType="button" onClick={exportHourlyCsv} disabled={hourlyAnalysis.mayBeTruncated || !hourlyRows.length}>导出小时 CSV</Button>}{selectedNode && <Button htmlType="button" onClick={() => loadNodeTrend(selectedNode, hourlySelectedDate, hourlyView)} disabled={hourlyLoading}>重新加载</Button>}</div><span className="hourly-selected-node" title={selectedNode || "未选择节点"}>{selectedNode || "未选择节点"}</span></div></div>
+        {!selectedNode
+          ? <div className="overall-empty-state"><strong>请选择节点查看小时趋势</strong><span>{selectedTrendDate ? `当前聚焦日期：${selectedTrendDate}。` : "可先在每日异常概览中选择日期。"}</span>{recommendedNodes.length > 0 && <div className="overall-query-actions">{recommendedNodes.map(([serverId, row]) => <Button key={serverId} htmlType="button" onClick={() => loadNodeTrend(serverId)}>{serverId} · {statusLabels[row.status]?.label ?? "关注"} · {percent(row.connectionSuccessRate)}</Button>)}</div>}</div>
+          : hourlyLoading
+            ? <div className="overall-empty-state">正在加载 {selectedNode} 的小时趋势，主报表不受影响。</div>
+            : hourlyError
+              ? <div className="diagnosis-no-reasons compact warn"><strong>小时趋势加载失败</strong><p>{hourlyError}</p></div>
+              : !hourlyReady
+                ? <div className="diagnosis-no-reasons compact warn"><strong>小时报表暂不可用</strong><p>{text(hourlyAnalysis?.reason ?? "该节点当前没有小时数据。")}{hourlyAnalysis?.diagnosticId ? `（诊断编号：${text(hourlyAnalysis.diagnosticId)}）` : ""}</p>{Array.isArray(hourlyAnalysis?.warnings) && hourlyAnalysis.warnings.includes("hourly_analysis_failed") && <Button htmlType="button" onClick={() => loadNodeTrend(selectedNode, selectedTrendDate, hourlyView)}>按原条件重试</Button>}</div>
           : <>
-            <div className="overall-active-hint">判定规则：此前连续 {number(hourlyAnalysis.thresholds?.baselineHours)} 个小时，每小时至少 {number(hourlyAnalysis.thresholds?.minimumBaselineHourlyResults)} 个结果且成功率均 ≥ {percent(hourlyAnalysis.thresholds?.minimumBaselineSuccessRate)}（合计至少 {number(hourlyAnalysis.thresholds?.minimumBaselineResults)} 个结果）；当前小时至少 {number(hourlyAnalysis.thresholds?.minimumHourlyResults)} 个结果、成功率 ≤ {percent(hourlyAnalysis.thresholds?.maximumCurrentSuccessRate)}、下降 ≥ {number(hourlyAnalysis.thresholds?.minimumDropPp)} 个百分点，并由后续小时成功率 ≤ {percent(hourlyAnalysis.thresholds?.maximumConfirmationSuccessRate)} 确认。每个节点只标记范围内首个起始点，最多查询 {number(hourlyAnalysis.thresholds?.maximumDays)} 天。</div>
+            <div className="overall-active-hint">{text(hourlyAnalysis.dateFrom)} → {text(hourlyAnalysis.dateTo)} · {selectedNode} · {text(hourlyAnalysis.timezone)}</div>
             <div className="summary-grid server-vpn-summary-grid">
-              <article><span>小时覆盖</span><strong>{number(hourlyTotals.hourCount)}</strong><small>{number(hourlyTotals.nodeCount)} 个节点 · {text(hourlyAnalysis.timezone)}</small></article>
-              <article><span>明确连接结果</span><strong>{number(hourlyTotals.connectionResultCount)}</strong><small>成功 {number(hourlyTotals.connectionSuccessCount)} · 失败 {number(hourlyTotals.connectionFailedCount)}</small></article>
-              <article><span>小时范围成功率</span><strong>{percent(hourlyTotals.connectionSuccessRate)}</strong><small>每个 connection_id 只取最后一条明确结果</small></article>
-              <article><span>疑似开始受限</span><strong>{number(hourlyAnalysis.alertCount)}</strong><small>必须有突降前基线和突降后确认小时</small></article>
+              <article><span>小时覆盖 <MetricInfo label="小时覆盖">当前查询实际返回的不同小时数。</MetricInfo></span><strong>{number(hourlyTotals.hourCount)}</strong><small>{text(hourlyAnalysis.timezone)}</small></article>
+              <article><span>有效结果 <MetricInfo label="有效结果">收到明确成功或失败状态的连接数。</MetricInfo></span><strong>{number(hourlyTotals.connectionResultCount)}</strong><small>成功 {number(hourlyTotals.connectionSuccessCount)} · 失败 {number(hourlyTotals.connectionFailedCount)}</small></article>
+              <article><span>成功率 <MetricInfo label="成功率">成功数 ÷ 有效结果数；每个 connection_id 只取最终状态。</MetricInfo></span><strong>{percent(hourlyTotals.connectionSuccessRate)}</strong><small>按最终状态去重</small></article>
+              <article><span>异常起点 <MetricInfo label="异常起点">同时满足前置基线、当前突降和后续确认的首个小时。</MetricInfo></span><strong>{number(hourlyAnalysis.alertCount)}</strong><small>疑似异常，不代表确定封禁</small></article>
             </div>
+            {hourlyChartRows.length > 1 && <div className="surface nested"><div className="surface-title"><div><h3>{selectedNode} 成功率与结果量</h3><p>上下图共用时间轴；轻触或悬停查看小时明细，横向滑动查看完整范围。</p></div><div><Button htmlType="button" disabled={!hourlyAnomalyIndices.length} onClick={() => selectRelativeHourlyAnomaly(-1)}>上一个异常</Button><Button htmlType="button" disabled={!hourlyAnomalyIndices.length} onClick={() => selectRelativeHourlyAnomaly(1)}>下一个异常</Button><span>{number(hourlyChartRows.length)} 小时 · {number(hourlyAnomalyIndices.length)} 个关注点</span></div></div>
+              {selectedHourlyRow && <div className="overall-active-hint" aria-live="polite"><strong>{text(selectedHourlyRow.statHour)}</strong> · 成功率 <strong>{percent(selectedHourlyRow.connectionSuccessRate)}</strong> · 成功 {number(selectedHourlyRow.connectionSuccessCount)} / 结果 {number(selectedHourlyRow.connectionResultCount)} · {selectedHourlyRow.detectedStart ? "疑似异常起点" : selectedHourlyRow.status === "bad" ? "疑似异常" : selectedHourlyRow.status === "warn" ? "需要关注" : selectedHourlyRow.status === "unavailable" ? "样本不足" : "正常"}</div>}
+              <div style={{ overflowX: "auto", overscrollBehaviorX: "contain", touchAction: "pan-x", paddingBottom: 6 }}>
+                <div style={{ width: hourlyChartWidth, minWidth: "100%" }}>
+                  <svg viewBox={`0 0 ${hourlyChartWidth} 100`} role="img" aria-label={`${selectedNode} 小时连接成功率趋势`} style={{ display: "block", width: "100%", height: 170 }}>
+                    {[0, 50, 100].map((rate) => { const y = 10 + (100 - rate) * .8; return <Fragment key={rate}><line x1="24" y1={y} x2={hourlyChartWidth} y2={y} stroke="var(--line, #d8dee8)" strokeDasharray="3 4" vectorEffect="non-scaling-stroke" /><text x="0" y={y + 4} fontSize="9" fill="var(--muted, #64748b)">{rate}%</text></Fragment>; })}
+                    <polyline points={hourlyChartPoints} fill="none" stroke="var(--primary, #2563eb)" strokeWidth="2.5" vectorEffect="non-scaling-stroke" />
+                    {hourlyChartRows.map((row, index) => { const x = 24 + index * hourlyPointWidth; const rate = Math.max(0, Math.min(100, normalizeRate(row.connectionSuccessRate) ?? 0)); const y = 10 + (100 - rate) * .8; const active = selectedHourlyIndex === index; const anomaly = row.detectedStart || row.status === "bad" || row.status === "warn"; return <g key={text(row.rowKey ?? row.statHour)} onPointerEnter={() => setSelectedHourlyIndex(index)} onPointerDown={() => setSelectedHourlyIndex(index)} onClick={() => setSelectedHourlyIndex(index)} style={{ cursor: "pointer" }}><circle cx={x} cy={y} r="18" fill="transparent" /><line x1={x} y1="8" x2={x} y2="94" stroke={active ? "rgba(37, 99, 235, .35)" : "transparent"} strokeDasharray="3 3" /><circle cx={x} cy={y} r={active ? 5 : anomaly ? 4 : 2.5} fill={anomaly ? "#dc2626" : "var(--primary, #2563eb)"} stroke="#fff" strokeWidth="1.5" /></g>; })}
+                  </svg>
+                  <svg viewBox={`0 0 ${hourlyChartWidth} 76`} role="img" aria-label={`${selectedNode} 小时连接结果量`} style={{ display: "block", width: "100%", height: 110 }}>
+                    {hourlyChartRows.map((row, index) => { const x = 24 + index * hourlyPointWidth; const barHeight = Number(row.connectionResultCount ?? 0) / hourlyMaxResults * 48; const active = selectedHourlyIndex === index; const label = String(row.statHour ?? "").slice(5, 13).replace(" ", "\n"); return <g key={text(row.rowKey ?? row.statHour)} onPointerEnter={() => setSelectedHourlyIndex(index)} onPointerDown={() => setSelectedHourlyIndex(index)} onClick={() => setSelectedHourlyIndex(index)} style={{ cursor: "pointer" }}><rect x={x - 15} y={52 - barHeight} width="30" height={barHeight} rx="3" fill={active ? "rgba(37, 99, 235, .48)" : "rgba(37, 99, 235, .18)"} /><rect x={x - 22} y="0" width="44" height="76" fill="transparent" /><text x={x} y="66" textAnchor="middle" fontSize="8" fill="var(--muted, #64748b)">{label}</text></g>; })}
+                    <text x="0" y="12" fontSize="9" fill="var(--muted, #64748b)">结果量</text>
+                  </svg>
+                </div>
+              </div>
+            </div>}
             {hourlyAlerts.length ? <div className="table-wrap"><table className="version-compare-table server-vpn-risk-table"><thead><tr><th>节点</th><th>疑似开始小时</th><th>此前3小时</th><th>当前小时</th><th>后续确认小时</th><th>判断</th></tr></thead><tbody>{hourlyAlerts.map((alert, index) => <tr key={`${text(alert.serverId)}-${text(alert.startHour)}-${index}`} className="row-bad"><td><strong>{text(alert.serverId)}</strong></td><td><strong>{text(alert.startHour)}</strong><small>{text(hourlyAnalysis.timezone)}</small></td><td><strong>{percent(alert.baselineSuccessRate)}</strong><small>{number(alert.baselineResultCount)} 个结果</small></td><td><strong>{percent(alert.currentSuccessRate)}</strong><small>{number(alert.currentResultCount)} 个结果 · 下降 {number(alert.dropPp)}pp</small></td><td><strong>{percent(alert.confirmationSuccessRate)}</strong><small>{number(alert.confirmationResultCount)} 个结果</small></td><td><strong>{text(alert.title)}</strong><small>{text(alert.suggestion)}</small></td></tr>)}</tbody></table></div> : <div className="overall-empty-state">当前范围没有达到“持续小时级突降”阈值的节点。单个低成功率小时不会被直接认定为封禁起点。</div>}
             {hourlyAnalysis.mayBeTruncated && <div className="diagnosis-no-reasons compact warn"><strong>小时明细展示 {number(hourlyRows.length)} / {number(hourlyAnalysis.totalHourlyRows)} 组</strong><p>省略 {number(hourlyAnalysis.omittedRows)} 组；起始点检测仍使用完整范围，CSV为避免导出不完整已禁用。请选择具体节点后重新查询。</p></div>}
+            <div className="surface-title hourly-table-heading"><div><h3>小时明细报表</h3><p>报表优先显示，不依赖上方图表是否生成。</p></div><span>{number(hourlyRows.length)} 条</span></div>
             <div className="table-wrap"><table className="version-compare-table server-vpn-hourly-table"><thead><tr><th>状态</th><th>小时（{text(hourlyAnalysis.timezone)}）</th><th>节点</th><th>连接结果</th><th>成功</th><th>失败</th><th>成功率</th></tr></thead><tbody>{hourlyRows.length ? hourlyRows.map((row) => {
               const hourlyStatus = row.detectedStart ? { label: "疑似起点", className: "bad" } : row.status === "bad" ? { label: "低成功率", className: "bad" } : row.status === "warn" ? { label: "关注", className: "warn" } : row.status === "good" ? { label: "正常", className: "good" } : { label: "样本不足", className: "muted" };
               return <tr key={text(row.rowKey)} className={row.status === "bad" ? "row-bad" : row.status === "warn" ? "row-warn" : ""}><td><span className={`status-chip ${hourlyStatus.className}`}>{hourlyStatus.label}</span></td><td><strong>{text(row.statHour)}</strong></td><td><strong>{text(row.serverId)}</strong></td><td>{number(row.connectionResultCount)}</td><td>{number(row.connectionSuccessCount)}</td><td>{number(row.connectionFailedCount)}</td><td><strong>{percent(row.connectionSuccessRate)}</strong></td></tr>;
             }) : <tr><td colSpan={7}>当前筛选范围没有小时明细</td></tr>}</tbody></table></div>
-            <div className="matrix-footnote">{text(hourlyAnalysis.notice)} 数据源：{text(hourlyAnalysis.source)}。</div>
+            <details className="module-explanation"><summary>小时趋势口径与规则</summary><div>此前连续 {number(hourlyAnalysis.thresholds?.baselineHours)} 小时，每小时至少 {number(hourlyAnalysis.thresholds?.minimumBaselineHourlyResults)} 个有效结果且成功率均 ≥ {percent(hourlyAnalysis.thresholds?.minimumBaselineSuccessRate)}；当前小时至少 {number(hourlyAnalysis.thresholds?.minimumHourlyResults)} 个有效结果、成功率 ≤ {percent(hourlyAnalysis.thresholds?.maximumCurrentSuccessRate)}、下降 ≥ {number(hourlyAnalysis.thresholds?.minimumDropPp)} 个百分点，并由后续低成功率小时确认。每个 connection_id 只取最后一条明确结果，最多查询 {number(hourlyAnalysis.thresholds?.maximumDays)} 天。数据源：{text(hourlyAnalysis.source)}。</div></details>
           </>}
+        {!hourlyReady && <><div className="surface-title hourly-table-heading"><div><h3>小时明细报表</h3><p>报表区域始终保留；数据返回后直接填充，不等待图表。</p></div><span>{hourlyLoading ? "读取中" : "0 条"}</span></div><div className="table-wrap"><table className="version-compare-table server-vpn-hourly-table"><thead><tr><th>状态</th><th>小时（UTC+8）</th><th>节点</th><th>连接结果</th><th>成功</th><th>失败</th><th>成功率</th></tr></thead><tbody><tr><td colSpan={7}>{!selectedNode ? "请先选择节点" : hourlyLoading ? "小时数据读取中，报表将优先显示" : hourlyError ? "小时数据读取失败，暂无可展示明细" : "当前条件没有小时明细"}</td></tr></tbody></table></div></>}
       </section>}
       {showReportData && report.inventoryAvailable === false && <div className="diagnosis-no-reasons compact warn"><strong>节点资料暂不可用</strong><p>连接质量数据仍正常展示；节点库恢复后自动补充名称、地区和资源状态。</p></div>}
-      {showReportData && <div className="table-wrap"><table className="version-compare-table server-vpn-overall-table"><thead><tr><th>状态</th>{activeDimensions.map((dimension) => <th key={dimension}>{serverVpnDimensionLabel(dimension)}</th>)}{SERVER_VPN_METRICS.filter((metric) => visibleMetrics.includes(metric.key)).map((metric) => <th key={metric.key}>{metric.label}</th>)}</tr></thead><tbody>
-        {rows.length ? rows.map((row) => {
-          const status = statusLabels[row.status] ?? statusLabels.unavailable;
-          return <tr key={text(row.rowKey ?? row.dimensionLabel)} className={row.status === "bad" ? "row-bad" : row.status === "warn" ? "row-warn" : ""}>
-            <td><span className={`status-chip ${status.className}`}>{status.label}</span></td>
-            {activeDimensions.map((dimension) => <td key={dimension}>{dimension === "server_id" ? <><strong>{text(row.nodeName ?? row.dimensionValues?.[dimension])}</strong><small>{text(row.dimensionValues?.[dimension])}{row.organization ? ` · ${text(row.organization)}` : ""}</small></> : <strong>{text(row.dimensionValues?.[dimension])}</strong>}</td>)}
-            {SERVER_VPN_METRICS.filter((metric) => visibleMetrics.includes(metric.key)).map((metric) => <td key={metric.key}><strong>{formatMetric(row, metric.key)}</strong></td>)}
-          </tr>;
-        }) : <tr><td colSpan={1 + activeDimensions.length + visibleMetrics.length}>{querying ? "正在读取服务器节点质量…" : "当前配置没有可展示的数据"}</td></tr>}
-      </tbody></table></div>}
-      {showSettledReport && <div className="matrix-footnote">字段来源：{text(report.source)}；口径：{text(report.notice)}{report.queriedAt ? `；查询时间：${text(report.queriedAt)}` : ""}</div>}
+      {showSettledReport && <details className="module-explanation"><summary>主报表数据口径</summary><div>字段来源：{text(report.source)}；{text(report.notice)}{report.queriedAt ? `；查询时间：${text(report.queriedAt)}` : ""}</div></details>}
     </section>
   </div>;
 }
@@ -3784,7 +4076,7 @@ function ServerVpnHourlyOverall({ data, initialDates, appliedConfig, hasQueried,
         <label className="overall-filter-item"><span>节点：</span><select value={draft.serverId ?? ""} onChange={(event) => setFilter("serverId", event.target.value)}><option value="">全部节点</option>{draft.serverId && !nodeOptions.includes(draft.serverId) && <option value={draft.serverId}>{draft.serverId}</option>}{nodeOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
         <label className="overall-filter-item"><span>协议：</span><input value={draft.protocol ?? ""} placeholder="全部协议" onChange={(event) => setFilter("protocol", event.target.value)} /></label>
       </div>
-      <div className="overall-action-row"><div className="overall-view-actions"><span>固定按小时 × 节点聚合；最多查询 7 天</span></div><div className="overall-query-actions"><Button htmlType="button" onClick={exportCsv} disabled={!ready || !rows.length}>导出小时 CSV</Button><Button htmlType="button" onClick={() => { setDraft(defaultConfig()); setVisibleMetrics(SERVER_VPN_HOURLY_METRICS.map((item) => item.key)); }}>重置</Button><Button htmlType="button" className="primary" onClick={() => onQuery({ ...draft, dimensions: ["stat_hour", "server_id"] })} disabled={querying}>⌕ {querying ? "查询中…" : "查询"}</Button></div></div>
+      <div className="overall-action-row"><div className="overall-view-actions"><span>固定按小时 × 节点聚合；最多查询 31 天</span></div><div className="overall-query-actions"><Button htmlType="button" onClick={exportCsv} disabled={!ready || !rows.length}>导出小时 CSV</Button><Button htmlType="button" onClick={() => { setDraft(defaultConfig()); setVisibleMetrics(SERVER_VPN_HOURLY_METRICS.map((item) => item.key)); }}>重置</Button><Button htmlType="button" className="primary" onClick={() => onQuery({ ...draft, dimensions: ["stat_hour", "server_id"] })} disabled={querying}>⌕ {querying ? "查询中…" : "查询"}</Button></div></div>
       <div className="overall-active-hint">待查询：小时 × 节点 · {draft.projectCode} · {draft.dateFrom} → {draft.dateTo}；一次查询返回范围内每个小时、每个节点的完整连接结果。</div>
     </section>
     <section className="surface overall-result-card">
@@ -3995,6 +4287,19 @@ export function OperationalFunnel(props: Props) {
   const [serverVpnAppliedConfig, setServerVpnAppliedConfig] = useState<ServerVpnQueryConfig | null>(null);
   const [serverVpnHasQueried, setServerVpnHasQueried] = useState(false);
   const [serverVpnQueryKey, setServerVpnQueryKey] = useState(0);
+  const [serverVpnQueryMode, setServerVpnQueryMode] = useState<"query" | "refresh">("query");
+  const [serverVpnOptionData, setServerVpnOptionData] = useState<AnyRow | null>(null);
+  const [serverVpnOptionsLoading, setServerVpnOptionsLoading] = useState(false);
+  const [serverVpnOptionsConfig, setServerVpnOptionsConfig] = useState<ServerVpnQueryConfig | null>(null);
+  const [serverVpnInlineHourlyData, setServerVpnInlineHourlyData] = useState<AnyRow | null>(null);
+  const [serverVpnInlineHourlyConfig, setServerVpnInlineHourlyConfig] = useState<ServerVpnHourlySelection | null>(null);
+  const [serverVpnInlineHourlyLoading, setServerVpnInlineHourlyLoading] = useState(false);
+  const [serverVpnInlineHourlyError, setServerVpnInlineHourlyError] = useState("");
+  const [serverVpnRiskData, setServerVpnRiskData] = useState<AnyRow | null>(null);
+  const [serverVpnRiskLoading, setServerVpnRiskLoading] = useState(false);
+  const updateServerVpnOptionsConfig = useCallback((config: ServerVpnQueryConfig) => {
+    setServerVpnOptionsConfig((current) => serverVpnOptionIdentity(current) === serverVpnOptionIdentity(config) ? current : config);
+  }, []);
   const [serverVpnHourlyData, setServerVpnHourlyData] = useState<AnyRow | null>(null);
   const [serverVpnHourlyLoading, setServerVpnHourlyLoading] = useState(false);
   const [serverVpnHourlyError, setServerVpnHourlyError] = useState("");
@@ -4212,6 +4517,87 @@ export function OperationalFunnel(props: Props) {
   }, [props.enabled, scope, props.projectCode, props.appIdentifier, props.range, props.platform, props.country, props.appVersion, props.refreshKey, dates, domain, unit, retryKey, props.softFailure]);
 
   useEffect(() => {
+    if (props.page !== "network_failure_matrix" || vpnReportSection !== "serverVpn" || !props.enabled || !serverVpnData?.serverVpnOverall?.queriedAt || !serverVpnAppliedConfig) return;
+    let active = true;
+    const controller = new AbortController();
+    setServerVpnRiskLoading(true);
+    queryFunnel<AnyRow>({
+      page: "server_vpn_overall",
+      dateFrom: serverVpnAppliedConfig.dateFrom,
+      dateTo: serverVpnAppliedConfig.dateTo,
+      projectCode: serverVpnAppliedConfig.projectCode,
+      country: serverVpnAppliedConfig.country,
+      nodeCountry: serverVpnAppliedConfig.nodeCountry,
+      platform: serverVpnAppliedConfig.platform as "android" | "ios" | undefined,
+      appVersion: serverVpnAppliedConfig.appVersion,
+      networkType: serverVpnAppliedConfig.networkType,
+      serverId: serverVpnAppliedConfig.serverId,
+      protocol: serverVpnAppliedConfig.protocol,
+      domain: "vpn",
+      unit: "sessions",
+      riskOnly: true,
+    }, controller.signal)
+      .then((result) => { if (active) setServerVpnRiskData(result); })
+      .catch(() => { if (active) setServerVpnRiskData(null); })
+      .finally(() => { if (active) setServerVpnRiskLoading(false); });
+    return () => { active = false; controller.abort(); };
+  }, [props.page, vpnReportSection, props.enabled, serverVpnData, serverVpnAppliedConfig]);
+
+  useEffect(() => {
+    if (props.page !== "network_failure_matrix" || vpnReportSection !== "serverVpn" || !props.enabled || !serverVpnInlineHourlyConfig?.serverId) return;
+    let active = true;
+    const controller = new AbortController();
+    setServerVpnInlineHourlyLoading(true);
+    setServerVpnInlineHourlyError("");
+    setServerVpnInlineHourlyData(null);
+    const { config, serverId, mode, focusDate } = serverVpnInlineHourlyConfig;
+    const requestedDate = focusDate && focusDate >= config.dateFrom && focusDate <= config.dateTo ? focusDate : config.dateTo;
+    const requestedStart = mode === "range" ? config.dateFrom : requestedDate;
+    const requestedEnd = mode === "range" ? config.dateTo : requestedDate;
+    queryFunnel<AnyRow>({
+      page: "server_vpn_hourly_overall",
+      dateFrom: requestedStart,
+      dateTo: requestedEnd,
+      projectCode: config.projectCode,
+      dimensions: ["stat_hour", "server_id"],
+      country: config.country,
+      platform: config.platform as "android" | "ios" | undefined,
+      appVersion: config.appVersion,
+      networkType: config.networkType,
+      serverId,
+      protocol: config.protocol,
+      domain: "vpn",
+      unit: "sessions",
+    }, controller.signal)
+      .then((result) => { if (active) setServerVpnInlineHourlyData(result); })
+      .catch((reason) => { if (active) setServerVpnInlineHourlyError(reason instanceof Error ? reason.message : "小时趋势查询失败"); })
+      .finally(() => { if (active) setServerVpnInlineHourlyLoading(false); });
+    return () => { active = false; controller.abort(); };
+  }, [props.page, vpnReportSection, props.enabled, serverVpnInlineHourlyConfig]);
+
+  useEffect(() => {
+    if (props.page !== "network_failure_matrix" || vpnReportSection !== "serverVpn" || !props.enabled || !serverVpnOptionsConfig) return;
+    let active = true;
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      setServerVpnOptionsLoading(true);
+      queryFunnel<AnyRow>({
+        page: "server_vpn_overall",
+        dateFrom: serverVpnOptionsConfig.dateFrom,
+        dateTo: serverVpnOptionsConfig.dateTo,
+        projectCode: serverVpnOptionsConfig.projectCode,
+        domain: "vpn",
+        unit: "sessions",
+        optionsOnly: true,
+      }, controller.signal)
+        .then((result) => { if (active) setServerVpnOptionData(result); })
+        .catch(() => { if (active) setServerVpnOptionData(null); })
+        .finally(() => { if (active) setServerVpnOptionsLoading(false); });
+    }, 250);
+    return () => { active = false; window.clearTimeout(timer); controller.abort(); };
+  }, [props.page, vpnReportSection, props.enabled, serverVpnOptionsConfig]);
+
+  useEffect(() => {
     if (props.page !== "network_failure_matrix" || vpnReportSection !== "serverVpn" || !props.enabled || !serverVpnHasQueried || !serverVpnAppliedConfig) return;
     let active = true;
     const controller = new AbortController();
@@ -4233,13 +4619,13 @@ export function OperationalFunnel(props: Props) {
       protocol: serverVpnAppliedConfig.protocol,
       domain: "vpn",
       unit: "sessions",
-      forceRefresh: serverVpnQueryKey > 0,
+      forceRefresh: serverVpnQueryMode === "refresh",
     }, controller.signal)
       .then((result) => { if (active) setServerVpnData(result); })
       .catch((reason) => { if (active) { setServerVpnData(null); setServerVpnError(reason instanceof Error ? reason.message : "查询失败"); } })
       .finally(() => { if (active) setServerVpnLoading(false); });
     return () => { active = false; controller.abort(); };
-  }, [props.page, vpnReportSection, props.enabled, serverVpnHasQueried, serverVpnAppliedConfig, serverVpnQueryKey]);
+  }, [props.page, vpnReportSection, props.enabled, serverVpnHasQueried, serverVpnAppliedConfig, serverVpnQueryKey, serverVpnQueryMode]);
 
   useEffect(() => {
     if (props.page !== "network_failure_matrix" || vpnReportSection !== "serverVpnHourly" || !props.enabled || !serverVpnHourlyHasQueried || !serverVpnHourlyAppliedConfig) return;
@@ -4489,7 +4875,7 @@ export function OperationalFunnel(props: Props) {
     const visibleServerVpnHourlyData = serverVpnHourlyDataMatches ? serverVpnHourlyData : null;
     return <div className="page-stack">
       {!props.hideReportTabs && <nav className="operational-tabs workbench-tabs"><Button className={vpnReportSection === "matrix" ? "active" : ""} onClick={() => setVpnReportSection("matrix")}>VPN Overall</Button><Button className={vpnReportSection === "serverVpn" ? "active" : ""} onClick={() => setVpnReportSection("serverVpn")}>服务器VPN Overall</Button><Button className={vpnReportSection === "serverVpnHourly" ? "active" : ""} onClick={() => setVpnReportSection("serverVpnHourly")}>服务器V小时overall</Button><Button className={vpnReportSection === "exitIp" ? "active" : ""} onClick={() => setVpnReportSection("exitIp")}>出口IP质量</Button><Button className={vpnReportSection === "adOverall" ? "active" : ""} onClick={() => setVpnReportSection("adOverall")}>广告漏斗Overall</Button><Button className={vpnReportSection === "adDns" ? "active" : ""} onClick={() => setVpnReportSection("adDns")}>广告DNS诊断</Button><Button className={vpnReportSection === "vpnVersions" ? "active" : ""} onClick={() => setVpnReportSection("vpnVersions")}>VPN版本对比</Button><Button className={vpnReportSection === "launcherVersions" ? "active" : ""} onClick={() => setVpnReportSection("launcherVersions")}>Launcher Overall</Button></nav>}
-      {vpnReportSection === "serverVpn" ? <ServerVpnOverall data={visibleServerVpnData ?? { serverVpnOverall: { available: true, rows: [], totals: {}, dimensionOptions: {}, dimensionCoverage: {}, source: "等待查询", notice: "配置后点击查询" } }} initialDates={dates} appliedConfig={serverVpnAppliedConfig} hasQueried={serverVpnHasQueried} querying={serverVpnLoading} queryError={serverVpnError} onQuery={(config) => { setServerVpnData(null); setServerVpnError(""); setServerVpnAppliedConfig(config); setServerVpnHasQueried(true); setServerVpnQueryKey((value) => value + 1); }} onRefresh={() => { if (!serverVpnAppliedConfig) return; setServerVpnData(null); setServerVpnQueryKey((value) => value + 1); }} /> : vpnReportSection === "serverVpnHourly" ? <ServerVpnHourlyOverall data={visibleServerVpnHourlyData ?? { serverVpnHourlyOverall: { available: true, rows: [], alerts: [], totals: {}, source: "等待查询", notice: "配置后点击查询" } }} initialDates={dates} appliedConfig={serverVpnHourlyAppliedConfig} hasQueried={serverVpnHourlyHasQueried} querying={serverVpnHourlyLoading} queryError={serverVpnHourlyError} onQuery={(config) => { setServerVpnHourlyData(null); setServerVpnHourlyError(""); setServerVpnHourlyQueryMode("query"); setServerVpnHourlyAppliedConfig(config); setServerVpnHourlyHasQueried(true); setServerVpnHourlyQueryKey((value) => value + 1); }} onRefresh={() => { if (!serverVpnHourlyAppliedConfig) return; setServerVpnHourlyData(null); setServerVpnHourlyQueryMode("refresh"); setServerVpnHourlyQueryKey((value) => value + 1); }} /> : vpnReportSection === "vpnVersions" || vpnReportSection === "launcherVersions" ? <VersionComparison key={`${vpnReportSection}-${props.appVersion}`} data={{}} domain="vpn" versionProduct={vpnReportSection === "launcherVersions" ? "launcher" : "vpn"} projectCode={props.projectCode} appIdentifier={props.appIdentifier} platform={props.platform} country={props.country} appVersion={props.appVersion} initialRange={props.range} refreshKey={props.refreshKey + matrixQueryKey} projectOptions={props.projectOptions} countryOptions={props.countryOptions} onProjectSelect={props.onProjectSelect} onRangeChange={props.onRangeChange} onCountryChange={props.onCountryChange} onPlatformChange={props.onPlatformChange} /> : vpnReportSection === "exitIp" ? <ExitIpQualityReport data={loadingExitIpData} detailData={exitIpDetailData} dates={dates} projectCode={props.projectCode} platform={props.platform} country={props.country} appVersion={props.appVersion} projectOptions={props.projectOptions} countryOptions={props.countryOptions} appVersionOptions={props.appVersionOptions} queried={exitIpHasQueried} activeFilters={exitIpFilters} querying={exitIpLoading} detailLoading={exitIpDetailLoading} queryError={exitIpError} detailError={exitIpDetailError} selectedIpRow={selectedIpRow} onSelectIp={setSelectedIpRow} onQuery={(filters) => { setExitIpFilters(filters); setExitIpHasQueried(true); setSelectedIpRow(null); setExitIpQueryKey((value) => value + 1); }} onProjectSelect={(value) => { setExitIpHasQueried(false); props.onProjectSelect?.(value); }} onRangeChange={(value) => { setExitIpHasQueried(false); props.onRangeChange?.(value); }} onCountryChange={(value) => { setExitIpHasQueried(false); props.onCountryChange?.(value); }} onAppVersionChange={(value) => { setExitIpHasQueried(false); props.onAppVersionChange?.(value); }} onPlatformChange={(value) => { setExitIpHasQueried(false); props.onPlatformChange?.(value); }} /> : vpnReportSection === "adDns" ? <AdDnsReport data={loadingAdDnsData} dimensions={adDnsDimensions} dates={dates} projectCode={props.projectCode} platform={props.platform} country={props.country} appVersion={props.appVersion} projectOptions={props.projectOptions} countryOptions={props.countryOptions} appVersionOptions={props.appVersionOptions} querying={adDnsLoading} queryError={adDnsError} onQuery={(nextDimensions) => { setAdDnsDimensions(nextDimensions); setAdDnsQueryKey((value) => value + 1); }} onProjectSelect={props.onProjectSelect} onRangeChange={props.onRangeChange} onCountryChange={props.onCountryChange} onAppVersionChange={props.onAppVersionChange} onPlatformChange={props.onPlatformChange} /> : vpnReportSection === "adOverall" ? <AdOverallReport data={loadingAdOverallData} dimensions={adOverallDimensions} dates={dates} projectCode={props.projectCode} platform={props.platform} country={props.country} appVersion={props.appVersion} projectOptions={props.projectOptions} countryOptions={props.countryOptions} appVersionOptions={props.appVersionOptions} querying={adOverallLoading} queryError={adOverallError} onQuery={(nextDimensions) => { setAdOverallDimensions(nextDimensions); setAdOverallQueryKey((value) => value + 1); }} onProjectSelect={props.onProjectSelect} onRangeChange={props.onRangeChange} onCountryChange={props.onCountryChange} onAppVersionChange={props.onAppVersionChange} onPlatformChange={props.onPlatformChange} /> : <AdNetworkFailureMatrix data={loadingMatrixData} dimensions={matrixDimensions} dates={dates} projectCode={props.projectCode} platform={props.platform} country={props.country} appVersion={props.appVersion} projectOptions={props.projectOptions} countryOptions={props.countryOptions} appVersionOptions={props.appVersionOptions} querying={matrixLoading} queryError={matrixError} onQuery={(nextDimensions) => { setMatrixDimensions(nextDimensions); setMatrixQueryKey((value) => value + 1); }} onProjectSelect={props.onProjectSelect} onRangeChange={props.onRangeChange} onCountryChange={props.onCountryChange} onAppVersionChange={props.onAppVersionChange} onPlatformChange={props.onPlatformChange} />}
+      {vpnReportSection === "serverVpn" ? <ServerVpnOverall data={visibleServerVpnData ?? { serverVpnOverall: { available: true, rows: [], totals: {}, dimensionCoverage: {}, source: "等待查询", notice: "配置后点击查询" } }} optionData={serverVpnOptionData} optionsLoading={serverVpnOptionsLoading} riskData={serverVpnRiskData} riskLoading={serverVpnRiskLoading} hourlyData={serverVpnInlineHourlyData} hourlyLoading={serverVpnInlineHourlyLoading} hourlyError={serverVpnInlineHourlyError} initialDates={dates} appliedConfig={serverVpnAppliedConfig} hasQueried={serverVpnHasQueried} querying={serverVpnLoading} queryError={serverVpnError} onOptionsConfigChange={updateServerVpnOptionsConfig} onSelectNode={setServerVpnInlineHourlyConfig} onQuery={(config) => { setServerVpnData(null); setServerVpnRiskData(null); setServerVpnInlineHourlyData(null); setServerVpnInlineHourlyConfig(null); setServerVpnError(""); setServerVpnQueryMode("query"); setServerVpnAppliedConfig(config); setServerVpnHasQueried(true); setServerVpnQueryKey((value) => value + 1); }} onRefresh={() => { if (!serverVpnAppliedConfig) return; setServerVpnData(null); setServerVpnRiskData(null); setServerVpnQueryMode("refresh"); setServerVpnQueryKey((value) => value + 1); }} /> : vpnReportSection === "serverVpnHourly" ? <ServerVpnHourlyOverall data={visibleServerVpnHourlyData ?? { serverVpnHourlyOverall: { available: true, rows: [], alerts: [], totals: {}, source: "等待查询", notice: "配置后点击查询" } }} initialDates={dates} appliedConfig={serverVpnHourlyAppliedConfig} hasQueried={serverVpnHourlyHasQueried} querying={serverVpnHourlyLoading} queryError={serverVpnHourlyError} onQuery={(config) => { setServerVpnHourlyData(null); setServerVpnHourlyError(""); setServerVpnHourlyQueryMode("query"); setServerVpnHourlyAppliedConfig(config); setServerVpnHourlyHasQueried(true); setServerVpnHourlyQueryKey((value) => value + 1); }} onRefresh={() => { if (!serverVpnHourlyAppliedConfig) return; setServerVpnHourlyData(null); setServerVpnHourlyQueryMode("refresh"); setServerVpnHourlyQueryKey((value) => value + 1); }} /> : vpnReportSection === "vpnVersions" || vpnReportSection === "launcherVersions" ? <VersionComparison key={`${vpnReportSection}-${props.appVersion}`} data={{}} domain="vpn" versionProduct={vpnReportSection === "launcherVersions" ? "launcher" : "vpn"} projectCode={props.projectCode} appIdentifier={props.appIdentifier} platform={props.platform} country={props.country} appVersion={props.appVersion} initialRange={props.range} refreshKey={props.refreshKey + matrixQueryKey} projectOptions={props.projectOptions} countryOptions={props.countryOptions} onProjectSelect={props.onProjectSelect} onRangeChange={props.onRangeChange} onCountryChange={props.onCountryChange} onPlatformChange={props.onPlatformChange} /> : vpnReportSection === "exitIp" ? <ExitIpQualityReport data={loadingExitIpData} detailData={exitIpDetailData} dates={dates} projectCode={props.projectCode} platform={props.platform} country={props.country} appVersion={props.appVersion} projectOptions={props.projectOptions} countryOptions={props.countryOptions} appVersionOptions={props.appVersionOptions} queried={exitIpHasQueried} activeFilters={exitIpFilters} querying={exitIpLoading} detailLoading={exitIpDetailLoading} queryError={exitIpError} detailError={exitIpDetailError} selectedIpRow={selectedIpRow} onSelectIp={setSelectedIpRow} onQuery={(filters) => { setExitIpFilters(filters); setExitIpHasQueried(true); setSelectedIpRow(null); setExitIpQueryKey((value) => value + 1); }} onProjectSelect={(value) => { setExitIpHasQueried(false); props.onProjectSelect?.(value); }} onRangeChange={(value) => { setExitIpHasQueried(false); props.onRangeChange?.(value); }} onCountryChange={(value) => { setExitIpHasQueried(false); props.onCountryChange?.(value); }} onAppVersionChange={(value) => { setExitIpHasQueried(false); props.onAppVersionChange?.(value); }} onPlatformChange={(value) => { setExitIpHasQueried(false); props.onPlatformChange?.(value); }} /> : vpnReportSection === "adDns" ? <AdDnsReport data={loadingAdDnsData} dimensions={adDnsDimensions} dates={dates} projectCode={props.projectCode} platform={props.platform} country={props.country} appVersion={props.appVersion} projectOptions={props.projectOptions} countryOptions={props.countryOptions} appVersionOptions={props.appVersionOptions} querying={adDnsLoading} queryError={adDnsError} onQuery={(nextDimensions) => { setAdDnsDimensions(nextDimensions); setAdDnsQueryKey((value) => value + 1); }} onProjectSelect={props.onProjectSelect} onRangeChange={props.onRangeChange} onCountryChange={props.onCountryChange} onAppVersionChange={props.onAppVersionChange} onPlatformChange={props.onPlatformChange} /> : vpnReportSection === "adOverall" ? <AdOverallReport data={loadingAdOverallData} dimensions={adOverallDimensions} dates={dates} projectCode={props.projectCode} platform={props.platform} country={props.country} appVersion={props.appVersion} projectOptions={props.projectOptions} countryOptions={props.countryOptions} appVersionOptions={props.appVersionOptions} querying={adOverallLoading} queryError={adOverallError} onQuery={(nextDimensions) => { setAdOverallDimensions(nextDimensions); setAdOverallQueryKey((value) => value + 1); }} onProjectSelect={props.onProjectSelect} onRangeChange={props.onRangeChange} onCountryChange={props.onCountryChange} onAppVersionChange={props.onAppVersionChange} onPlatformChange={props.onPlatformChange} /> : <AdNetworkFailureMatrix data={loadingMatrixData} dimensions={matrixDimensions} dates={dates} projectCode={props.projectCode} platform={props.platform} country={props.country} appVersion={props.appVersion} projectOptions={props.projectOptions} countryOptions={props.countryOptions} appVersionOptions={props.appVersionOptions} querying={matrixLoading} queryError={matrixError} onQuery={(nextDimensions) => { setMatrixDimensions(nextDimensions); setMatrixQueryKey((value) => value + 1); }} onProjectSelect={props.onProjectSelect} onRangeChange={props.onRangeChange} onCountryChange={props.onCountryChange} onAppVersionChange={props.onAppVersionChange} onPlatformChange={props.onPlatformChange} />}
     </div>;
   }
 
