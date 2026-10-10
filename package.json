@@ -9,7 +9,7 @@
     "dev": "vite --host 127.0.0.1 --port 3020",
     "build": "vite build",
     "start": "node scripts/vite-preview.mjs",
-    "test": "npm run build && node --test tests/rendered-html.test.mjs tests/login-diagnostics.test.mjs",
+    "test": "npm run build && node --experimental-strip-types --test tests/rendered-html.test.mjs tests/login-diagnostics.test.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate"
   },
@@ -17,6 +17,7 @@
     "@ant-design/icons": "^6.3.4",
     "antd": "^6.6.3",
     "drizzle-orm": "0.45.2",
+    "mysql2": "^3.24.5",
     "react": "19.2.6",
     "react-dom": "19.2.6"
   },

@@ -1,5 +1,6 @@
 import react from "@vitejs/plugin-react";
 import { defineConfig, loadEnv } from "vite";
+import { localVpnNodeScanPlugin } from "./scripts/local-vpn-node-scan.mjs";
 
 // macOS Seatbelt blocks FSEvents, so Codex previews need polling for HMR.
 const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
@@ -9,7 +10,7 @@ export default defineConfig(({ mode }) => {
   const oaBaseUrl = (env.VITE_OA_API_BASE_URL || env.NEXT_PUBLIC_OA_API_BASE_URL || "https://oa.geekforest.ai").replace(/\/$/, "");
 
   return {
-    plugins: [react()],
+    plugins: [react(), localVpnNodeScanPlugin(env)],
     server: {
       host: "127.0.0.1",
       port: 3020,

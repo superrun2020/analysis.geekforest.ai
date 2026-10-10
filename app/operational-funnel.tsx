@@ -6,6 +6,7 @@ import type { ReactNode } from "react";
 import { getCompanyAuthToken } from "./company-auth";
 import { trackingApiBaseUrl } from "./api-base-url";
 import { queryFunnel, type FunnelPageKey, type FunnelQuery, type FunnelQueryPackageItem } from "./funnel-analysis-api";
+import { mergeLocalVpnHourlyRows, mergeLocalVpnRows } from "./local-vpn-node-scan";
 
 type VpnReportSectionKey = "matrix" | "serverVpn" | "serverVpnHourly" | "exitIp" | "adOverall" | "adDns" | "vpnVersions" | "launcherVersions";
 
@@ -286,8 +287,8 @@ function stepCondition(row: AnyRow) {
   if (name.includes("vpn_connection_start") || name.includes("连接开始") || name.includes("连接尝试")) return "connection_id 非空；一次底层连接尝试";
   if (name.includes("vpn_connection_result") && (name.includes("连接成功") || name.includes("success"))) return "vpn_status = success";
   if (name.includes("vpn_connection_result") && (name.includes("连接失败") || name.includes("failed"))) return "vpn_status = failed/prohibited";
-  if (name.includes("vpn_permission") && (name.includes("授权") || name.includes("通过") || name.includes("granted"))) return "permission_status = granted";
-  if (name.includes("vpn_permission")) return "permission_status = granted/denied/error";
+  if (name.includes("vpn_permission") && (name.includes("授权") || name.includes("通过") || name.includes("可用") || name.includes("granted"))) return "permission_status in (granted, already_granted, not_required)";
+  if (name.includes("vpn_permission")) return "permission_status = granted/already_granted/not_required/denied/error";
   if (name.includes("ad_opportunity") || name.includes("广告机会")) return "opportunity_id 非空";
   if (name.includes("ad_request") || name.includes("广告请求")) return "request_id 非空";
   if (name.includes("ad_show_attempt") || name.includes("展示尝试")) return "ad_instance_id/opportunity_id 可关联";
@@ -765,10 +766,16 @@ function QueryProgressPanel({ items, compact = false }: { items: QueryProgressIt
   const doneCount = items.filter((item) => item.status === "done").length;
   const failedCount = items.filter((item) => item.status === "error").length;
   const loading = items.find((item) => item.status === "loading" || item.status === "retrying");
-  return <section className={`query-progress-panel ${compact ? "compact" : ""}`}>
+  const complete = doneCount + failedCount >= items.length;
+  const content = <>
     <div className="query-progress-title"><div><strong>查询进度</strong><small>{loading ? `${loading.status === "retrying" ? "自动重拉" : "正在查询"}：${loading.label}` : doneCount === items.length ? "全部数据查询完成" : "等待后台补齐剩余数据"}</small></div><span>{doneCount}/{items.length} 完成{failedCount ? ` · ${failedCount} 失败` : ""}</span></div>
     <div className="query-progress-list">{items.map((item) => <div key={item.key} className={item.status}><i>{item.status === "done" ? "✓" : item.status === "error" ? "!" : item.status === "loading" || item.status === "retrying" ? "…" : "○"}</i><span>{item.label}</span><small>{item.status === "done" ? `${item.finishedAt || "刚刚"} 完成` : item.status === "error" ? item.error || "查询失败" : item.status === "retrying" ? `自动重拉中，第 ${item.attempt || 2}/${item.maxAttempts || 3} 次` : item.status === "loading" ? `查询中，第 ${item.attempt || 1}/${item.maxAttempts || 3} 次` : "待查询"}</small><strong>{item.dataCountLabel || "数据量待返回"}</strong><em>{item.dateLabel || "日期待返回"}</em></div>)}</div>
-  </section>;
+  </>;
+  if (!complete || compact) return <section className={`query-progress-panel ${compact ? "compact" : ""}`}>{content}</section>;
+  return <details className="query-progress-panel query-progress-collapsed">
+    <summary><span>✓ 数据加载完成</span><small>{doneCount}/{items.length} 个数据包 · 查看加载详情</small></summary>
+    {content}
+  </details>;
 }
 
 function MetricCard({ label, value, note, status }: { label: string; value: string; note?: string; status?: string }) {
@@ -796,8 +803,327 @@ function funnelUnitHint(unit: FunnelUnit = "users", domain = "ads") {
   return "按 my_user_id / user_pseudo_id 去重统计；这是独立用户 UV，不是事件次数。";
 }
 
+type VpnVisualNode = {
+  key: string;
+  label: string;
+  description: string;
+  status: "official" | "unavailable" | "needs_review" | "provisional";
+  statusLabel: string;
+  detail: string;
+  row: AnyRow;
+  sourceIndex: number;
+  expandItems: Array<{ label: string; value: string; available: boolean; source: string }>;
+};
+
+function vpnVisualFunnelNodes(rows: AnyRow[], data: AnyRow | null): VpnVisualNode[] {
+  const lifecycleSources = data?.vpnLifecycleSources ?? {};
+  const dwdLifecycle: AnyRow = lifecycleSources.dwd ?? {};
+  const dwsLifecycle: AnyRow = lifecycleSources.dws ?? {};
+  const sequentialLifecycle: AnyRow = lifecycleSources.sequential ?? {};
+  const used = new Set<number>();
+  const find = (patterns: RegExp[], exclude: RegExp[] = []) => {
+    const index = rows.findIndex((row, rowIndex) => !used.has(rowIndex) && patterns.some((pattern) => pattern.test(rowText(row))) && !exclude.some((pattern) => pattern.test(rowText(row))));
+    if (index >= 0) used.add(index);
+    return index;
+  };
+  const successIndex = find([/vpn_connection_result.*success|连接成功/]);
+  const impressionIndex = find([/ad_impression|\bimpression\b|有效曝光|广告曝光/]);
+  const paidIndex = find([/ad_paid|paid_event|\bpaid\b|付费回调|广告收入/]);
+  const indexes: Record<string, number> = {
+    dau: find([/app_foreground|\bdau\b|日活跃|活跃用户/]),
+    vpn_home: find([/home_entry|进入.*首页|core_action.*vpn_home|vpn首页/]),
+    connect_intent: find([/vpn.*button|connect.*button|连接按钮|按钮点击|element_click.*(vpn|connect)/]),
+    permission_available: find([/vpn_permission|permission.*granted|权限.*(通过|授权|可用)/]),
+    node_ready: find([/vpn_node_selected|节点选择|节点准备/]),
+    connection_start: find([/vpn_connection_start|连接开始|连接尝试/]),
+    connection_result: find([/收到.*结果|连接结果|vpn_connection_result|connection_result/], [/success|成功/]),
+    connection_success: successIndex,
+    post_connect_ad_opportunity: find([/连接后.*广告机会|post.*connect.*opportunity|ad_opportunity|广告机会/]),
+    ad_show: find([/连接后.*广告展示|ad_show_attempt|展示尝试|广告展示/], [/impression|paid|收入/]),
+    ad_impression: impressionIndex,
+    ad_paid: paidIndex,
+  };
+  const metricRows: AnyRow[] = data?.metrics ?? [];
+  const fallbackKeys: Record<string, string[]> = {
+    dau: ["dauUsers", "activeUsers", "foregroundUsers"],
+    vpn_home: ["vpnHomeUsers", "homeEntryUsers", "homeUsers"],
+    connect_intent: ["vpnConnectButtonClickUsers", "connectButtonClickUsers", "vpnButtonClickUsers"],
+    permission_available: ["vpnPermissionAvailableUsers", "vpnPermissionGrantedUsers", "permissionAvailableUsers"],
+    node_ready: ["vpnNodeSelectedUsers", "nodeSelectedUsers"],
+    connection_start: ["vpnConnectionStartUsers", "connectionStartUsers", "connectAttemptUsers"],
+    connection_result: ["vpnConnectionResultUsers", "connectionResultUsers", "resultUsers"],
+    connection_success: ["vpnConnectionSuccessUsers", "connectionSuccessUsers", "connectSuccessUsers"],
+    post_connect_ad_opportunity: ["postConnectOpportunityUsers", "opportunityUsers", "adOpportunityUsers"],
+    ad_show: ["postConnectShowUsers", "showAttemptUsers", "adShowAttemptUsers"],
+    ad_impression: ["impressionUsers", "avUsers", "adViewerUsers"],
+    ad_paid: ["paidUsers", "adPaidUsers", "revenueUsers"],
+  };
+  const dwdMainKeys: Record<string, string[]> = {
+    dau: ["dauUsers"],
+    vpn_home: ["vpnHomeUsers"],
+    connect_intent: ["vpnConnectButtonClickUsers"],
+    permission_available: ["vpnPermissionAvailableUsers"],
+    node_ready: ["vpnNodeSelectedUsers"],
+    connection_start: ["vpnConnectionStartUsers"],
+    connection_result: ["vpnConnectionResultUsers"],
+    connection_success: ["vpnConnectionSuccessUsers"],
+    post_connect_ad_opportunity: ["postConnectOpportunityUsers"],
+    ad_show: ["postConnectShowUsers"],
+    ad_impression: ["impressionUsers"],
+    ad_paid: ["paidUsers"],
+  };
+  const sequentialMainKeys: Record<string, string[]> = {
+    dau: ["dauUsers"],
+    vpn_home: ["vpnHomeUsers"],
+    connect_intent: ["connectIntentUsers"],
+    permission_available: ["permissionAvailableUsers"],
+    node_ready: ["nodeReadyUsers"],
+    connection_start: ["connectionStartUsers"],
+    connection_result: ["connectionResultUsers"],
+    connection_success: ["connectionSuccessUsers"],
+    post_connect_ad_opportunity: ["postConnectOpportunityUsers"],
+    ad_show: ["adShowUsers"],
+    ad_impression: ["impressionUsers"],
+    ad_paid: ["paidUsers"],
+  };
+  const buildRow = (key: string) => {
+    const sequentialCount = numericValue(sequentialLifecycle, sequentialMainKeys[key] ?? []);
+    if (sequentialCount !== null) return {
+      sourceIndex: -1,
+      row: {
+        name: key,
+        count: sequentialCount,
+        users: sequentialCount,
+        value: sequentialCount,
+        available: true,
+        sourceType: "DWD",
+        synthetic: false,
+        conditionText: key === "connect_intent"
+          ? "代理口径：VPN首页用户中出现 core_action.vpn_connect 的用户；不等同于真实按钮点击。"
+          : "现有事件代理漏斗：同一查询区间内按用户集合逐层收窄。",
+      },
+    };
+    if (key === "connect_intent") return {
+      sourceIndex: -1,
+      row: { name: key, count: null, users: null, value: null, available: false, sourceType: "DWD", synthetic: false, conditionText: "真实按钮事件与代理数据均未返回。" },
+    };
+    const dwdCount = numericValue(dwdLifecycle, dwdMainKeys[key] ?? []);
+    const dwdAvailable = dwdCount !== null;
+    if (dwdAvailable && dwdCount !== null) return {
+      sourceIndex: -1,
+      row: { name: key, count: dwdCount, users: dwdCount, value: dwdCount, available: true, sourceType: "DWD", synthetic: false },
+    };
+    const sourceIndex = indexes[key];
+    if (sourceIndex >= 0) return { row: { ...rows[sourceIndex], sourceType: rows[sourceIndex].sourceType ?? "DWS" }, sourceIndex };
+    const count = numericValue(data?.summary ?? {}, fallbackKeys[key] ?? [])
+      ?? valueFromMetrics(data ?? {}, metricRows, fallbackKeys[key] ?? []);
+    return {
+      sourceIndex: -1,
+      row: {
+        name: key,
+        count,
+        users: count,
+        value: count,
+        available: count !== null,
+        sourceType: count !== null ? "DWS" : undefined,
+        synthetic: true,
+        conditionText: "当前汇总未返回独立节点；保留漏斗位置，不以 0 代替未知。",
+      },
+    };
+  };
+  const specs = [
+    ["dau", "日活用户 DAU", "进入 App 的活跃用户", "official", "正式指标", "查看当前活跃用户和统计范围。"],
+    ["vpn_home", "进入 VPN 首页", "到达 VPN 主页面", "official", "正式指标", "查看首页到达人数及辅助覆盖信号。"],
+    ["connect_intent", "产生连接意图", "发生 VPN 连接动作", "needs_review", "代理指标", "使用 core_action.vpn_connect 作为现有数据代理；有具体数字，但不等同于真实按钮点击。"],
+    ["permission_available", "VPN 权限可用", "连接所需权限已经具备", "official", "现有字段", "在上一层用户集合中，统计出现 granted、already_granted 或 not_required 的用户。"],
+    ["node_ready", "节点准备完成", "已经获得可用于连接的节点", "official", "现有字段", "在上一层用户集合中，统计出现有效 server_id 的用户。"],
+    ["connection_start", "连接开始", "已经真实发起连接", "official", "正式指标", "主人数按用户去重；会话数和连接尝试数放在展开项中辅助判断重试。"],
+    ["connection_result", "收到连接结果", "连接尝试产生明确终态", "official", "正式指标", "重点观察连接开始后是否返回结果；未返回属于本阶段直接流失。"],
+    ["connection_success", "VPN 连接成功", "最终连接成功的用户", "official", "正式指标", "重点观察收到结果后最终成功的人数、成功率和连接耗时。"],
+    ["post_connect_ad_opportunity", "连接后广告机会", "成功后进入广告场景", "official", "现有字段关联", "在成功用户集合中，统计成功时间之后出现广告机会的用户。"],
+    ["ad_show", "广告展示", "广告已经进入展示执行", "official", "现有字段关联", "在广告机会用户集合中，统计后续出现展示尝试的用户。"],
+    ["ad_impression", "Impression", "收到有效广告曝光回调", "official", "现有字段关联", "在展示用户集合中，统计后续出现有效曝光的用户。"],
+    ["ad_paid", "Paid", "收到广告付费回调", "official", "现有字段关联", "在曝光用户集合中，统计后续出现 Paid 回调的用户。"],
+  ] as const;
+  const metricValue = (keys: string[], format: "number" | "ratio" | "ms" | "money" = "number", fallback: number | null = null, preferredSource: "DWD" | "DWS" = "DWD") => {
+    const preferred = preferredSource === "DWD" ? dwdLifecycle : dwsLifecycle;
+    const secondary = preferredSource === "DWD" ? dwsLifecycle : dwdLifecycle;
+    const preferredValue = numericValue(preferred, keys);
+    const secondaryValue = numericValue(secondary, keys);
+    const value = preferredValue ?? secondaryValue ?? numericValue(data?.summary ?? {}, keys) ?? numericValue(data ?? {}, keys) ?? valueFromMetrics(data ?? {}, metricRows, keys) ?? fallback;
+    const source = preferredValue !== null ? preferredSource : secondaryValue !== null ? (preferredSource === "DWD" ? "DWS" : "DWD") : "接口";
+    if (value === null || value === undefined || !Number.isFinite(Number(value))) return { value: "不可计算", available: false, source: preferredSource };
+    if (format === "ratio") return { value: percent(Number(value)), available: true, source };
+    if (format === "ms") return { value: `${number(Number(value))} ms`, available: true, source };
+    if (format === "money") return { value: `USD ${number(Number(value))}`, available: true, source };
+    return { value: number(Number(value)), available: true, source };
+  };
+  const expandDefinitions: Record<string, Array<[string, string[], ("number" | "ratio" | "ms" | "money")?, ("DWD" | "DWS")?]>> = {
+    dau: [["当前活跃用户", ["dauUsers", "activeUsers", "foregroundUsers"]], ["前台事件", ["foregroundEventCount"]]],
+    vpn_home: [["进入首页用户", ["vpnHomeUsers", "officialVpnHomeUsers"]], ["页面访问次数", ["vpnHomeEventCount"]], ["首页用户覆盖率", ["vpnHomeCoverageRate", "homeEntryCoverageRate"], "ratio"]],
+    connect_intent: [["连接按钮曝光", ["vpnConnectButtonExposureUsers", "connectButtonExposureUsers"]], ["真实按钮点击", ["vpnConnectButtonClickUsers", "connectButtonClickUsers"]], ["core_action 参考", ["vpnCoreConnectActionUsers"]], ["按钮可用用户", ["vpnConnectButtonAvailableUsers", "connectButtonAvailableUsers"]], ["自动连接触发", ["vpnAutoConnectUsers", "autoConnectUsers"]]],
+    permission_available: [["granted", ["vpnPermissionGrantedUsers", "permissionGrantedUsers"]], ["already_granted", ["vpnPermissionAlreadyGrantedUsers", "permissionAlreadyGrantedUsers"]], ["not_required", ["vpnPermissionNotRequiredUsers", "permissionNotRequiredUsers"]], ["denied", ["vpnPermissionDeniedUsers", "permissionDeniedUsers"]], ["权限事件", ["vpnPermissionAttemptCount", "vpnPermissionEventCount"], "number", "DWS"]],
+    node_ready: [["手动选择", ["vpnNodeManualSelectedUsers", "nodeManualSelectedUsers"]], ["自动选择", ["vpnNodeAutoSelectedUsers", "nodeAutoSelectedUsers"]], ["回退选择", ["vpnNodeFallbackSelectedUsers", "nodeFallbackSelectedUsers"]], ["有效节点", ["vpnValidNodeSelectedUsers", "validNodeSelectedUsers"]], ["节点选择次数", ["vpnNodeSelectionCount"], "number", "DWS"]],
+    connection_start: [["连接用户数", ["vpnConnectionStartUsers", "connectionStartUsers"]], ["VPN 会话数", ["vpnSessionCount", "vpnSessions"]], ["连接尝试次数", ["connectionAttemptCount", "vpnConnectionCount"], "number", "DWS"], ["自动重连用户", ["autoReconnectUsers", "vpnAutoReconnectUsers"]]],
+    connection_result: [["结果次数", ["connectionResultCount"], "number", "DWS"], ["success 用户", ["connectionSuccessUsers", "vpnConnectionSuccessUsers"]], ["failed 用户", ["connectionFailedUsers", "vpnConnectionFailedUsers"]], ["timeout 用户", ["connectionTimeoutUsers", "vpnConnectionTimeoutUsers"]], ["cancelled 用户", ["connectionCancelledUsers", "vpnConnectionCancelledUsers"]]],
+    connection_success: [["成功会话", ["vpnSuccessSessionCount"]], ["成功连接次数", ["connectionSuccessCount"], "number", "DWS"], ["连接耗时 P95", ["connectionDurationP95Ms", "vpnConnectionP95Ms"], "ms", "DWS"]],
+    post_connect_ad_opportunity: [["广告机会用户", ["postConnectOpportunityUsers", "opportunityUsers"]], ["广告机会次数", ["postConnectOpportunityCount", "opportunityCount"], "number", "DWS"]],
+    ad_show: [["展示尝试", ["postConnectShowCount"]], ["SDK 展示成功", ["adShowSuccessCount"]], ["展示失败", ["adShowFailedCount"]], ["缓存命中", ["cacheHitCount"]], ["缓存未命中", ["cacheMissCount"]], ["请求", ["adRequestCount"]], ["加载成功", ["adLoadSuccessCount"]], ["加载失败", ["adLoadFailedCount"]]],
+    ad_impression: [["Impression 用户数", ["impressionUsers", "avUsers"]], ["Impression 次数", ["postConnectImpressionCount", "impressionCount", "adImpressionCount"], "number", "DWS"], ["广告源/格式覆盖率", ["impressionSourceFormatCoverageRate", "adSourceCoverageRate"], "ratio"], ["response_id 覆盖率", ["responseIdCoverageRate", "impressionResponseCoverageRate"], "ratio"], ["页面可见性覆盖率", ["pageVisibilityCoverageRate"], "ratio"]],
+    ad_paid: [["Paid 用户数", ["paidUsers", "adPaidUsers"]], ["Paid 事件次数", ["paidEventCount", "adPaidCount"]], ["收入", ["revenue", "adRevenue"], "money"], ["eCPM", ["ecpm", "adEcpm"], "money"], ["Paid 回调覆盖率", ["paidCallbackCoverageRate", "paidCoverageRate"], "ratio"], ["广告实例字段覆盖率", ["adInstanceAssociationRate", "paidInstanceLinkRate"], "ratio"]],
+  };
+  return specs.map(([key, label, description, status, statusLabel, detail]) => {
+    const resolved = buildRow(key);
+    const definitions = expandDefinitions[key] ?? [];
+    const expandItems = definitions.map(([itemLabel, keys, format, preferredSource]) => ({ label: itemLabel, ...metricValue(keys, format, null, preferredSource) }));
+    if (key === "dau" && expandItems[0]?.available === false && resolved.row.available !== false) expandItems[0] = { label: "当前活跃用户", value: number(rowCount(resolved.row)), available: true, source: String(resolved.row.sourceType ?? "DWD") };
+    return { key, label, description, status, statusLabel, detail, expandItems, ...resolved };
+  });
+}
+
+function VpnLifecycleFunnel({ rows, data }: { rows: AnyRow[]; data: AnyRow | null }) {
+  const nodes = vpnVisualFunnelNodes(rows, data);
+  const dwsLifecycle: AnyRow = data?.vpnLifecycleSources?.dws ?? {};
+  const dwsNodeSpecs: Record<string, { keys: string[]; label: string }> = {
+    permission_available: { keys: ["vpnPermissionSuccessCount"], label: "成功事件" },
+    node_ready: { keys: ["vpnValidNodeSelectionCount"], label: "有效选择" },
+    connection_start: { keys: ["connectionAttemptCount"], label: "连接尝试" },
+    connection_result: { keys: ["connectionResultCount"], label: "结果数" },
+    connection_success: { keys: ["connectionSuccessCount"], label: "成功次数" },
+    post_connect_ad_opportunity: { keys: ["postConnectOpportunityCount"], label: "机会次数" },
+    ad_impression: { keys: ["postConnectImpressionCount"], label: "曝光次数" },
+  };
+  const max = Math.max(1, ...nodes.filter((node) => node.row.available !== false).map((node) => rowCount(node.row)));
+  const renderNode = (node: VpnVisualNode, index: number) => {
+    const value = rowCount(node.row);
+    const available = node.row.available !== false;
+    const previous = index > 0 ? nodes[index - 1] : null;
+    const previousValue = previous && previous.row.available !== false ? rowCount(previous.row) : null;
+    const transitionState: "official" | "unavailable" | "needs_review" | "provisional" = index === 0 || node.key === "connection_start"
+      ? "official"
+      : node.status === "unavailable" || previous?.status === "unavailable"
+        ? "unavailable"
+        : node.status === "provisional" || previous?.status === "provisional"
+          ? "provisional"
+          : node.status === "needs_review" || previous?.status === "needs_review"
+            ? "needs_review"
+            : "official";
+    const canCalculateTransition = transitionState !== "unavailable";
+    const rawRate = canCalculateTransition ? normalizeRate(node.row.conversionRate) : null;
+    const calculatedRate = canCalculateTransition && previousValue !== null && previousValue > 0 && available ? value / previousValue * 100 : null;
+    const conversionRate = rawRate ?? calculatedRate;
+    const surfaceRate = previousValue !== null && previousValue > 0 && available ? value / previousValue * 100 : null;
+    const loss = canCalculateTransition && previousValue !== null && available ? previousValue - value : null;
+    const inverted = loss !== null && loss < 0;
+    const mainSource = String(node.row.sourceType ?? (node.sourceIndex >= 0 ? "DWS" : "接口"));
+    const dwsSpec = dwsNodeSpecs[node.key];
+    const dwsValue = dwsSpec ? numericValue(dwsLifecycle, dwsSpec.keys) : null;
+    const missingResult = node.key === "connection_result" && previousValue !== null && available ? Math.max(0, previousValue - value) : null;
+    const failedResult = node.key === "connection_success" && previousValue !== null && available ? Math.max(0, previousValue - value) : null;
+    const inlineExit = node.key === "connection_result"
+      ? {
+          key: "connection_no_result",
+          tone: "warn",
+          badge: "没有结果",
+          title: "连接结果未返回",
+          count: missingResult,
+          base: previousValue,
+          description: "已经发起连接，但在当前统计窗口内没有关联到明确连接结果。",
+          secondaryLabel: "没有返回的连接",
+          secondaryValue: numericValue(data?.vpnLifecycleSources?.dwd ?? {}, ["unreturnedConnectionCount"]),
+          reasons: ["超时", "App 退出", "进程中断", "结果事件漏报", "connection_id 断链", "未知"],
+        }
+      : node.key === "connection_success"
+        ? {
+            key: "connection_explicit_failure",
+            tone: "bad",
+            badge: "明确失败",
+            title: "连接失败",
+            count: failedResult,
+            base: previousValue,
+            description: "已经收到连接结果，但最终没有进入连接成功。",
+            secondaryLabel: "失败连接结果",
+            secondaryValue: numericValue(data?.vpnLifecycleSources?.dwd ?? {}, ["connectionFailedCount"]),
+            reasons: ["节点失败", "协议失败", "网络限制", "DNS / Socket / TLS 失败", "错误码", "协议回退仍失败"],
+          }
+        : null;
+    const inlineExitRate = inlineExit?.count !== null && inlineExit?.base !== null && inlineExit?.base !== undefined && inlineExit.base > 0
+      ? inlineExit.count / inlineExit.base * 100
+      : null;
+    const transitionLabel = index === 0
+      ? "起点"
+      : transitionState === "unavailable"
+        ? "不可计算"
+        : transitionState === "needs_review"
+          ? conversionRate === null ? "代理口径" : `代理 ${percent(conversionRate)}`
+          : transitionState === "provisional"
+          ? surfaceRate === null ? "转化待验证" : `表面 ${percent(surfaceRate)}`
+            : conversionRate === null
+              ? "不可计算"
+              : percent(conversionRate);
+    const transitionNote = index === 0
+      ? "当前筛选"
+      : transitionState === "unavailable"
+        ? "缺少真实事件"
+        : transitionState === "needs_review"
+          ? loss === null ? "现有事件代理" : `流失 ${number(Math.max(0, loss))}`
+          : transitionState === "provisional"
+            ? "严格转化待验证"
+            : loss === null
+              ? "无法计算流失"
+              : `流失 ${number(Math.max(0, loss))}`;
+    return <details key={node.key} className={`vpn-lifecycle-node ${available ? "available" : "unavailable"} status-${node.status} ${inverted ? "inverted" : ""}`} data-step-key={node.key}>
+      <summary>
+        <span className="vpn-lifecycle-index">{index + 1}</span>
+        <div className="vpn-lifecycle-name"><strong>{node.label}</strong><small>{node.description}</small></div>
+        <span className={`vpn-lifecycle-badge ${node.status}`}>{node.statusLabel}</span>
+        <em>{available ? number(value) : "—"}<small className="vpn-main-source"><span>{mainSource}</span>{available ? "用户UV" : "字段缺失"}</small>{dwsValue !== null && <small className="vpn-dws-companion"><span>DWS</span>{number(dwsValue)} · {dwsSpec.label}</small>}</em>
+        <b className={transitionState !== "official" || inverted ? "warn" : ""}>{transitionLabel}<small>{transitionNote}</small></b>
+        <i><u style={{ width: `${available ? Math.max(3, value / max * 100) : 0}%` }} /></i>
+      </summary>
+      <div className={`vpn-lifecycle-detail ${inlineExit ? "with-inline-exit" : ""}`}>
+        <div className="vpn-lifecycle-detail-main">
+          <p>{node.detail}</p>
+          {node.expandItems.length > 0 && <div className="vpn-lifecycle-expand-grid">{node.expandItems.map((item) => <article key={item.label} className={item.available ? "available" : "unavailable"}><span>{item.label}<i className={`vpn-source-tag ${item.source.toLowerCase()}`}>{item.source}</i></span><strong>{item.value}</strong></article>)}</div>}
+          <dl><div><dt>主数据来源</dt><dd>{mainSource === "DWD" ? "DWD 明细按用户去重" : "DWS 聚合结果"}</dd></div><div><dt>当前口径</dt><dd>{node.statusLabel}</dd></div><div><dt>数据说明</dt><dd>{node.status === "official" ? "按现有事件用户集合逐层统计" : node.status === "unavailable" ? "当前数据未返回" : node.status === "needs_review" ? "使用现有最接近事件作为代理并计算转化" : "现有字段关联结果"}</dd></div></dl>
+          {node.key === "ad_show" && <div className="vpn-lifecycle-mini-flow"><span>广告机会</span><i>→</i><span>缓存命中/实时请求</span><i>→</i><span>请求发出</span><i>→</i><span>加载成功</span><i>→</i><span>展示尝试</span><i>→</i><span>SDK展示成功</span></div>}
+        </div>
+        {inlineExit && <aside className={`vpn-inline-exit ${inlineExit.tone}`} data-exit-key={inlineExit.key}>
+          <header><span>{inlineExit.badge} · DWD</span><strong>{inlineExit.title}</strong></header>
+          <div className="vpn-inline-exit-value"><strong>{inlineExit.count === null ? "不可计算" : number(inlineExit.count)}</strong><small>{inlineExitRate === null ? "当前缺少可关联分母" : `占上一步 ${percent(inlineExitRate)}`}</small></div>
+          {inlineExit.secondaryValue !== null && <div className="vpn-inline-exit-secondary"><span>{inlineExit.secondaryLabel}</span><strong>{number(inlineExit.secondaryValue)}</strong><small>DWD · connection_id</small></div>}
+          <p>{inlineExit.description}</p>
+          <section><strong>下钻分析方向</strong><div>{inlineExit.reasons.map((reason) => <span key={reason}>{reason}</span>)}</div><small>具体原因和数量待断点分析验证</small></section>
+        </aside>}
+      </div>
+    </details>;
+  };
+  const connectionResultNode = nodes[6];
+  const connectionSuccessNode = nodes[7];
+  return <div className="vpn-lifecycle-funnel">
+    <section className="vpn-funnel-reading-guide">
+      <div><strong>怎么看这张漏斗</strong><span>主数字按DWD用户集合逐层收窄；连接意图使用现有连接动作代理，其余次数、会话和P95由DWS辅助。</span></div>
+      <nav aria-label="数据状态说明"><span className="official">现有字段</span><span className="needs_review">代理指标</span><span className="provisional">关联指标</span><span className="unavailable">数据未返回</span></nav>
+    </section>
+    <section className="vpn-lifecycle-phase connection-phase">
+      <header><div><span>阶段一</span><strong>VPN 连接生命周期</strong><small>目标：让有连接需求的用户成功连接 VPN</small></div><em>DAU → 首页 → 意图 → 权限 → 节点 → 开始 → 结果 → 成功</em></header>
+      <div className="vpn-lifecycle-stack vpn-preconnect-stack">{nodes.slice(0, 6).map(renderNode)}</div>
+      <section className="vpn-outcome-layout" aria-label="连接结果与流失出口">
+        <div className="vpn-outcome-main result-node"><div className="vpn-outcome-path-label"><span>↓</span><strong>收到结果</strong></div>{renderNode(connectionResultNode, 6)}</div>
+        <div className="vpn-outcome-main success-node"><div className="vpn-outcome-path-label"><span>↓</span><strong>连接成功</strong></div>{renderNode(connectionSuccessNode, 7)}</div>
+      </section>
+    </section>
+    <div className="vpn-phase-link"><i>↓</i><strong>VPN连接成功 · {nodes[7].row.available === false ? "不可计算" : `${number(rowCount(nodes[7].row))} 用户`}</strong><span>变现漏斗限定分母：当前成功连接用户 · 连接成功后的时间窗口 · 指定连接后广告场景</span></div>
+    <section className="vpn-lifecycle-phase monetization-phase">
+      <header><div><span>阶段二</span><strong>连接后变现</strong><small>目标：让连接成功用户产生广告展示和收入</small></div><em>广告机会 → 广告展示 → Impression → Paid</em></header>
+      <div className="vpn-lifecycle-stack">{nodes.slice(8).map((node, offset) => renderNode(node, offset + 8))}</div>
+    </section>
+  </div>;
+}
+
 function Funnel({ rows = [], selectedTransition, onSelectTransition, unit = "users", domain = "ads", data = null }: { rows?: AnyRow[]; selectedTransition?: DropoffSelection; onSelectTransition?: (selection: DropoffSelection) => void; unit?: FunnelUnit; domain?: string; data?: AnyRow | null }) {
   if (!rows.length) return <div className="inline-empty">当前范围没有可用漏斗步骤</div>;
+  if (domain === "vpn") return <VpnLifecycleFunnel rows={rows} data={data} />;
   const max = Math.max(...rows.map((row) => rowCount(row)), 1);
   const unitLabel = funnelUnitLabel(unit, domain);
   const unitHint = funnelUnitHint(unit, domain);
@@ -1931,7 +2257,7 @@ function vpnSyntheticStep(name: string, eventName: string, condition: string, co
     unavailableReason: unavailable ? `后续「连接尝试」已有 ${number(downstreamCount)}，但当前节点没有返回真实聚合字段，不能解释为 0。` : "",
     requiredAggregation: name.includes("按钮")
       ? "element_click 且 element_name/action_name in (vpn_connect_button, connect)"
-      : "vpn_permission_result 且 permission_status=granted；已授权老用户可能不会再次弹权限窗，需补“权限已具备”口径。",
+      : "vpn_permission_result 且 permission_status in (granted, already_granted, not_required)；不需要再次申请权限的用户也属于权限可用。",
   };
 }
 
@@ -1947,7 +2273,7 @@ function ensureVpnRequiredSteps(rows: AnyRow[], data: AnyRow, metrics: AnyRow[])
   const dauCount = dau ? rowCount(dau) : null;
   const startCount = start ? rowCount(start) : null;
   const buttonStep = button ?? vpnSyntheticStep("连接按钮点击", "element_click", "element_name/action_name = vpn_connect_button 或 connect", buttonCount, dauCount, startCount);
-  const permissionStep = permission ?? vpnSyntheticStep("VPN权限通过", "vpn_permission_result", "permission_status = granted", permissionCount, button ? rowCount(button) : buttonCount, startCount);
+  const permissionStep = permission ?? vpnSyntheticStep("VPN权限可用", "vpn_permission_result", "permission_status in (granted, already_granted, not_required)", permissionCount, button ? rowCount(button) : buttonCount, startCount);
 
   if (!button) {
     const insertAt = dau ? result.indexOf(dau) + 1 : 1;
@@ -2024,7 +2350,7 @@ function VpnDropoffReasonBoard({ data }: { data: AnyRow }) {
   if (!rows.length) return null;
   const worst = [...rows].filter((row) => row.measurable !== false && row.status !== "missing").sort((left, right) => Number(right.lostCount ?? 0) - Number(left.lostCount ?? 0))[0];
   return <section className="surface vpn-dropoff-reason-board">
-    <div className="surface-title"><div><h2>VPN 大流失原因拆解</h2><p>后端按真实 DWD 字段计算：按钮点击、权限可用、节点选择、连接开始、连接成功；同时返回权限状态、出口检查和失败原因。</p></div><span>{worst ? `最大断点：${text(worst.fromStep)} → ${text(worst.toStep)}` : "等待数据"}</span></div>
+    <div className="surface-title"><div><h2>前置流失试算</h2><p>用于核对 DWS 与 DWD 的字段覆盖、顺序和关联情况；口径未验证前不作为正式漏斗结论。</p></div><span>口径待验证</span></div>
     {worst && <div className="vpn-root-cause-hero">
       <div><span>当前最应该先看</span><strong>{text(worst.fromStep)} → {text(worst.toStep)}</strong><small>流失 {number(worst.lostCount)} · {percent(worst.lossRate)}；通过率 {percent(worst.passRate)}</small></div>
       <div><span>字段口径</span><strong>{text(worst.basis)}</strong><small>这里展示的是 UV 口径，connection_id / events 放在证据里。</small></div>
@@ -2054,22 +2380,30 @@ function VpnPrerequisiteInsight({ rows, data }: { rows: AnyRow[]; data: AnyRow }
   const items = [
     { label: "DAU", row: dau, condition: "app_foreground" },
     { label: "进入首页人数", row: home, condition: "core_action · actionName=vpn_home" },
-    { label: "按钮点击人数", row: click, condition: "element_click · connect" },
-    { label: "权限可用人数", row: permission, condition: "vpn_permission_result · permission_status=granted/already_granted" },
+    { label: "连接意图", row: click, condition: "需真实按钮点击事件；core_action.vpn_connect 不能直接代替" },
+    { label: "权限可用人数", row: permission, condition: "vpn_permission_result · permission_status=granted/already_granted/not_required" },
     { label: "节点选择人数", row: node, condition: "vpn_node_selected" },
     { label: "连接开始人数", row: start, condition: "vpn_connection_start · connection_id非空" },
     { label: "连接成功人数", row: success, condition: "vpn_connection_result · vpn_status=success" },
   ];
   const missing = items.filter((item) => !item.row || item.row.available === false);
   const unavailable = items.filter((item) => item.row?.available === false);
-  return <><VpnHomeSignalBoard data={data} /><section className={`surface vpn-prerequisite-insight ${missing.length ? "warn" : "good"}`}>
-    <div className="surface-title"><div><h2>VPN 连接前置链路诊断</h2><p>VPN 漏斗必须先看用户有没有点连接按钮、权限有没有通过，再看连接尝试和连接成功；没有返回字段时不能按 0 解释。</p></div><span>{missing.length ? `缺 ${missing.length} 个可计算节点` : "前置节点完整"}</span></div>
-    <div className="vpn-prerequisite-flow">{items.map((item, index) => {
-      const unavailableNode = item.row?.available === false;
-      return <article key={item.label} className={!item.row || unavailableNode ? "missing" : "ok"}><span>{index + 1}</span><strong>{item.label}</strong><em>{item.row && !unavailableNode ? number(rowCount(item.row)) : "待补字段"}</em><small>{item.row ? stepCondition(item.row) : item.condition}</small>{item.row?.unavailableReason && <small>{item.row.unavailableReason}</small>}</article>;
-    })}</div>
-    {missing.length > 0 && <div className="diagnosis-no-reasons compact warn"><strong>为什么按钮点击和权限通过没有数量？</strong><p>{unavailable.length ? "因为后端/汇总表没有返回这两个前置节点的真实聚合字段；但连接尝试已经有数据，说明不能把它们当成 0。" : "当前接口没有返回这两个前置节点。" } 请在 VPN 工作台接口/汇总表返回：<code>vpn_connect_button_click_users</code>、<code>vpn_permission_available_users</code>，或在 funnel steps 中返回「连接按钮点击」「VPN权限可用」。权限口径必须包含 <code>already_granted</code>，否则老用户已授权不会再次触发弹窗，会被误判。</p></div>}
-  </section><VpnDropoffReasonBoard data={data} /></>;
+  return <details className={`surface vpn-prerequisite-insight vpn-prerequisite-collapsible ${missing.length ? "warn" : "good"}`}>
+    <summary className="vpn-prerequisite-summary">
+      <div><strong>VPN 连接前置链路</strong><small>识别用户是否在真正发起连接前流失；缺失字段只标记为不可计算，不按 0 解释。</small></div>
+      <span>数据口径待完善{missing.length ? ` · ${missing.length} 项不可计算` : ""}</span>
+    </summary>
+    <div className="vpn-prerequisite-content">
+      <div className="vpn-prerequisite-intro"><strong>当前定位：两大流失类型中的“连接前流失”</strong><span>先判断连接意图与权限，再看是否形成连接开始；当前按钮点击事件和部分事件顺序仍需验证。</span></div>
+      <div className="vpn-prerequisite-flow">{items.map((item, index) => {
+        const unavailableNode = item.row?.available === false;
+        const available = Boolean(item.row && !unavailableNode);
+        return <article key={item.label} className={available ? "ok" : "missing"}><span>{index + 1}</span><strong>{item.label}</strong><em>{available ? number(rowCount(item.row!)) : "不可计算"}</em><small className="vpn-data-state">{available ? item.row?.synthetic ? "口径待验证" : "当前汇总可用" : "字段缺失/口径未确认"}</small><small>{item.row ? stepCondition(item.row) : item.condition}</small>{item.row?.unavailableReason && <small>{item.row.unavailableReason}</small>}</article>;
+      })}</div>
+      {missing.length > 0 && <details className="vpn-prerequisite-method"><summary>为什么有些节点不可计算？</summary><div className="diagnosis-no-reasons compact warn"><strong>缺字段不等于 0 人</strong><p>{unavailable.length ? "后端/汇总表没有返回前置节点的可靠聚合字段，但下游已经存在连接开始数据，因此只能标记为不可计算。" : "当前接口没有返回完整前置节点。"} 真正的连接按钮点击事件仍需确认；权限可用口径需要包含 <code>granted</code>、<code>already_granted</code> 和 <code>not_required</code>。</p></div></details>}
+      <details className="vpn-prerequisite-secondary"><summary>查看首页信号与前置流失试算</summary><VpnHomeSignalBoard data={data} /><VpnDropoffReasonBoard data={data} /></details>
+    </div>
+  </details>;
 }
 
 const MATRIX_DIMENSIONS: Array<{ key: string; label: string }> = [
@@ -3246,9 +3580,34 @@ function Workbench({ data, domain, setDomain, unit, setUnit, pageData, diagnosis
     return normalizeWorkbenchFunnelRows(base, unit, domain);
   }, [data, domain, baseMetrics, rawFunnelRows, unit]);
   const metrics: AnyRow[] = useMemo(() => addSingleProjectDerivedMetrics(baseMetrics, data, funnelRows, domain), [baseMetrics, data, funnelRows, domain]);
+  const vpnPrimaryMetrics = useMemo(() => {
+    if (domain !== "vpn") return metrics;
+    const selected = metrics.filter((row) => /连接尝试成功率|会话最终成功率|结果覆盖率|connection[_ ]?attempt[_ ]?success|session[_ ]?final[_ ]?success|result[_ ]?coverage/i.test(`${row.name ?? ""} ${row.metricKey ?? row.metric_key ?? ""}`));
+    return selected.length ? selected : metrics.slice(0, 2);
+  }, [domain, metrics]);
+  const vpnSecondaryMetrics = useMemo(() => domain === "vpn" ? metrics.filter((row) => !vpnPrimaryMetrics.includes(row)) : [], [domain, metrics, vpnPrimaryMetrics]);
   const [dropoffSelection, setDropoffSelection] = useState<DropoffSelection>(() => bestDropoffSelection(funnelRows));
   useEffect(() => { setDropoffSelection(bestDropoffSelection(funnelRows)); }, [data, domain, funnelRows]);
-  return <div className="page-stack">{!lockDomain && <nav className="operational-tabs"><Button className={domain === "ads" ? "active" : ""} onClick={() => setDomain("ads")}>广告变现</Button><Button className={domain === "vpn" ? "active" : ""} onClick={() => setDomain("vpn")}>VPN 功能</Button><Button className={domain === "quality" ? "active" : ""} onClick={() => setDomain("quality")}>数据质量</Button></nav>}{domain === "ads" && <nav className="operational-tabs unit-tabs"><Button className={unit === "sessions" ? "active" : ""} onClick={() => setUnit("sessions")}>Session 漏斗</Button><Button className={unit === "users" ? "active" : ""} onClick={() => setUnit("users")}>用户 UV</Button><Button className={unit === "events" ? "active" : ""} onClick={() => setUnit("events")}>履约次数</Button></nav>}<AvailabilityBanner data={data} /><section className="operational-metric-grid">{metrics.map((row) => <MetricCard key={row.metricKey ?? row.name} label={text(row.name)} value={row.displayValue ?? (row.unit === "ratio" ? percent(row.value) : number(row.value))} note={row.detail ?? row.formula} status={row.status} />)}</section><AiAnalysisPanel data={data} metrics={metrics} funnelRows={funnelRows} rawFunnelRows={rawFunnelRows} domain={domain} unit={unit} pageData={pageData} diagnosisData={diagnosisData} />{domain === "ads" && isVpnProduct && unit !== "events" && <VpnHomeSignalBoard data={data} />}{domain === "ads" && unit === "sessions" && !isVpnProduct && <AdSessionBaselineWarning rows={funnelRows} rawRows={rawFunnelRows} />}{domain === "ads" && <AdViewerRatioDeepDive rows={funnelRows} data={data} metrics={metrics} pageData={pageData} diagnosisData={diagnosisData} diagnosisProgress={diagnosisProgress} pageProgress={pageProgress} />}{domain === "ads" && <AdEligibilityInsight rows={funnelRows} data={data} diagnosisData={diagnosisData} diagnosisProgress={diagnosisProgress} />}{domain === "vpn" && <VpnPrerequisiteInsight rows={funnelRows} data={data} />}<section className="surface"><div className="surface-title"><div><h2>{domain === "vpn" ? "VPN 功能详细漏斗" : domain === "quality" ? "数据质量门禁" : isVpnProduct && unit !== "events" ? "VPN 品类广告变现全链路漏斗" : "广告核心漏斗"}</h2><p>{domain === "vpn" ? "DAU → 进入首页 → 点击连接 → 权限可用 → 节点选择 → 连接开始 → 连接成功。" : domain === "ads" && isVpnProduct && unit !== "events" ? "DAU → 进入首页 → 资格检查/不通过原因 → 资格通过 → 广告机会 → 缓存或实时请求 → 加载成功 → 广告可展示 → 展示尝试 → Impression → Paid。" : domain === "ads" && unit === "events" ? "按广告链路 ID 统计履约次数，用于检查缓存、请求、加载和展示断点。" : "按当前去重口径展示广告变现链路。"}</p></div><span title={funnelUnitHint(unit, domain)}>当前口径：{domain === "vpn" ? "用户 UV" : funnelUnitLabel(unit, domain)}</span></div><Funnel rows={funnelRows} selectedTransition={dropoffSelection} onSelectTransition={setDropoffSelection} unit={unit} domain={domain} data={data} /></section><DropoffAnalysisPanel rows={funnelRows} selection={dropoffSelection} onSelectionChange={setDropoffSelection} data={data} pageData={pageData} diagnosisData={diagnosisData} pageProgress={pageProgress} diagnosisProgress={diagnosisProgress} />{data.vpnStageHealth?.stages?.length > 0 && <section className="surface"><div className="surface-title"><div><h2>连接阶段成功率与 P95</h2><p>按 connection_id 关联真实连接阶段</p></div></div><div className="table-wrap"><table><thead><tr><th>阶段</th><th>样本</th><th>成功率</th><th>P95</th><th>状态</th></tr></thead><tbody>{data.vpnStageHealth.stages.map((row: AnyRow) => <tr key={row.stageKey}><td>{text(row.stageName)}</td><td>{number(row.totalCount)}</td><td>{percent(row.successRate)}</td><td>{text(row.displayP95 ?? row.p95Ms)}</td><td>{row.available === false ? "暂无数据" : text(row.status)}</td></tr>)}</tbody></table></div></section>}</div>;
+  const metricCards = (rows: AnyRow[]) => rows.map((row) => <MetricCard key={row.metricKey ?? row.metric_key ?? row.name} label={text(row.name)} value={row.displayValue ?? (row.unit === "ratio" ? percent(row.value) : number(row.value))} note={row.detail ?? row.formula} status={row.status} />);
+  return <div className="page-stack">
+    {!lockDomain && <nav className="operational-tabs"><Button className={domain === "ads" ? "active" : ""} onClick={() => setDomain("ads")}>广告变现</Button><Button className={domain === "vpn" ? "active" : ""} onClick={() => setDomain("vpn")}>VPN 功能</Button><Button className={domain === "quality" ? "active" : ""} onClick={() => setDomain("quality")}>数据质量</Button></nav>}
+    {domain === "ads" && <nav className="operational-tabs unit-tabs"><Button className={unit === "sessions" ? "active" : ""} onClick={() => setUnit("sessions")}>Session 漏斗</Button><Button className={unit === "users" ? "active" : ""} onClick={() => setUnit("users")}>用户 UV</Button><Button className={unit === "events" ? "active" : ""} onClick={() => setUnit("events")}>履约次数</Button></nav>}
+    <AvailabilityBanner data={data} />
+    {domain === "vpn" ? <section className="surface vpn-metric-overview">
+      <div className="surface-title"><div><h2>核心观测</h2><p>默认只保留判断连接结果所需的核心指标；阶段指标与大量计算数据按需展开。</p></div><span>DWS 优先</span></div>
+      <div className="operational-metric-grid vpn-primary-metrics">{metricCards(vpnPrimaryMetrics)}</div>
+      {vpnSecondaryMetrics.length > 0 && <details className="vpn-secondary-metrics"><summary>查看阶段与深层指标（{vpnSecondaryMetrics.length}项）</summary><div className="operational-metric-grid">{metricCards(vpnSecondaryMetrics)}</div></details>}
+    </section> : <section className="operational-metric-grid">{metricCards(metrics)}</section>}
+    {domain === "vpn" ? <details className="vpn-deferred-analysis"><summary><strong>AI分析报告</strong><span>低优先级 · 按需生成，不阻塞核心漏斗</span></summary><AiAnalysisPanel data={data} metrics={metrics} funnelRows={funnelRows} rawFunnelRows={rawFunnelRows} domain={domain} unit={unit} pageData={pageData} diagnosisData={diagnosisData} /></details> : <AiAnalysisPanel data={data} metrics={metrics} funnelRows={funnelRows} rawFunnelRows={rawFunnelRows} domain={domain} unit={unit} pageData={pageData} diagnosisData={diagnosisData} />}
+    {domain === "ads" && isVpnProduct && unit !== "events" && <VpnHomeSignalBoard data={data} />}
+    {domain === "ads" && unit === "sessions" && !isVpnProduct && <AdSessionBaselineWarning rows={funnelRows} rawRows={rawFunnelRows} />}
+    {domain === "ads" && <AdViewerRatioDeepDive rows={funnelRows} data={data} metrics={metrics} pageData={pageData} diagnosisData={diagnosisData} diagnosisProgress={diagnosisProgress} pageProgress={pageProgress} />}
+    {domain === "ads" && <AdEligibilityInsight rows={funnelRows} data={data} diagnosisData={diagnosisData} diagnosisProgress={diagnosisProgress} />}
+    {domain === "vpn" && <VpnPrerequisiteInsight rows={funnelRows} data={data} />}
+    <section className="surface"><div className="surface-title"><div><h2>{domain === "vpn" ? "VPN 功能详细漏斗" : domain === "quality" ? "数据质量门禁" : isVpnProduct && unit !== "events" ? "VPN 品类广告变现全链路漏斗" : "广告核心漏斗"}</h2><p>{domain === "vpn" ? "两段式主链路：先看 VPN 连接生命周期，再看连接成功后的广告机会、展示、Impression 与 Paid；点击节点展开细项。" : domain === "ads" && isVpnProduct && unit !== "events" ? "DAU → 进入首页 → 资格检查/不通过原因 → 资格通过 → 广告机会 → 缓存或实时请求 → 加载成功 → 广告可展示 → 展示尝试 → Impression → Paid。" : domain === "ads" && unit === "events" ? "按广告链路 ID 统计履约次数，用于检查缓存、请求、加载和展示断点。" : "按当前去重口径展示广告变现链路。"}</p></div><span title={funnelUnitHint(unit, domain)}>当前口径：{domain === "vpn" ? "用户 UV" : funnelUnitLabel(unit, domain)}</span></div><Funnel rows={funnelRows} selectedTransition={dropoffSelection} onSelectTransition={setDropoffSelection} unit={unit} domain={domain} data={data} /></section>
+    <DropoffAnalysisPanel rows={funnelRows} selection={dropoffSelection} onSelectionChange={setDropoffSelection} data={data} pageData={pageData} diagnosisData={diagnosisData} pageProgress={pageProgress} diagnosisProgress={diagnosisProgress} />
+    {data.vpnStageHealth?.stages?.length > 0 && <section className="surface"><div className="surface-title"><div><h2>连接阶段成功率与 P95</h2><p>按 connection_id 关联真实连接阶段</p></div></div><div className="table-wrap"><table><thead><tr><th>阶段</th><th>样本</th><th>成功率</th><th>P95</th><th>状态</th></tr></thead><tbody>{data.vpnStageHealth.stages.map((row: AnyRow) => <tr key={row.stageKey}><td>{text(row.stageName)}</td><td>{number(row.totalCount)}</td><td>{percent(row.successRate)}</td><td>{text(row.displayP95 ?? row.p95Ms)}</td><td>{row.available === false ? "暂无数据" : text(row.status)}</td></tr>)}</tbody></table></div></section>}
+  </div>;
 }
 
 function DiagnosisPage({ data, workbenchData, onOpenWorkbench }: { data: AnyRow; workbenchData?: AnyRow | null; onOpenWorkbench?: () => void }) {
@@ -3598,7 +3957,13 @@ function ServerVpnOverall({ data, optionData, optionsLoading, riskData, riskLoad
   onQuery: (config: ServerVpnQueryConfig) => void;
   onRefresh: () => void;
 }) {
-  const defaultConfig = (): ServerVpnQueryConfig => ({ projectCode: "A003", dateFrom: initialDates.dateFrom, dateTo: initialDates.dateTo, dimensions: ["stat_date", "server_id"] });
+  const defaultConfig = (): ServerVpnQueryConfig => {
+    const params = typeof window === "undefined" ? null : new URLSearchParams(window.location.search);
+    const linkedFrom = params?.get("dateFrom");
+    const linkedTo = params?.get("dateTo");
+    const validDate = (value: string | null | undefined) => /^\d{4}-\d{2}-\d{2}$/.test(value ?? "");
+    return { projectCode: "A003", dateFrom: validDate(linkedFrom) ? linkedFrom! : initialDates.dateFrom, dateTo: validDate(linkedTo) ? linkedTo! : initialDates.dateTo, dimensions: ["stat_date", "server_id"] };
+  };
   const [serverVpnDraft, setServerVpnDraft] = useState<ServerVpnQueryConfig>(() => appliedConfig ?? defaultConfig());
   const [visibleMetrics, setVisibleMetrics] = useState<ServerVpnMetricKey[]>(SERVER_VPN_PRIMARY_METRICS);
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -3614,6 +3979,23 @@ function ServerVpnOverall({ data, optionData, optionsLoading, riskData, riskLoad
   const [aiSummary, setAiSummary] = useState("");
   const [aiSummaryLoading, setAiSummaryLoading] = useState(false);
   const [aiSummaryRefreshKey, setAiSummaryRefreshKey] = useState(0);
+  const [localScanStatus, setLocalScanStatus] = useState<AnyRow | null>(null);
+  const [localScanLoading, setLocalScanLoading] = useState(false);
+  const loadLocalScanStatus = useCallback(async (method: "GET" | "POST" = "GET") => {
+    setLocalScanLoading(method === "POST");
+    try {
+      const response = await fetch("/api/local/vpn-node-scan", { method });
+      const payload = await response.json().catch(() => ({}));
+      setLocalScanStatus(response.ok ? payload : { error: payload.error || `HTTP_${response.status}` });
+      if (response.ok && method === "POST") window.dispatchEvent(new CustomEvent("jkcl:vpn-node-scan-complete", { detail: payload }));
+    } finally { setLocalScanLoading(false); }
+  }, []);
+  useEffect(() => {
+    void loadLocalScanStatus();
+    const refresh = () => void loadLocalScanStatus();
+    window.addEventListener("jkcl:vpn-node-scan-complete", refresh);
+    return () => window.removeEventListener("jkcl:vpn-node-scan-complete", refresh);
+  }, [loadLocalScanStatus]);
   useEffect(() => {
     if (appliedConfig) {
       setServerVpnDraft(appliedConfig);
@@ -3901,7 +4283,8 @@ function ServerVpnOverall({ data, optionData, optionsLoading, riskData, riskLoad
         <label className="overall-filter-item"><span>节点：</span><select value={serverVpnDraft.serverId ?? ""} onChange={(event) => setFilter("serverId", event.target.value)}><option value="">全部节点</option>{dimensionOption("serverIds", serverVpnDraft.serverId).map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
         <label className="overall-filter-item"><span>协议：</span><select value={serverVpnDraft.protocol ?? ""} onChange={(event) => setFilter("protocol", event.target.value)}><option value="">全部协议</option>{dimensionOption("protocols", serverVpnDraft.protocol).map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
       </div>
-      <div className="overall-action-row"><div className="overall-view-actions"><span>{optionsLoading ? "正在加载筛选选项…" : "项目白名单：A003、A005、A007"}</span></div><div className="overall-query-actions"><Button htmlType="button" onClick={exportCsv} disabled={!showReportData || report.mayBeTruncated || !rows.length}>{report.mayBeTruncated ? "缩小范围后导出" : "导出 CSV"}</Button><Button htmlType="button" onClick={() => { setServerVpnDraft(defaultConfig()); setVisibleMetrics(SERVER_VPN_PRIMARY_METRICS); setShowAdvanced(false); }}>重置</Button><Button htmlType="button" className="primary" onClick={() => onQuery(serverVpnDraft)} disabled={querying}>⌕ {querying ? "查询中…" : "查询"}</Button></div></div>
+      <div className="overall-action-row"><div className="overall-view-actions"><span>{optionsLoading ? "正在加载筛选选项…" : "项目白名单：A003、A005、A007"}</span></div><div className="overall-query-actions"><Button htmlType="button" onClick={() => void loadLocalScanStatus("POST")} disabled={localScanLoading}>{localScanLoading ? "扫描中…" : "重新扫描节点"}</Button><Button htmlType="button" onClick={exportCsv} disabled={!showReportData || report.mayBeTruncated || !rows.length}>{report.mayBeTruncated ? "缩小范围后导出" : "导出 CSV"}</Button><Button htmlType="button" onClick={() => { setServerVpnDraft(defaultConfig()); setVisibleMetrics(SERVER_VPN_PRIMARY_METRICS); setShowAdvanced(false); }}>重置</Button><Button htmlType="button" className="primary" onClick={() => onQuery(serverVpnDraft)} disabled={querying}>⌕ {querying ? "查询中…" : "查询"}</Button></div></div>
+      <div className="overall-active-hint">本地节点扫描：{localScanStatus?.error ? `失败（${text(localScanStatus.error)}）` : localScanStatus?.scannedAt ? `${new Date(localScanStatus.scannedAt).toLocaleString("zh-CN")} · 汇总缺失 ${number(localScanStatus.rows?.length)} 组` : "等待当天首次登录扫描"}</div>
       <div className="overall-active-hint">待查询：{serverVpnDraft.dimensions.map(serverVpnDimensionLabel).join(" × ")} · {visibleMetrics.length} 个指标</div>
       {truncatedOptionLabels.length > 0 && <div className="overall-active-hint">选项已限制为前 250 项：{truncatedOptionLabels.join("、")}；请先增加其他筛选缩小范围。</div>}
     </section>
@@ -4288,6 +4671,15 @@ export function OperationalFunnel(props: Props) {
   const [serverVpnHasQueried, setServerVpnHasQueried] = useState(false);
   const [serverVpnQueryKey, setServerVpnQueryKey] = useState(0);
   const [serverVpnQueryMode, setServerVpnQueryMode] = useState<"query" | "refresh">("query");
+  useEffect(() => {
+    const refreshAfterLocalScan = () => {
+      if (!serverVpnAppliedConfig || !serverVpnHasQueried) return;
+      setServerVpnQueryMode("refresh");
+      setServerVpnQueryKey((value) => value + 1);
+    };
+    window.addEventListener("jkcl:vpn-node-scan-complete", refreshAfterLocalScan);
+    return () => window.removeEventListener("jkcl:vpn-node-scan-complete", refreshAfterLocalScan);
+  }, [serverVpnAppliedConfig, serverVpnHasQueried]);
   const [serverVpnOptionData, setServerVpnOptionData] = useState<AnyRow | null>(null);
   const [serverVpnOptionsLoading, setServerVpnOptionsLoading] = useState(false);
   const [serverVpnOptionsConfig, setServerVpnOptionsConfig] = useState<ServerVpnQueryConfig | null>(null);
@@ -4569,7 +4961,10 @@ export function OperationalFunnel(props: Props) {
       domain: "vpn",
       unit: "sessions",
     }, controller.signal)
-      .then((result) => { if (active) setServerVpnInlineHourlyData(result); })
+      .then(async (result) => {
+        const merged = await mergeLocalVpnHourlyRows(result, { projectCode: config.projectCode, dateFrom: requestedStart, dateTo: requestedEnd, serverId }).catch(() => result);
+        if (active) setServerVpnInlineHourlyData(merged);
+      })
       .catch((reason) => { if (active) setServerVpnInlineHourlyError(reason instanceof Error ? reason.message : "小时趋势查询失败"); })
       .finally(() => { if (active) setServerVpnInlineHourlyLoading(false); });
     return () => { active = false; controller.abort(); };
@@ -4621,7 +5016,10 @@ export function OperationalFunnel(props: Props) {
       unit: "sessions",
       forceRefresh: serverVpnQueryMode === "refresh",
     }, controller.signal)
-      .then((result) => { if (active) setServerVpnData(result); })
+      .then(async (result) => {
+        const merged = await mergeLocalVpnRows(result, serverVpnAppliedConfig).catch(() => result);
+        if (active) setServerVpnData(merged);
+      })
       .catch((reason) => { if (active) { setServerVpnData(null); setServerVpnError(reason instanceof Error ? reason.message : "查询失败"); } })
       .finally(() => { if (active) setServerVpnLoading(false); });
     return () => { active = false; controller.abort(); };
@@ -4652,7 +5050,15 @@ export function OperationalFunnel(props: Props) {
       unit: "sessions",
       forceRefresh,
     }, controller.signal)
-      .then((result) => { if (active) setServerVpnHourlyData(result); })
+      .then(async (result) => {
+        const merged = await mergeLocalVpnHourlyRows(result, {
+          projectCode: serverVpnHourlyAppliedConfig.projectCode,
+          dateFrom: serverVpnHourlyAppliedConfig.dateFrom,
+          dateTo: serverVpnHourlyAppliedConfig.dateTo,
+          serverId: serverVpnHourlyAppliedConfig.serverId,
+        }).catch(() => result);
+        if (active) setServerVpnHourlyData(merged);
+      })
       .catch((reason) => { if (active) { setServerVpnHourlyData(null); setServerVpnHourlyError(reason instanceof Error ? reason.message : "查询失败"); } })
       .finally(() => { if (active) setServerVpnHourlyLoading(false); });
     return () => { active = false; controller.abort(); };

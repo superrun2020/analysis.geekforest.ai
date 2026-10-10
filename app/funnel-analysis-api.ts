@@ -55,6 +55,63 @@ export type FunnelQueryPackage<T = Record<string, unknown>> = {
   errors: Record<string, string>;
 };
 
+type AnyRecord = Record<string, any>;
+
+async function enrichLocalVpnLifecycle<T>(data: T, query: FunnelQuery, signal?: AbortSignal): Promise<T> {
+  if (query.page !== "workbench" || query.domain !== "vpn" || !query.projectCode || !query.dateFrom || !query.dateTo) return data;
+  const current = data as AnyRecord;
+  const summary: AnyRecord = current.summary ?? {};
+  const existingSources: AnyRecord = current.vpnLifecycleSources ?? {};
+  const legacyDws = {
+    dauUsers: summary.dauUsers,
+    vpnConnectionStartUsers: summary.connectAttemptUsers,
+    vpnConnectionSuccessUsers: summary.connectSuccessUsers,
+    postConnectOpportunityUsers: summary.postConnectOpportunityUsers,
+    impressionUsers: summary.postConnectImpressionUsers ?? summary.impressionUsers,
+    vpnSessionCount: current.fulfillment?.vpnSessionCount,
+    connectionAttemptCount: summary.connectAttemptCount,
+    connectionResultCount: current.fulfillment?.connectionResultCount,
+    connectionSuccessCount: summary.connectSuccessCount,
+    connectionFailedCount: current.fulfillment?.connectionFailedCount,
+    vpnPermissionAttemptCount: current.vpnPermissionAttemptCount,
+    vpnPermissionSuccessCount: current.vpnPermissionSuccessCount,
+    vpnNodeSelectionCount: current.vpnNodeSelectionCount,
+    vpnValidNodeSelectionCount: current.vpnValidNodeSelectionCount,
+    vpnConnectionP95Ms: current.fulfillment?.vpnConnectP95Ms,
+    postConnectOpportunityCount: summary.opportunityCount,
+    postConnectImpressionCount: summary.impressionCount,
+  };
+  let localDwd: AnyRecord = {};
+  let localDws: AnyRecord = {};
+  let localSequential: AnyRecord = {};
+  if (typeof window !== "undefined" && ["127.0.0.1", "localhost"].includes(window.location.hostname)) {
+    try {
+      const response = await fetch("/api/local/vpn-lifecycle", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectCode: query.projectCode, dateFrom: query.dateFrom, dateTo: query.dateTo }),
+        signal,
+      });
+      if (response.ok) {
+        const local = (await response.json()) as AnyRecord;
+        localDwd = local.data ?? {};
+        localDws = local.dws ?? {};
+        localSequential = local.sequential ?? {};
+      }
+    } catch {
+      // The local DWD supplement is optional; the OA response remains usable.
+    }
+  }
+  return {
+    ...current,
+    vpnLifecycleSources: {
+      dwd: { ...localDwd, ...(existingSources.dwd ?? {}) },
+      dws: { ...legacyDws, ...localDws, ...(existingSources.dws ?? {}) },
+      sequential: { ...localSequential, ...(existingSources.sequential ?? {}) },
+    },
+  } as T;
+}
+
 /** Call the OA-protected operational API and preserve actionable failure states. */
 export async function queryFunnel<T = Record<string, unknown>>(query: FunnelQuery, signal?: AbortSignal): Promise<T> {
   const baseUrl = trackingApiBaseUrl();
@@ -74,7 +131,7 @@ export async function queryFunnel<T = Record<string, unknown>>(query: FunnelQuer
   if (response.status === 422) throw new Error(payload.msg || payload.error || "筛选条件不合法");
   if (!response.ok || (payload.code !== undefined && payload.code !== 0)) throw new Error(payload.msg || payload.error || `漏斗接口返回 HTTP ${response.status}`);
   if (!payload.data) throw new Error("漏斗接口未返回数据");
-  return payload.data;
+  return enrichLocalVpnLifecycle(payload.data, query, signal);
 }
 
 /**

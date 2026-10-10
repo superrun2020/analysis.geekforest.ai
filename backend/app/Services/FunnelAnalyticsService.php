@@ -2942,6 +2942,7 @@ class FunnelAnalyticsService
             $funnel = $this->contextStages($aggregate, $params);
             $topReasons = $this->summaryVpnFailureReasons($params);
             $reasonEvents = max(1, (int) $topReasons->sum('events'));
+            $dwdLifecycle = $this->vpnDwdLifecycleMetrics($params);
 
             return [
                 'context' => $this->context($params),
@@ -2951,6 +2952,28 @@ class FunnelAnalyticsService
                 'vpnPermissionAttemptCount' => (int) ($aggregate->vpn_permission_attempt_count ?? 0),
                 'vpnPermissionSuccessCount' => (int) ($aggregate->vpn_permission_success_count ?? 0),
                 'vpnNodeSelectedUsers' => $aggregate->vpn_node_selected_users ?? null,
+                'vpnLifecycleSources' => [
+                    'dwd' => $dwdLifecycle,
+                    'dws' => [
+                        'dauUsers' => (int) ($aggregate->dau_users ?? 0),
+                        'vpnConnectionStartUsers' => (int) ($aggregate->connect_attempt_users ?? 0),
+                        'vpnConnectionSuccessUsers' => (int) ($aggregate->connect_success_users ?? 0),
+                        'postConnectOpportunityUsers' => (int) ($aggregate->post_connect_opportunity_users ?? 0),
+                        'impressionUsers' => (int) ($aggregate->post_connect_impression_users ?? 0),
+                        'vpnSessionCount' => (int) ($aggregate->app_sessions ?? 0),
+                        'connectionAttemptCount' => (int) ($aggregate->connect_attempt_count ?? 0),
+                        'connectionResultCount' => (int) ($aggregate->connect_result_count ?? 0),
+                        'connectionSuccessCount' => (int) ($aggregate->connect_success_count ?? 0),
+                        'connectionFailedCount' => (int) ($aggregate->connect_failed_count ?? 0),
+                        'vpnPermissionAttemptCount' => (int) ($aggregate->vpn_permission_attempt_count ?? 0),
+                        'vpnPermissionSuccessCount' => (int) ($aggregate->vpn_permission_success_count ?? 0),
+                        'vpnNodeSelectionCount' => (int) ($aggregate->vpn_node_selection_count ?? 0),
+                        'vpnValidNodeSelectionCount' => (int) ($aggregate->vpn_valid_node_selection_count ?? 0),
+                        'vpnConnectionP95Ms' => isset($aggregate->vpn_connect_p95_ms) ? (int) $aggregate->vpn_connect_p95_ms : null,
+                        'postConnectOpportunityCount' => (int) ($aggregate->opportunity_count ?? 0),
+                        'postConnectImpressionCount' => (int) ($aggregate->impression_count ?? 0),
+                    ],
+                ],
                 'funnel' => $funnel,
                 'funnelSummary' => $this->funnelSummary($funnel, $aggregate, $params),
                 'comparisonFunnel' => $comparisonAvailable
@@ -3006,6 +3029,94 @@ class FunnelAnalyticsService
     }
 
     /**
+     * Project-scope VPN lifecycle UVs from DWD. These values complement DWS
+     * event/session aggregates and keep every visible funnel node on the same
+     * my_user_id deduplication grain.
+     */
+    private function vpnDwdLifecycleMetrics(array $params): array
+    {
+        try {
+            $row = $this->baseQuery($params)
+                ->selectRaw("COUNT(DISTINCT CASE WHEN event_name = 'app_foreground' THEN NULLIF(my_user_id, '') END) AS dau_users")
+                ->selectRaw("COUNT(DISTINCT CASE WHEN event_name = 'screen_view' AND screen_name = 'MainVpnActivity' THEN NULLIF(my_user_id, '') END) AS vpn_home_users")
+                ->selectRaw("COUNT(DISTINCT CASE WHEN event_name = 'element_click' AND (LOWER(COALESCE(element_name, '')) LIKE '%connect%' OR LOWER(COALESCE(action_name, '')) LIKE '%connect%') THEN NULLIF(my_user_id, '') END) AS connect_button_click_users")
+                ->selectRaw("COUNT(DISTINCT CASE WHEN event_name = 'core_action' AND action_name = 'vpn_connect' THEN NULLIF(my_user_id, '') END) AS core_connect_action_users")
+                ->selectRaw("COUNT(DISTINCT CASE WHEN event_name = 'vpn_permission_result' AND LOWER(COALESCE(permission_status, '')) IN ('granted','already_granted','not_required') THEN NULLIF(my_user_id, '') END) AS permission_available_users")
+                ->selectRaw("COUNT(DISTINCT CASE WHEN event_name = 'vpn_permission_result' AND LOWER(COALESCE(permission_status, '')) = 'granted' THEN NULLIF(my_user_id, '') END) AS permission_granted_users")
+                ->selectRaw("COUNT(DISTINCT CASE WHEN event_name = 'vpn_permission_result' AND LOWER(COALESCE(permission_status, '')) = 'already_granted' THEN NULLIF(my_user_id, '') END) AS permission_already_granted_users")
+                ->selectRaw("COUNT(DISTINCT CASE WHEN event_name = 'vpn_permission_result' AND LOWER(COALESCE(permission_status, '')) = 'not_required' THEN NULLIF(my_user_id, '') END) AS permission_not_required_users")
+                ->selectRaw("COUNT(DISTINCT CASE WHEN event_name = 'vpn_permission_result' AND LOWER(COALESCE(permission_status, '')) = 'denied' THEN NULLIF(my_user_id, '') END) AS permission_denied_users")
+                ->selectRaw("COUNT(DISTINCT CASE WHEN event_name = 'vpn_permission_result' AND LOWER(COALESCE(permission_status, '')) = 'error' THEN NULLIF(my_user_id, '') END) AS permission_error_users")
+                ->selectRaw("COUNT(DISTINCT CASE WHEN event_name = 'vpn_node_selected' AND NULLIF(server_id, '') IS NOT NULL THEN NULLIF(my_user_id, '') END) AS node_ready_users")
+                ->selectRaw("COUNT(DISTINCT CASE WHEN event_name = 'vpn_node_selected' AND LOWER(COALESCE(selection_mode, '')) = 'auto' THEN NULLIF(my_user_id, '') END) AS node_auto_selected_users")
+                ->selectRaw("COUNT(DISTINCT CASE WHEN event_name = 'vpn_node_selected' AND LOWER(COALESCE(selection_mode, '')) = 'manual' THEN NULLIF(my_user_id, '') END) AS node_manual_selected_users")
+                ->selectRaw("COUNT(DISTINCT CASE WHEN event_name = 'vpn_connection_start' THEN NULLIF(my_user_id, '') END) AS connection_start_users")
+                ->selectRaw("COUNT(DISTINCT CASE WHEN event_name = 'vpn_connection_start' THEN NULLIF(vpn_session_id, '') END) AS vpn_session_count")
+                ->selectRaw("COUNT(DISTINCT CASE WHEN event_name = 'vpn_connection_start' THEN NULLIF(connection_id, '') END) AS connection_attempt_count")
+                ->selectRaw("COUNT(DISTINCT CASE WHEN event_name = 'vpn_connection_start' AND LOWER(COALESCE(trigger_type, '')) = 'auto_reconnect' THEN NULLIF(my_user_id, '') END) AS auto_reconnect_users")
+                ->selectRaw("COUNT(DISTINCT CASE WHEN event_name = 'vpn_connection_result' THEN NULLIF(my_user_id, '') END) AS connection_result_users")
+                ->selectRaw("COUNT(DISTINCT CASE WHEN event_name = 'vpn_connection_result' AND LOWER(COALESCE(result_status, vpn_status, '')) = 'success' THEN NULLIF(my_user_id, '') END) AS connection_success_users")
+                ->selectRaw("COUNT(DISTINCT CASE WHEN event_name = 'vpn_connection_result' AND LOWER(COALESCE(result_status, vpn_status, '')) IN ('failed','failure') THEN NULLIF(my_user_id, '') END) AS connection_failed_users")
+                ->selectRaw("COUNT(DISTINCT CASE WHEN event_name = 'vpn_connection_result' AND LOWER(COALESCE(result_status, vpn_status, '')) = 'timeout' THEN NULLIF(my_user_id, '') END) AS connection_timeout_users")
+                ->selectRaw("COUNT(DISTINCT CASE WHEN event_name = 'vpn_connection_result' AND LOWER(COALESCE(result_status, vpn_status, '')) = 'cancelled' THEN NULLIF(my_user_id, '') END) AS connection_cancelled_users")
+                ->selectRaw("COUNT(DISTINCT CASE WHEN event_name = 'ad_opportunity' AND vpn_active = 1 THEN NULLIF(my_user_id, '') END) AS post_connect_opportunity_users")
+                ->selectRaw("COUNT(DISTINCT CASE WHEN event_name = 'ad_show_attempt' AND vpn_active = 1 THEN NULLIF(my_user_id, '') END) AS post_connect_show_users")
+                ->selectRaw("COUNT(DISTINCT CASE WHEN event_name = 'ad_impression' AND vpn_active = 1 THEN NULLIF(my_user_id, '') END) AS post_connect_impression_users")
+                ->selectRaw("COUNT(DISTINCT CASE WHEN event_name = 'ad_paid_event' AND vpn_active = 1 THEN NULLIF(my_user_id, '') END) AS post_connect_paid_users")
+                ->selectRaw("SUM(CASE WHEN event_name = 'ad_show_attempt' AND vpn_active = 1 THEN 1 ELSE 0 END) AS post_connect_show_count")
+                ->selectRaw("SUM(CASE WHEN event_name = 'ad_paid_event' AND vpn_active = 1 THEN 1 ELSE 0 END) AS post_connect_paid_count")
+                ->selectRaw("SUM(CASE WHEN event_name = 'ad_paid_event' AND vpn_active = 1 THEN COALESCE(value_micros, 0) ELSE 0 END) AS post_connect_revenue_micros")
+                ->first();
+
+            if ($row === null) {
+                return [];
+            }
+
+            return [
+                'dauUsers' => (int) $row->dau_users,
+                'vpnHomeUsers' => (int) $row->vpn_home_users,
+                'vpnConnectButtonClickUsers' => (int) $row->connect_button_click_users,
+                'vpnConnectButtonClickAvailable' => (int) $row->connect_button_click_users > 0,
+                'vpnCoreConnectActionUsers' => (int) $row->core_connect_action_users,
+                'vpnPermissionAvailableUsers' => (int) $row->permission_available_users,
+                'vpnPermissionGrantedUsers' => (int) $row->permission_granted_users,
+                'vpnPermissionAlreadyGrantedUsers' => (int) $row->permission_already_granted_users,
+                'vpnPermissionNotRequiredUsers' => (int) $row->permission_not_required_users,
+                'vpnPermissionDeniedUsers' => (int) $row->permission_denied_users,
+                'vpnPermissionErrorUsers' => (int) $row->permission_error_users,
+                'vpnNodeSelectedUsers' => (int) $row->node_ready_users,
+                'vpnValidNodeSelectedUsers' => (int) $row->node_ready_users,
+                'vpnNodeAutoSelectedUsers' => (int) $row->node_auto_selected_users,
+                'vpnNodeManualSelectedUsers' => (int) $row->node_manual_selected_users,
+                'vpnConnectionStartUsers' => (int) $row->connection_start_users,
+                'vpnSessionCount' => (int) $row->vpn_session_count,
+                'connectionAttemptCount' => (int) $row->connection_attempt_count,
+                'autoReconnectUsers' => (int) $row->auto_reconnect_users,
+                'vpnConnectionResultUsers' => (int) $row->connection_result_users,
+                'vpnConnectionSuccessUsers' => (int) $row->connection_success_users,
+                'connectionSuccessUsers' => (int) $row->connection_success_users,
+                'connectionFailedUsers' => (int) $row->connection_failed_users,
+                'connectionTimeoutUsers' => (int) $row->connection_timeout_users,
+                'connectionCancelledUsers' => (int) $row->connection_cancelled_users,
+                'postConnectOpportunityUsers' => (int) $row->post_connect_opportunity_users,
+                'postConnectShowUsers' => (int) $row->post_connect_show_users,
+                'impressionUsers' => (int) $row->post_connect_impression_users,
+                'paidUsers' => (int) $row->post_connect_paid_users,
+                'postConnectShowCount' => (int) $row->post_connect_show_count,
+                'paidEventCount' => (int) $row->post_connect_paid_count,
+                'revenue' => round(((int) $row->post_connect_revenue_micros) / 1000000, 6),
+            ];
+        } catch (Throwable $exception) {
+            Log::warning('jkcl_vpn_dwd_lifecycle_metrics_failed', [
+                'message' => $exception->getMessage(),
+                'projectCode' => $params['projectCode'] ?? null,
+            ]);
+
+            return [];
+        }
+    }
+
+    /**
      * Historical DWS partitions are stable after the 05:00 aggregate window, so
      * keep them warm for the workday. Today still stays short because data is
      * continuously refreshed by Firebase/API sync jobs.
@@ -3045,7 +3156,7 @@ class FunnelAnalyticsService
 
     private function vpnSummaryWorkbenchCacheKey(array $params): string
     {
-        return 'jkcl_funnel:vpn_summary_workbench:' . md5(json_encode(
+        return 'jkcl_funnel:vpn_summary_workbench:v2:' . md5(json_encode(
             $this->sortForCacheKey($params),
             JSON_UNESCAPED_UNICODE
         ));

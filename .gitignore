@@ -42,3 +42,6 @@ yarn-error.log*
 
 # build artifacts
 *.tar.gz
+vite-*.log
+.local-cache/
+*.tsbuildinfo

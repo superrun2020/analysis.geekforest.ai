@@ -25,6 +25,7 @@ import { DomainReportPage } from "./domain-report";
 import { trackingApiBaseUrl } from "./api-base-url";
 import { createCodexQueryLinks } from "./codex-query-links-api";
 import { OperationsWorkspace, operationsEntries, legacyOperationsEntries, type OperationsEntry } from "./operations-workspace";
+import { scanVpnNodesOnceToday } from "./local-vpn-node-scan";
 
 const APP_VERSION = "V175";
 const VERSION_MANIFEST_PATH = "/version.json";
@@ -1017,6 +1018,11 @@ function LegacyActionDialog({ dialog, project, onClose, onSubmit }: { dialog: Ex
 
 export default function Home() {
   const companyAuth = useCompanyAuth();
+
+  useEffect(() => {
+    if (!companyAuth.user) return;
+    void scanVpnNodesOnceToday().catch(() => undefined);
+  }, [companyAuth.user]);
   const isSharedReportMode = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("sharedReport") === "1";
   const isProjectReportShareMode = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("projectReportShare") === "1";
   const initialProjectCode = readInitialProjectCode();
@@ -1095,7 +1101,11 @@ export default function Home() {
   const [reportSnapshot, setReportSnapshot] = useState<OperationalReportSnapshot | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [diagnosticMenuOpen, setDiagnosticMenuOpen] = useState(true);
-  const [vpnReportSection, setVpnReportSection] = useState<VpnReportSectionKey>("matrix");
+  const [vpnReportSection, setVpnReportSection] = useState<VpnReportSectionKey>(() => {
+    if (typeof window === "undefined") return "matrix";
+    const requested = new URLSearchParams(window.location.search).get("report") as VpnReportSectionKey | null;
+    return requested && diagnosticReportMenus.some((item) => item.key === requested) ? requested : "matrix";
+  });
   const [sharingReport, setSharingReport] = useState(false);
   const [sharedReportResult, setSharedReportResult] = useState<{ shareUrl: string; copyText?: string } | null>(null);
   const [creatingCodexLinks, setCreatingCodexLinks] = useState(false);
@@ -1578,6 +1588,12 @@ export default function Home() {
     setPage("network_failure_matrix");
     setDiagnosticMenuOpen(true);
     setVpnReportSection(section);
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      url.searchParams.set("module", "vpnReport");
+      url.searchParams.set("report", section);
+      window.history.replaceState({}, "", url);
+    }
     setReportSnapshot(null);
     if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
   }
